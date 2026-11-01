@@ -227,7 +227,10 @@ export function useReceiptUploads(options = {}) {
           }
 
           if (index !== -1) {
-            const oldThumbnail = localReceipts.value[index].thumbnail;
+            const currentItem = localReceipts.value[index];
+            const oldThumbnail = currentItem.thumbnail;
+            const oldImages = currentItem.images;
+            const isMulti = currentItem.isMultiReceipt || (Array.isArray(data.file_url) && data.file_url.length > 1);
             const updatedReceipt = buildPrefilledReceiptDraft({
               id: data.id,
               receiptData: data,
@@ -235,6 +238,10 @@ export function useReceiptUploads(options = {}) {
             });
             updatedReceipt.isUploading = false;
             updatedReceipt.isProcessing = false;
+            if (isMulti) {
+              updatedReceipt.isMultiReceipt = true;
+              updatedReceipt.images = oldImages || (Array.isArray(data.file_url) ? data.file_url : []);
+            }
             localReceipts.value[index] = updatedReceipt;
             checkAndNotifyMissingFields(localReceipts.value[index]);
           }
@@ -569,12 +576,21 @@ export function useReceiptUploads(options = {}) {
 
     const tempId = `temp-seg-${Date.now()}`;
     const firstFile = files[0];
+    const segmentImages = files.map((file, idx) => ({
+      id: `seg-${tempId}-${idx}`,
+      url: URL.createObjectURL(file),
+      name: file.name,
+      file,
+      fileType: file.type,
+    }));
     const receiptObj = buildPrefilledReceiptDraft({
       id: tempId,
       file: firstFile,
-      thumbnail: URL.createObjectURL(firstFile),
+      thumbnail: segmentImages[0]?.url || URL.createObjectURL(firstFile),
     });
     receiptObj.isUploading = true;
+    receiptObj.isMultiReceipt = true;
+    receiptObj.images = segmentImages;
     localReceipts.value.push(receiptObj);
 
     try {
@@ -701,6 +717,8 @@ export function useReceiptUploads(options = {}) {
               isUploading: false,
               isProcessing: false,
               isRejected: true,
+              isMultiReceipt: true,
+              images: segmentImages,
               rejectionCode: data.data.rejection_code || "ocr_failed",
               rejectionReason:
                 data.data.rejection_reason ||
@@ -728,6 +746,8 @@ export function useReceiptUploads(options = {}) {
             isUploading: false,
             isProcessing: false,
             isRejected: true,
+            isMultiReceipt: true,
+            images: segmentImages,
             rejectionCode: data.data.rejection_code || "blurry",
             rejectionReason:
               data.data.rejection_reason ||
@@ -759,6 +779,8 @@ export function useReceiptUploads(options = {}) {
           }),
           isUploading: false,
           isProcessing: data.data.status === "processing",
+          isMultiReceipt: true,
+          images: segmentImages,
         };
         if (data.data.status === "processing") {
           startPolling(data.data.id);
@@ -779,6 +801,14 @@ export function useReceiptUploads(options = {}) {
   async function removeReceipt(receipt) {
     if (receipt.thumbnail?.startsWith("blob:")) {
       URL.revokeObjectURL(receipt.thumbnail);
+    }
+    if (Array.isArray(receipt.images)) {
+      receipt.images.forEach((img) => {
+        const u = typeof img === "string" ? img : img.url;
+        if (u?.startsWith("blob:")) {
+          URL.revokeObjectURL(u);
+        }
+      });
     }
     if (receipt.id && pollTimers[receipt.id]) {
       clearInterval(pollTimers[receipt.id]);

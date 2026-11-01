@@ -7,6 +7,8 @@ import {
   RotateCw,
   RotateCcw,
   Maximize2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-vue-next";
 
 const props = defineProps({
@@ -20,7 +22,15 @@ const props = defineProps({
   },
   src: {
     type: String,
-    required: true,
+    default: "",
+  },
+  images: {
+    type: Array,
+    default: () => [],
+  },
+  initialIndex: {
+    type: Number,
+    default: 0,
   },
   alt: {
     type: String,
@@ -52,11 +62,75 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["update:modelValue", "close"]);
+const emit = defineEmits(["update:modelValue", "close", "change-index"]);
 
 const isVisible = computed(() =>
   props.isOpen !== undefined ? props.isOpen : props.modelValue,
 );
+
+const normalizedImages = computed(() => {
+  if (Array.isArray(props.images) && props.images.length > 0) {
+    return props.images.map((item, idx) => {
+      if (typeof item === "string") {
+        return { url: item, name: `Part ${idx + 1}` };
+      }
+      return {
+        url:
+          item.url ||
+          item.thumbnail ||
+          item.preview ||
+          item.filePath ||
+          item.file_url ||
+          "",
+        name: item.name || item.fileName || `Part ${idx + 1}`,
+      };
+    });
+  }
+  if (props.src) {
+    return [{ url: props.src, name: props.title || "" }];
+  }
+  return [];
+});
+
+const currentIndex = ref(props.initialIndex || 0);
+
+watch(
+  () => props.initialIndex,
+  (newIdx) => {
+    if (newIdx !== undefined && newIdx !== null) {
+      currentIndex.value = Math.max(
+        0,
+        Math.min(newIdx, Math.max(0, normalizedImages.value.length - 1)),
+      );
+    }
+  },
+);
+
+const hasMultipleImages = computed(() => normalizedImages.value.length > 1);
+
+const currentImage = computed(() => {
+  return normalizedImages.value[currentIndex.value] || null;
+});
+
+const activeSrc = computed(() => {
+  return currentImage.value?.url || props.src || "";
+});
+
+function prevImage() {
+  if (currentIndex.value > 0) {
+    currentIndex.value--;
+    resetZoom();
+    emit("change-index", currentIndex.value);
+  }
+}
+
+function nextImage() {
+  if (currentIndex.value < normalizedImages.value.length - 1) {
+    currentIndex.value++;
+    resetZoom();
+    emit("change-index", currentIndex.value);
+  }
+}
 
 const viewportRef = ref(null);
 const zoom = ref(props.initialZoom);
@@ -180,6 +254,12 @@ function handleKeyDown(e) {
   if (!isVisible.value) return;
   if (e.key === "Escape") {
     close();
+  } else if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    prevImage();
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    nextImage();
   } else if (e.key === "+" || e.key === "=") {
     e.preventDefault();
     zoomIn();
@@ -192,8 +272,8 @@ function handleKeyDown(e) {
   }
 }
 
-// Reset state whenever modal opens or closes or src changes
-watch([isVisible, () => props.src], ([visible]) => {
+// Reset state whenever modal opens or closes or active image source changes
+watch([isVisible, activeSrc], ([visible]) => {
   if (visible) {
     resetZoom();
   }
@@ -235,14 +315,20 @@ onUnmounted(() => {
           class="w-full flex items-center justify-between px-6 py-4 z-20 pointer-events-auto"
           @click.stop
         >
-          <!-- Optional Image Title / Filename -->
-          <div class="flex items-center gap-2 min-w-0 pr-4">
+          <!-- Optional Image Title / Filename & Part Counter -->
+          <div class="flex items-center gap-2.5 min-w-0 pr-4">
             <span
-              v-if="title"
-              class="text-sm font-medium text-white/90 truncate max-w-[60vw]"
-              :title="title"
+              v-if="hasMultipleImages"
+              class="text-xs font-bold px-2.5 py-1 rounded-full bg-white/20 text-white backdrop-blur-sm shrink-0"
             >
-              {{ title }}
+              Part {{ currentIndex + 1 }} of {{ normalizedImages.length }}
+            </span>
+            <span
+              v-if="title || currentImage?.name"
+              class="text-sm font-medium text-white/90 truncate max-w-[60vw]"
+              :title="title || currentImage?.name"
+            >
+              {{ title || currentImage?.name }}
             </span>
           </div>
 
@@ -265,6 +351,34 @@ onUnmounted(() => {
           @wheel="handleWheel"
           @click.self="close"
         >
+          <!-- Left Navigation Button -->
+          <button
+            v-if="hasMultipleImages"
+            data-testid="preview-prev-btn"
+            type="button"
+            class="absolute left-4 top-1/2 -translate-y-1/2 z-30 flex items-center justify-center w-11 h-11 rounded-full bg-slate-900/70 hover:bg-slate-900/90 active:scale-95 text-white/90 hover:text-white transition-all duration-150 backdrop-blur-md shadow-xl border border-white/15 disabled:opacity-30 disabled:pointer-events-none focus:outline-none focus:ring-2 focus:ring-white/40"
+            title="Previous segment (Left Arrow)"
+            aria-label="Previous image"
+            :disabled="currentIndex <= 0"
+            @click.stop="prevImage"
+          >
+            <ChevronLeft class="w-6 h-6" />
+          </button>
+
+          <!-- Right Navigation Button -->
+          <button
+            v-if="hasMultipleImages"
+            data-testid="preview-next-btn"
+            type="button"
+            class="absolute right-4 top-1/2 -translate-y-1/2 z-30 flex items-center justify-center w-11 h-11 rounded-full bg-slate-900/70 hover:bg-slate-900/90 active:scale-95 text-white/90 hover:text-white transition-all duration-150 backdrop-blur-md shadow-xl border border-white/15 disabled:opacity-30 disabled:pointer-events-none focus:outline-none focus:ring-2 focus:ring-white/40"
+            title="Next segment (Right Arrow)"
+            aria-label="Next image"
+            :disabled="currentIndex >= normalizedImages.length - 1"
+            @click.stop="nextImage"
+          >
+            <ChevronRight class="w-6 h-6" />
+          </button>
+
           <div
             class="relative inline-flex items-center justify-center select-none"
             :class="
@@ -285,7 +399,7 @@ onUnmounted(() => {
             @click.stop="toggleZoomClick($event)"
           >
             <img
-              :src="src"
+              :src="activeSrc"
               :alt="alt"
               class="max-w-full max-h-[75vh] w-auto h-auto object-contain rounded-lg shadow-2xl pointer-events-none select-none ring-1 ring-white/10"
               draggable="false"

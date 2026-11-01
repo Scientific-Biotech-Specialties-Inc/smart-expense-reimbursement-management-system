@@ -205,6 +205,7 @@ function removeReceiptItem(receipt, index) {
           <div class="lg:col-span-4">
             <ReceiptImagePreview
               :src="receipt.thumbnail || receipt.preview || receipt.filePath || receipt.file_url"
+              :images="receipt.images"
               :file-name="receipt.fileName || receipt.name"
               :file-type="receipt.fileType"
               :is-uploading="receipt.isUploading"
