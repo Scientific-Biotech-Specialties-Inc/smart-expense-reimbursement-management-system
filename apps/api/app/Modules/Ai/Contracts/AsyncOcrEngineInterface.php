@@ -22,4 +22,12 @@ interface AsyncOcrEngineInterface
      *   $engine->sendForProcessing(42, ['https://supabase.io/.../receipt.jpg'], 'https://serms.app/api/reimbursements/receipts/42/ocr-callback');
      */
     public function sendForProcessing(int $receiptId, array $fileUrls, string $callbackUrl): void;
+
+    /**
+     * Purge the stored vector embedding for a receipt from the AI service.
+     *
+     * @param int $receiptId The SERMS receipt ID.
+     * @return void
+     */
+    public function deleteReceiptEmbedding(int $receiptId): void;
 }

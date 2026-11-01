@@ -45,6 +45,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  pendingUpload: {
+    type: Object,
+    default: null,
+  },
 });
 
 const emit = defineEmits(["update:modelValue", "saved"]);
@@ -184,7 +188,12 @@ function buildUpdatePayload(receipt) {
     },
   });
   prefill.location = receipt.location || null;
-  // NOTE: We deliberately do NOT force `status = "processed"` here. The receipt
+  // If the user deliberately overrode a quality or non-receipt warning and filled
+  // the details manually, promote the receipt status from 'rejected' to 'processed'.
+  if (receipt.isQualityOverridden) {
+    prefill.status = "processed";
+  }
+  // NOTE: We deliberately do NOT force `status = "processed"` by default here. The receipt
   // was created by ReceiptService::storeReceipt() with status `processing` and OCR
   // was already dispatched. Forcing `processed` would make the async AI OCR callback
   // hit OcrCallbackService's replay guard (which skips already-`processed` receipts)
@@ -318,12 +327,13 @@ const {
   dismissWithConfirm,
 } = useUnsavedChanges(isDirty, isSubmitted);
 
-watch(itemsGrossTotal, (newGross) => {
+function recalculateUploadTotalFromItems() {
   if (uploadForm.value.items.length > 0) {
+    const newGross = itemsGrossTotal.value;
     uploadForm.value.total_amount =
       newGross > 0 ? Number(newGross.toFixed(2)) : "";
   }
-});
+}
 
 watch(
   [() => uploadForm.value.total_amount, () => uploadForm.value.vat_classification],
@@ -391,6 +401,15 @@ watch(
     } else {
       // Start each NEW upload session with a clean OCR draft list.
       clearDraftReceipts();
+
+      if (props.pendingUpload) {
+        const { mode, files } = props.pendingUpload;
+        if (mode === "multi" && files?.length >= 2) {
+          submitSegments(files);
+        } else if (files?.length) {
+          addReceiptFiles([files[0]]);
+        }
+      }
     }
   },
 );
@@ -407,6 +426,7 @@ function addItem() {
 
 function removeItem(index) {
   uploadForm.value.items.splice(index, 1);
+  recalculateUploadTotalFromItems();
 }
 
 function formatTIN(event) {
@@ -653,7 +673,7 @@ function formatCurrency(amount) {
                 @click="receiptInput?.click()"
               >
                 <UploadCloud class="w-4 h-4" />
-                Select Receipt
+                Single Receipt
               </button>
               <button
                 type="button"
@@ -662,7 +682,7 @@ function formatCurrency(amount) {
                 @click="showSegmentedUpload = true"
               >
                 <Layers class="w-4 h-4" />
-                Upload in Segments
+                Multi Receipt
               </button>
               <p class="text-xs text-slate-400">
                 JPEG, PNG, or PDF (max 2MB). Receipt data is extracted
@@ -971,6 +991,7 @@ function formatCurrency(amount) {
                         min="0"
                         v-model="item.price"
                         placeholder="0.00"
+                        @input="recalculateUploadTotalFromItems"
                       />
                     </div>
                     <button

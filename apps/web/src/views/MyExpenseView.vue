@@ -31,6 +31,8 @@ import {
   Wallet,
   CheckSquare,
   ShieldCheck,
+  ChevronDown,
+  Layers,
 } from "lucide-vue-next";
 
 const auth = useAuthStore();
@@ -250,12 +252,53 @@ function openViewModal(receipt) {
 // ── Upload Modal ──────────────────────────────────────────────────
 const uploadModalOpen = ref(false);
 const receiptBeingEdited = ref(null);
+const isDropdownOpen = ref(false);
+const uploadMode = ref("single");
+const myExpenseFileInput = ref(null);
+const pendingUpload = ref(null);
 
 const automaticRejectedReceipts = computed(() =>
   receiptsStore.visibleReceipts.filter(
     (r) => r.status === "automatic-rejected",
   ),
 );
+
+function triggerUpload(mode) {
+  uploadMode.value = mode;
+  isDropdownOpen.value = false;
+  if (myExpenseFileInput.value) {
+    myExpenseFileInput.value.multiple = (mode === "multi");
+    myExpenseFileInput.value.value = "";
+    myExpenseFileInput.value.click();
+  }
+}
+
+function handleFileInput(e) {
+  const files = e.target.files;
+  if (files && files.length > 0) {
+    const fileArray = Array.from(files);
+    if (uploadMode.value === "single") {
+      pendingUpload.value = { mode: "single", files: [fileArray[0]] };
+    } else {
+      if (fileArray.length >= 2) {
+        pendingUpload.value = { mode: "multi", files: fileArray.slice(0, 6) };
+      } else {
+        // Fallback to single receipt
+        pendingUpload.value = { mode: "single", files: [fileArray[0]] };
+      }
+    }
+    uploadModalOpen.value = true;
+  }
+  if (e.target) e.target.value = "";
+}
+
+const dropdownRef = ref(null);
+
+function handleWindowClick(event) {
+  if (dropdownRef.value && !dropdownRef.value.contains(event.target)) {
+    isDropdownOpen.value = false;
+  }
+}
 
 function openEditReceipt(receipt) {
   if (!canEditReceipt(receipt)) {
@@ -272,7 +315,10 @@ function openEditReceipt(receipt) {
 
 function closeUploadModal(value) {
   uploadModalOpen.value = value;
-  if (!value) receiptBeingEdited.value = null;
+  if (!value) {
+    receiptBeingEdited.value = null;
+    pendingUpload.value = null;
+  }
 }
 
 // Refresh the card grid after a new OCR'd receipt is saved.
@@ -281,7 +327,7 @@ function onExpenseSaved() {
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────
-const handleOpenReceiptUpload = () => { uploadModalOpen.value = true; };
+const handleOpenReceiptUpload = () => { triggerUpload("single"); };
 
 const { checkDeepLink } = useNotificationDeepLink({
   verifyUrl: (id) => `/api/serms/reimbursements/receipts/${id}`,
@@ -294,6 +340,7 @@ const { checkDeepLink } = useNotificationDeepLink({
 });
 
 onMounted(async () => {
+  window.addEventListener("click", handleWindowClick);
   const tasks = [fetchReceipts(1), receiptsStore.fetchCategories()];
   await Promise.all(tasks);
   checkDeepLink();
@@ -302,6 +349,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener("click", handleWindowClick);
   if (ocrPollTimer) clearInterval(ocrPollTimer);
   window.removeEventListener('open-receipt-upload', handleOpenReceiptUpload);
 });
@@ -348,6 +396,16 @@ const kpis = computed(() => [
 
 <template>
   <div>
+    <!-- Hidden file input for My Expense Upload -->
+    <input
+      ref="myExpenseFileInput"
+      type="file"
+      class="hidden"
+      accept=".jpg,.jpeg,.png,.pdf"
+      :multiple="uploadMode === 'multi'"
+      @change="handleFileInput"
+    />
+
     <div class="flex flex-col gap-6 pb-12 mx-auto max-w-7xl animate-fade-up">
       <!-- ── Page Header ── -->
       <div
@@ -380,14 +438,54 @@ const kpis = computed(() => [
             <Send class="w-4 h-4 shrink-0" />
             <span>To Reimbursement</span>
           </button>
-          <!-- Upload Receipt -->
-          <button
-            @click="uploadModalOpen = true"
-            class="btn btn-primary min-h-[42px]"
-          >
-            <UploadCloud class="w-4 h-4" />
-            Upload Receipt
-          </button>
+          <!-- Upload Receipt Dropdown -->
+          <div ref="dropdownRef" class="relative inline-block text-left" @click.stop>
+            <button
+              id="upload-receipt-btn"
+              type="button"
+              @click.stop="isDropdownOpen = !isDropdownOpen"
+              class="btn btn-primary min-h-[42px] inline-flex items-center gap-2"
+            >
+              <UploadCloud class="w-4 h-4" />
+              <span>Upload Receipt</span>
+              <ChevronDown class="w-3.5 h-3.5 ml-1 -mr-1" aria-hidden="true" />
+            </button>
+
+            <transition
+              enter-active-class="transition duration-100 ease-out"
+              enter-from-class="transform scale-95 opacity-0"
+              enter-to-class="transform scale-100 opacity-100"
+              leave-active-class="transition duration-75 ease-in"
+              leave-from-class="transform scale-100 opacity-100"
+              leave-to-class="transform scale-95 opacity-0"
+            >
+              <div
+                v-if="isDropdownOpen"
+                class="absolute z-30 w-48 mt-2 origin-top-right right-0 bg-white divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+              >
+                <div class="px-1 py-1">
+                  <button
+                    type="button"
+                    id="my-expense-single-btn"
+                    class="group flex w-full items-center rounded-md px-3 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white transition-colors"
+                    @click="triggerUpload('single')"
+                  >
+                    <UploadCloud class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
+                    Single Receipt
+                  </button>
+                  <button
+                    type="button"
+                    id="my-expense-multi-btn"
+                    class="group flex w-full items-center rounded-md px-3 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white transition-colors"
+                    @click="triggerUpload('multi')"
+                  >
+                    <Layers class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
+                    Multi Receipt
+                  </button>
+                </div>
+              </div>
+            </transition>
+          </div>
         </div>
       </div>
 
@@ -489,7 +587,7 @@ const kpis = computed(() => [
             Try a different category filter or upload a new receipt.
           </p>
         </div>
-        <button @click="uploadModalOpen = true" class="mt-2 btn btn-primary">
+        <button @click="triggerUpload('single')" class="mt-2 btn btn-primary">
           <UploadCloud class="w-4 h-4" /> Upload Receipt
         </button>
       </div>
@@ -500,6 +598,7 @@ const kpis = computed(() => [
       :model-value="uploadModalOpen"
       :categories="receiptsStore.categories"
       :receipt-to-edit="receiptBeingEdited"
+      :pending-upload="pendingUpload"
       @update:model-value="closeUploadModal"
       @saved="onExpenseSaved"
     />

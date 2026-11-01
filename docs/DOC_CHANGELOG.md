@@ -3,11 +3,11 @@
 **Project:** Smart Expense & Reimbursement Management System (SERMS)  
 **Client / Partner:** Science Biotech Specialties Inc. (SBSI) — [https://sbsi.com.ph/about-us/](https://sbsi.com.ph/about-us/)  
 **Academic Context:** 3rd & 4th Year Capstone Project (Capstone 1: Ended July 2026 · Capstone 2: September–December 2026)  
-**Date:** 2026-10-22  
-**Version:** 1.8.0  
+**Date:** Oct 28, 2026  
+**Version:** 1.9.3  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** 2026-10-22 (Request audit trail unified lifecycle and BaseAuditTrail component)  
+**Last reconciled:** Oct 28, 2026 (Receipt Upload Cancellation & 3-Layer Artifact Purge)  
 **Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
 
 ---
@@ -21,6 +21,32 @@ All notable changes, architectural decisions, and documentation updates for the 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
+
+## [1.9.3] - Oct 28, 2026
+
+### Added
+- **Receipt Upload Draft Lifecycle & 3-Layer Purge (`fix/cancel-receipt-not-saving`):**
+  - **Draft State & "My Expense" Isolation:** Added `is_draft` boolean column to `receipts` (migration `2026_10_28_000001_add_is_draft_to_receipts_table.php`). Unsubmitted uploads inside Reimbursement and Liquidation forms are saved as drafts (`is_draft = true`), hiding them from "My Expense" lists and suppressing premature notifications until the claim or liquidation report is submitted.
+  - **3-Layer Cancellation & Purge:** When a user removes a draft receipt or cancels an in-progress form, SERMS automatically:
+    1. Purges physical files from Supabase S3 storage (`Storage::disk('supabase')->delete($path)`).
+    2. Purges the 384-dimensional vector embedding in `ocr-pipeline` (`DELETE /api/duplicate/embeddings/{receipt_id}`) to prevent false semantic duplicate blocks upon re-upload.
+    3. Permanently deletes the draft database record and `file_hash`, recording `RECEIPT_DELETED` in audit logs.
+  - **Scheduled Orphan Pruner:** Created `receipts:prune-orphans --hours=24` artisan command (scheduled daily in `routes/console.php`) to automatically clean up abandoned draft receipts for users who close their browser tabs without clicking Cancel.
+  - **Frontend Form Cancellation Hooks:** Integrated draft cleanup into `useReceiptUploads.js`, `ReimbursementFormView.vue`, `FileUpload.vue`, `LiquidationSettlementForm.vue`, and `LiquidationsView.vue`, with strict guards ensuring receipts forwarded from "My Expense" or pre-existing liquidation receipts are never touched.
+
+## [1.9.2] - Oct 25, 2026
+
+### Added
+- **Receipt-Only Quality Guardrails & Manual Entry Override (`feat/receipt-guardrails`):**
+  - **Two-Stage Non-Receipt Detection:** Integrated multi-heuristic fast pre-OCR rejection (face cascade detection + color saturation vs horizontal text edge density) in `ocr-pipeline` alongside post-OCR token/keyword validation (`is_likely_receipt`), blocking non-receipts (selfies, scenery photos, screenshots) from polluting `pgvector` embeddings and MongoDB stores with `rejection_code: "not_a_receipt"`.
+  - **Differentiated Warning & User Copy:** Updated `ReceiptQualityRejectionModal.vue` to distinguish "Blurry Receipt Image Detected" vs "Unrecognized Receipt Image", providing tailored guidance for blurry versus non-receipt images and suppressing segmented upload suggestions for non-receipts.
+  - **Quality & Rejection Override Flow:** Enabled manual entry bypass across all three receipt upload flows (My Expense `ReceiptUploadModal.vue`, Reimbursements `useReceiptUploads.js`, and Liquidations `FileUpload.vue`). Users can click "Continue Anyway (Enter Manually)" to clear rejection status, mark `isQualityOverridden = true`, unlock the form for manual detail entry, and promote to `processed` upon save.
+  - **Automated Verification:** Added PHPUnit callback integration test (`test_not_a_receipt_ocr_sets_status_rejected`) and Vitest modal unit tests (`ReceiptQualityRejectionModal.test.js`), passing 100% of test suites.
+
+## [1.9.1] - Oct 24, 2026
+
+### Changed
+- **Test Account Credential Re-Seeding & Synchronization:** Re-provisioned Accounting/Finance test account `Summer Love` (`sum@sbsi.com`) in the central `capstone-auth-module` authentication service (`auth-service`) with credentials (`password`), assigned to the `Accounting` department with the `Admin` role to align with SERMS RBAC requirements. Synchronized documentation across `docs/Build.md` and `docs/agent-setup/SETUP-03-serms.md` to reference `password` consistently with `AGENTS.md`.
 
 ## [1.9.0] - 2026-10-22
 

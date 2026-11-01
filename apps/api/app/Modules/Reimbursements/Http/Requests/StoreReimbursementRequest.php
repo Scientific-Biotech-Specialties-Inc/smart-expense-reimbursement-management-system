@@ -36,6 +36,7 @@ class StoreReimbursementRequest extends FormRequest
             'receipts.*.vendor_name' => 'nullable|string|max:255',
             'receipts.*.transaction_date' => 'nullable|date',
             'receipts.*.total_amount' => 'nullable|numeric|min:0',
+            'receipts.*.subtotal' => 'nullable|numeric|min:0',
             'receipts.*.vat_amount' => 'nullable|numeric|min:0',
             'receipts.*.vat_classification' => 'nullable|string|in:vat,non-vat',
             'receipts.*.tin' => 'nullable|string|max:255',

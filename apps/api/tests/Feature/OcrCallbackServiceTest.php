@@ -131,6 +131,27 @@ class OcrCallbackServiceTest extends TestCase
         ]);
     }
 
+    public function test_not_a_receipt_ocr_sets_status_rejected(): void
+    {
+        $receipt = $this->makeProcessingReceipt();
+
+        $response = $this->postCallback($receipt, [
+            'receipt_id' => $receipt->id,
+            'status' => 'rejected',
+            'rejection_code' => 'not_a_receipt',
+            'rejection_reason' => 'The uploaded image does not appear to be a receipt or invoice. Please upload a clear photo of an official receipt or invoice.',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.status', 'rejected');
+
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receipt->id,
+            'status' => 'rejected',
+            'rejection_code' => 'not_a_receipt',
+        ]);
+    }
+
     public function test_duplicate_ocr_sets_status_rejected(): void
     {
         $receipt = $this->makeProcessingReceipt();

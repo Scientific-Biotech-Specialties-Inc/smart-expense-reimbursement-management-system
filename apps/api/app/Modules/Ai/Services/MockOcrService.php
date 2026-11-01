@@ -79,11 +79,13 @@ class MockOcrService
         $location = self::LOCATION_POOL[array_rand(self::LOCATION_POOL)];
         $total = round(150 + (mt_rand() / mt_getrandmax()) * 4850, 2);
         $vat = round(($total * 0.12) / 1.12, 2);
+        $subtotal = round($total - $vat, 2);
 
         return [
             'vendor_name' => $vendor,
             'transaction_date' => $date,
             'total_amount' => $total,
+            'subtotal' => $subtotal,
             'vat_amount' => $vat,
             'tin' => $tin,
             'invoice_number' => $invoice,

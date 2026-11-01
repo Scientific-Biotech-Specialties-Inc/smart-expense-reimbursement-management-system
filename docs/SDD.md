@@ -244,6 +244,7 @@ erDiagram
         bigint expense_category_id FK
         enum status
         boolean is_archived
+        boolean is_draft
         datetime deleted_at
     }
 
@@ -540,6 +541,7 @@ cd apps/api && composer run dev
 | Session Timeout | 90 min (user) / 60 min (admin) | Enforced by auth-module; SERMS validates on every `/api/serms/auth/me` call |
 | File Upload Size | ≤ 2MB per file | Enforced in `StoreReceiptRequest` validation rules |
 | Duplicate Detection Window | 90 days | Checked in `ExpenseService::storeReceipt()` on vendor + date + amount + invoice |
+| Draft Receipt Retention | 24 hours | Scheduled daily via CRON (`receipts:prune-orphans --hours=24`) purging Supabase files, pgvector embeddings, and DB records |
 | Penalty Accrual | Daily via CRON | Queue job dispatched by scheduled command after 7-day grace period |
 | Dashboard Performance | Pre-aggregated database queries | Computed via optimized SQL `SUM` and `COUNT` queries; indexed correctly |
 | Audit Log Query Performance | Indexed by `entity_type` + `entity_id` | No full-table scans; composite index required on these columns |

@@ -9,6 +9,8 @@ import { useOcrMode } from "@/composables/useOcrMode";
 import { isOcrOfflineFailure } from "@/utils/ocrErrors";
 
 export function useReceiptUploads(options = {}) {
+  const authStore = useAuthStore();
+  const isDraftMode = options.isDraft ?? true;
   const DRAFT_KEY = options.draftKey || "serms_draft_receipts";
   const initialDrafts = sessionStorage.getItem(DRAFT_KEY);
   const localReceipts = ref(initialDrafts ? JSON.parse(initialDrafts) : []);
@@ -263,8 +265,6 @@ export function useReceiptUploads(options = {}) {
     }
   }
 
-  const authStore = useAuthStore();
-
   function handleReceiptDrop(e) {
     receiptDrag.value = false;
     return addReceiptFiles(e.dataTransfer.files);
@@ -320,6 +320,9 @@ export function useReceiptUploads(options = {}) {
       try {
         const formData = new FormData();
         formData.append("file", file);
+        if (isDraftMode) {
+          formData.append("is_draft", "1");
+        }
         if (forceProcess) {
           formData.append("force_process", "1");
         }
@@ -523,11 +526,33 @@ export function useReceiptUploads(options = {}) {
   }
 
   function continueAnyway() {
+    const targetId = qualityRejection.value?.receiptId;
+    const rejectionCode = qualityRejection.value?.rejectionCode;
+
+    if (targetId) {
+      const target = localReceipts.value.find((r) => r.id === targetId);
+      if (target) {
+        target.isRejected = false;
+        target.isQualityOverridden = true;
+        target.hasOcrReturned = true;
+      }
+    }
+
     clearQualityRejection();
-    addToast({
-      message: "Quality override applied. You can now fill in the receipt details manually.",
-      type: "info",
-    });
+
+    if (rejectionCode === "not_a_receipt") {
+      addToast({
+        message:
+          "Warning overridden. Please enter the receipt details manually.",
+        type: "info",
+      });
+    } else {
+      addToast({
+        message:
+          "Quality warning overridden. Please fill in the receipt details manually.",
+        type: "info",
+      });
+    }
   }
 
   const submitWithForce = continueAnyway;
@@ -557,6 +582,7 @@ export function useReceiptUploads(options = {}) {
       files.forEach((file) => {
         formData.append("files[]", file);
       });
+      if (isDraftMode) formData.append("is_draft", "1");
       if (isMockMode) formData.append("is_mock", "1");
 
       const headers = { Accept: "application/json" };
@@ -750,12 +776,53 @@ export function useReceiptUploads(options = {}) {
     }
   }
 
-  function removeReceipt(receipt) {
+  async function removeReceipt(receipt) {
     if (receipt.thumbnail?.startsWith("blob:")) {
       URL.revokeObjectURL(receipt.thumbnail);
     }
+    if (receipt.id && pollTimers[receipt.id]) {
+      clearInterval(pollTimers[receipt.id]);
+      delete pollTimers[receipt.id];
+    }
     localReceipts.value = localReceipts.value.filter(
       (r) => r.id !== receipt.id,
+    );
+
+    // If this receipt has a persisted backend ID and was uploaded as a draft, delete it from storage, pgvector and DB
+    if (receipt.id && !String(receipt.id).startsWith("temp-") && !receipt.isForwarded) {
+      try {
+        const headers = { Accept: "application/json" };
+        if (authStore.token) headers["Authorization"] = `Bearer ${authStore.token}`;
+        await fetch(`/api/serms/reimbursements/receipts/${receipt.id}`, {
+          method: "DELETE",
+          headers,
+        });
+      } catch (err) {
+        console.error("Failed to delete canceled receipt draft:", err);
+      }
+    }
+  }
+
+  async function abortSessionReceipts() {
+    const receiptsToDelete = localReceipts.value.filter(
+      (r) => r.id && !String(r.id).startsWith("temp-") && !r.isForwarded,
+    );
+    clearDraftReceipts();
+    if (receiptsToDelete.length === 0) return;
+
+    await Promise.allSettled(
+      receiptsToDelete.map(async (r) => {
+        try {
+          const headers = { Accept: "application/json" };
+          if (authStore.token) headers["Authorization"] = `Bearer ${authStore.token}`;
+          await fetch(`/api/serms/reimbursements/receipts/${r.id}`, {
+            method: "DELETE",
+            headers,
+          });
+        } catch (err) {
+          console.error(`Failed to delete receipt draft ${r.id}:`, err);
+        }
+      }),
     );
   }
 
@@ -768,6 +835,7 @@ export function useReceiptUploads(options = {}) {
     addReceiptFiles,
     removeReceipt,
     clearDraftReceipts,
+    abortSessionReceipts,
     qualityRejection,
     clearQualityRejection,
     showSegmentedUpload,

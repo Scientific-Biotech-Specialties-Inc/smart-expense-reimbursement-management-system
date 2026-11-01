@@ -19,6 +19,7 @@ class Receipt extends Model
         'vendor_name',
         'transaction_date',
         'total_amount',
+        'subtotal',
         'vat_amount',
         'tin',
         'invoice_number',
@@ -34,6 +35,7 @@ class Receipt extends Model
         'deletion_warning_sent',
         'admin_notes',
         'status',
+        'is_draft',
         'rejection_code',
         'rejection_reason',
     ];
@@ -75,10 +77,12 @@ class Receipt extends Model
         'file_type' => 'array',
         'file_size_bytes' => 'array',
         'total_amount' => 'decimal:2',
+        'subtotal' => 'decimal:2',
         'vat_amount' => 'decimal:2',
         'ocr_confidence_score' => 'decimal:2',
         'ocr_flagged' => 'boolean',
         'is_archived' => 'boolean',
+        'is_draft' => 'boolean',
         'transaction_date' => 'date',
         'deletion_warning_sent' => 'boolean',
     ];

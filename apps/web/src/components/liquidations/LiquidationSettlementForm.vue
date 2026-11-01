@@ -21,6 +21,7 @@ import { useLiquidationStore } from "@/stores/liquidation";
 import { useOcrMode } from "@/composables/useOcrMode";
 import { useReportExport } from "@/composables/useReportExport";
 import { formatPeso } from "@/utils/formatters";
+import { apiFetch } from "@/utils/apiFetch";
 
 const props = defineProps({
   auditTrail: {
@@ -247,11 +248,28 @@ const roadmapAging = computed(() => {
   try { return liqStore.calculateAging(props.selectedAdvance); } catch { return null; }
 });
 
-function handleRemoveReceipt(receiptToRemove) {
+async function handleRemoveReceipt(receiptToRemove) {
   const updated = props.receipts.filter(
     (r) => r !== receiptToRemove && (!receiptToRemove.id || r.id !== receiptToRemove.id)
   );
   emit("update:receipts", updated);
+
+  const existingIds = new Set(
+    (props.existingLiquidation?.receipts || []).map((r) => r.id)
+  );
+  if (
+    receiptToRemove?.id &&
+    !existingIds.has(receiptToRemove.id) &&
+    !String(receiptToRemove.id).startsWith("temp-")
+  ) {
+    try {
+      await apiFetch(`/api/serms/reimbursements/receipts/${receiptToRemove.id}`, {
+        method: "DELETE",
+      });
+    } catch (err) {
+      console.warn("Failed to delete removed receipt draft:", err);
+    }
+  }
 }
 
 function formatTinValue(value, { padLastBlock = false } = {}) {

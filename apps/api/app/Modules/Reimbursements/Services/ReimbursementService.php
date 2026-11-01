@@ -16,13 +16,18 @@ use Illuminate\Validation\ValidationException;
 
 class ReimbursementService
 {
-    private function updateReceiptStatuses(array $receiptIds, string $status): void
+    private function updateReceiptStatuses(array $receiptIds, string $status, ?bool $isDraft = null): void
     {
         if (empty($receiptIds)) {
             return;
         }
 
-        Receipt::whereIn('id', $receiptIds)->update(['status' => $status]);
+        $data = ['status' => $status];
+        if ($isDraft !== null) {
+            $data['is_draft'] = $isDraft;
+        }
+
+        Receipt::whereIn('id', $receiptIds)->update($data);
     }
 
     /**
@@ -81,6 +86,7 @@ class ReimbursementService
                             'vendor_name' => $receiptData['vendor_name'] ?? $receipt->vendor_name,
                             'transaction_date' => $receiptData['transaction_date'] ?? $receipt->transaction_date,
                             'total_amount' => $receiptData['total_amount'] ?? $receipt->total_amount,
+                            'subtotal' => $receiptData['subtotal'] ?? $receipt->subtotal,
                             'vat_amount' => $receiptData['vat_amount'] ?? $receipt->vat_amount,
                             'vat_classification' => $receiptData['vat_classification'] ?? $receipt->vat_classification,
                             'tin' => $receiptData['tin'] ?? $receipt->tin,
@@ -118,7 +124,7 @@ class ReimbursementService
             ]);
 
             $reimbursement->receipts()->attach($receiptIds);
-            $this->updateReceiptStatuses($receiptIds, 'pending');
+            $this->updateReceiptStatuses($receiptIds, 'pending', false);
 
             $formattedAmount = NotificationService::formatPeso($reimbursement->amount);
             $link = "/reimbursements?view={$reimbursement->id}";
@@ -597,6 +603,7 @@ class ReimbursementService
                             'vendor_name' => $receiptData['vendor_name'] ?? $receipt->vendor_name,
                             'transaction_date' => $receiptData['transaction_date'] ?? $receipt->transaction_date,
                             'total_amount' => $receiptData['total_amount'] ?? $receipt->total_amount,
+                            'subtotal' => $receiptData['subtotal'] ?? $receipt->subtotal,
                             'vat_amount' => $receiptData['vat_amount'] ?? $receipt->vat_amount,
                             'vat_classification' => $receiptData['vat_classification'] ?? $receipt->vat_classification,
                             'tin' => $receiptData['tin'] ?? $receipt->tin,

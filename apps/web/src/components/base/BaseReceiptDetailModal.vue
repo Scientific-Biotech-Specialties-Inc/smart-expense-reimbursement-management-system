@@ -44,7 +44,7 @@ const hasItems = computed(() => props.receipt?.items?.length > 0);
 const subtotal = computed(() => {
   if (hasItems.value) {
     return props.receipt.items.reduce(
-      (sum, item) => sum + (Number(item.price) * Number(item.quantity) || 0),
+      (sum, item) => sum + (Number(item.price) || 0),
       0,
     );
   }

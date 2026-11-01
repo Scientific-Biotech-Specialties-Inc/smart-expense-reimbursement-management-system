@@ -103,4 +103,39 @@ describe("ScannedReceiptsList — Required Field Highlighting", () => {
     expect(receipt.eventType).toBe("Client Meeting");
     expect(eventSelect.classes()).not.toContain("input-error");
   });
+
+  it("keeps subtotal and total independent when user inputs values", async () => {
+    const receipt = {
+      ...baseReceipt,
+      amount: "112.00",
+      subtotal: "100.00",
+      tax: "12.00",
+    };
+    const wrapper = mount(ScannedReceiptsList, {
+      props: {
+        receipts: [receipt],
+        categories: [{ id: 1, name: "Meals" }],
+      },
+    });
+
+    const numberInputs = wrapper.findAll("input[type='number']");
+    // Find subtotal input (v-model receipt.subtotal)
+    const subtotalInput = numberInputs.find((w) => w.element.value === "100.00" || w.element.value === "100");
+    const totalInput = numberInputs.find((w) => w.element.value === "112.00" || w.element.value === "112");
+
+    expect(subtotalInput).toBeDefined();
+    expect(totalInput).toBeDefined();
+
+    // Change subtotal manually
+    await subtotalInput.setValue("105.00");
+    // Total should remain intact (not auto-overwritten)
+    expect(Number(receipt.subtotal)).toBe(105);
+    expect(Number(receipt.amount)).toBe(112);
+
+    // Change total manually
+    await totalInput.setValue("120.00");
+    // Subtotal should remain intact (not auto-overwritten by VAT formula)
+    expect(Number(receipt.amount)).toBe(120);
+    expect(Number(receipt.subtotal)).toBe(105);
+  });
 });

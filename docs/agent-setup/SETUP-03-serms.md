@@ -255,7 +255,7 @@ docker compose logs --tail=20 api_queue
 | Role | Email | Password |
 | :--- | :--- | :--- |
 | Employee (Standard) | `employee@example.com` | `password` |
-| Accounting / Finance | `sum@sbsi.com` | `@.Akirasendoh07` |
+| Accounting / Finance | `sum@sbsi.com` | `password` |
 | IT Admin | `admin@example.com` | `password` |
 | Approver / Finance Mgr | `approver@example.com` | `password` |
 | Finance Admin | `finance-admin@example.com` | `password` |

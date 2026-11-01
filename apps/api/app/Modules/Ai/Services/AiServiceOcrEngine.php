@@ -83,4 +83,34 @@ class AiServiceOcrEngine implements AsyncOcrEngineInterface
             'http_status' => $response->status(),
         ]);
     }
+
+    /**
+     * Purge the stored vector embedding for a receipt from the AI service.
+     */
+    public function deleteReceiptEmbedding(int $receiptId): void
+    {
+        $serviceUrl = rtrim((string) config('services.ai_service.url'), '/');
+        $apiKey     = (string) config('services.ai_service.api_key');
+        $timeout    = (int) config('services.ai_service.timeout', 5);
+
+        if (!$serviceUrl || !$apiKey) {
+            return;
+        }
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->timeout($timeout)
+                ->delete("{$serviceUrl}/api/duplicate/embeddings/{$receiptId}");
+
+            Log::info('AiServiceOcrEngine: purge embedding request sent to AI service.', [
+                'receipt_id'  => $receiptId,
+                'http_status' => $response->status(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('AiServiceOcrEngine: failed to purge embedding for receipt from AI service.', [
+                'receipt_id' => $receiptId,
+                'error'      => $e->getMessage(),
+            ]);
+        }
+    }
 }
