@@ -42,6 +42,7 @@ class UpdateReceiptRequest extends FormRequest
             'vendor_name' => 'nullable|string|max:255',
             'transaction_date' => 'nullable|date',
             'total_amount' => 'nullable|numeric|min:0',
+            'subtotal' => 'nullable|numeric|min:0',
             'vat_amount' => 'nullable|numeric|min:0',
             'tin' => 'nullable|string|max:255',
             'invoice_number' => 'nullable|string|max:255',

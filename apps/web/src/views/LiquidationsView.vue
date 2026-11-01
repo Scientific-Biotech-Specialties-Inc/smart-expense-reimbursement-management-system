@@ -35,6 +35,7 @@ import { formatPeso, formatDate, truncateText } from "@/utils/formatters";
 import { numberOrZero } from "@/utils/numbers";
 import { getFileUrl } from "@/utils/fileUtils";
 import { firstFilePathField } from "@/utils/receiptUtils";
+import { apiFetch } from "@/utils/apiFetch";
 import {
   Activity,
   AlertTriangle,
@@ -939,7 +940,8 @@ function closeSettlementModal() {
     return;
   }
 
-  dismissWithConfirm(() => {
+  dismissWithConfirm(async () => {
+    await abortLiquidationDraftReceipts();
     isSettlementModalOpen.value = false;
     settlementModalMode.value = "settle";
     settlementModalStep.value = "form";
@@ -1275,6 +1277,35 @@ function selectAdvance(adv) {
   });
 }
 
+async function abortLiquidationDraftReceipts() {
+  if (submitted.value) return;
+  const existingIds = new Set(
+    (existingLiquidation.value?.receipts || []).map((r) => r.id)
+  );
+  const draftsToDelete = receipts.value.filter(
+    (r) => r.id && !existingIds.has(r.id) && !String(r.id).startsWith("temp-")
+  );
+
+  if (draftsToDelete.length === 0) return;
+
+  await Promise.allSettled(
+    draftsToDelete.map(async (r) => {
+      try {
+        await apiFetch(`/api/serms/reimbursements/receipts/${r.id}`, {
+          method: "DELETE",
+        });
+      } catch (err) {
+        console.error(`Failed to delete liquidation receipt draft ${r.id}:`, err);
+      }
+    })
+  );
+}
+
+async function onConfirmLeaveModal() {
+  await abortLiquidationDraftReceipts();
+  handleConfirmLeave();
+}
+
 function resetLiquidationComposer() {
   selectedAdvance.value = null;
   receipts.value = [];
@@ -1312,7 +1343,8 @@ function chooseAdvanceForLiquidation(advance) {
 }
 
 function backToAdvanceSelection() {
-  dismissWithConfirm(() => {
+  dismissWithConfirm(async () => {
+    await abortLiquidationDraftReceipts();
     resetLiquidationComposer();
     settlementModalMode.value = "settle";
     settlementModalStep.value = "select";
@@ -2011,7 +2043,7 @@ onMounted(async () => {
       confirm-text="Leave"
       cancel-text="Stay"
       :danger="true"
-      @confirm="handleConfirmLeave"
+      @confirm="onConfirmLeaveModal"
       @close="handleCancelLeave"
     />
 

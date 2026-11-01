@@ -11,9 +11,11 @@ use App\Modules\Reimbursements\Jobs\DispatchReceiptToAiService;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
+use App\Modules\Ai\Contracts\AsyncOcrEngineInterface;
 
 class ReceiptService
 {
@@ -25,6 +27,11 @@ class ReceiptService
     {
         $query = Receipt::with('category', 'uploader', 'items')
             ->withCount('reimbursements');
+
+        // Exclude uncommitted drafts so in-flight form uploads never leak into My Expense
+        if (empty($filters['include_drafts'])) {
+            $query->where('receipts.is_draft', false);
+        }
 
         if (!$canManage || ($filters['scope'] ?? null) === 'mine') {
             $query->where('uploaded_by', $user->id);
@@ -118,6 +125,7 @@ class ReceiptService
 
             $isMock = MockOcrService::isMockRequest($validated);
             $mock = $isMock ? MockOcrService::generate($files[0]?->getClientOriginalName() ?? 'receipt.jpg') : [];
+            $isDraft = (bool) ($validated['is_draft'] ?? false);
 
             $receipt = Receipt::create([
                 'uploaded_by'          => $user->id,
@@ -129,6 +137,7 @@ class ReceiptService
                 'vendor_name'          => $validated['vendor_name'] ?? $mock['vendor_name'] ?? null,
                 'transaction_date'     => $validated['transaction_date'] ?? $mock['transaction_date'] ?? null,
                 'total_amount'         => $validated['total_amount'] ?? $mock['total_amount'] ?? null,
+                'subtotal'             => $validated['subtotal'] ?? $mock['subtotal'] ?? null,
                 'vat_amount'           => $validated['vat_amount'] ?? $mock['vat_amount'] ?? null,
                 'tin'                  => $validated['tin'] ?? $mock['tin'] ?? null,
                 'invoice_number'       => $validated['invoice_number'] ?? $mock['invoice_number'] ?? null,
@@ -138,6 +147,7 @@ class ReceiptService
                 'ocr_confidence_score' => $mock['ocr_confidence_score'] ?? null,
                 'ocr_flagged'          => false,
                 'is_archived'          => false,
+                'is_draft'             => $isDraft,
                 'status'               => $isMock ? 'processed' : 'processing',
             ]);
 
@@ -161,17 +171,19 @@ class ReceiptService
                     ipAddress: request()->ip(),
                 );
 
-                $amountText = $receipt->total_amount ? ' (' . NotificationService::formatPeso($receipt->total_amount) . ')' : '';
-                NotificationService::notifyUser(
-                    userId: $user->id,
-                    type: 'receipt_processed',
-                    module: 'My Expense',
-                    title: 'Receipt Processed',
-                    message: "Your My Expense receipt #{$receipt->id}{$amountText} was uploaded and processed.",
-                    recordLink: "/my-expense?view={$receipt->id}",
-                    recordType: 'receipt',
-                    recordId: $receipt->id
-                );
+                if (!$isDraft) {
+                    $amountText = $receipt->total_amount ? ' (' . NotificationService::formatPeso($receipt->total_amount) . ')' : '';
+                    NotificationService::notifyUser(
+                        userId: $user->id,
+                        type: 'receipt_processed',
+                        module: 'My Expense',
+                        title: 'Receipt Processed',
+                        message: "Your My Expense receipt #{$receipt->id}{$amountText} was uploaded and processed.",
+                        recordLink: "/my-expense?view={$receipt->id}",
+                        recordType: 'receipt',
+                        recordId: $receipt->id
+                    );
+                }
 
                 return $receipt;
             }
@@ -194,17 +206,19 @@ class ReceiptService
                 ipAddress: request()->ip(),
             );
 
-            $amountText = $receipt->total_amount ? ' (' . NotificationService::formatPeso($receipt->total_amount) . ')' : '';
-            NotificationService::notifyUser(
-                userId: $user->id,
-                type: 'receipt_uploaded',
-                module: 'My Expense',
-                title: 'Receipt Uploaded',
-                message: "Your My Expense receipt #{$receipt->id} was uploaded and sent for OCR processing.",
-                recordLink: "/my-expense?view={$receipt->id}",
-                recordType: 'receipt',
-                recordId: $receipt->id
-            );
+            if (!$isDraft) {
+                $amountText = $receipt->total_amount ? ' (' . NotificationService::formatPeso($receipt->total_amount) . ')' : '';
+                NotificationService::notifyUser(
+                    userId: $user->id,
+                    type: 'receipt_uploaded',
+                    module: 'My Expense',
+                    title: 'Receipt Uploaded',
+                    message: "Your My Expense receipt #{$receipt->id} was uploaded and sent for OCR processing.",
+                    recordLink: "/my-expense?view={$receipt->id}",
+                    recordType: 'receipt',
+                    recordId: $receipt->id
+                );
+            }
 
             return $receipt;
         });
@@ -595,6 +609,38 @@ class ReceiptService
     }
 
     /**
+     * Purge physical files from storage and vector embedding from ocr-pipeline.
+     */
+    public function purgeReceiptArtifacts(Receipt $receipt): void
+    {
+        // 1. Delete physical files from Supabase storage
+        $filePaths = is_array($receipt->file_path) ? $receipt->file_path : (array) $receipt->file_path;
+        foreach ($filePaths as $path) {
+            if ($path && !str_starts_with($path, 'http://') && !str_starts_with($path, 'https://')) {
+                try {
+                    Storage::disk('supabase')->delete($path);
+                } catch (\Throwable $e) {
+                    Log::warning('purgeReceiptArtifacts: failed to delete file from storage', [
+                        'receipt_id' => $receipt->id,
+                        'path'       => $path,
+                        'error'      => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
+
+        // 2. Purge AI vector embedding from ocr-pipeline pgvector
+        try {
+            app(AsyncOcrEngineInterface::class)->deleteReceiptEmbedding($receipt->id);
+        } catch (\Throwable $e) {
+            Log::warning('purgeReceiptArtifacts: failed to purge AI embedding', [
+                'receipt_id' => $receipt->id,
+                'error'      => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * Delete a receipt.
      */
     public function deleteReceipt(User $user, int $id, bool $canManage, string $ipAddress)
@@ -622,8 +668,8 @@ class ReceiptService
 
             $beforeState = $receipt->toArray();
             
-            // Soft delete the receipt
-            $receipt->delete();
+            // Purge physical files and ocr-pipeline vector embedding
+            $this->purgeReceiptArtifacts($receipt);
 
             // Audit Log
             AuditLogService::log(
@@ -636,6 +682,13 @@ class ReceiptService
                 afterState: ['deleted_at' => now()->toDateTimeString()],
                 ipAddress: $ipAddress
             );
+
+            if ($receipt->is_draft) {
+                $receipt->items()->delete();
+                $receipt->forceDelete();
+            } else {
+                $receipt->delete();
+            }
         });
     }
 }

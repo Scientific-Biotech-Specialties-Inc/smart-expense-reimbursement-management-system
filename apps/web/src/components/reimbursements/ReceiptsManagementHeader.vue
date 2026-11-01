@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 import { CheckCircle2, PlusCircle, Layers, ChevronDown, UploadCloud } from "lucide-vue-next";
 
 defineProps({
@@ -12,6 +12,21 @@ defineProps({
 defineEmits(["add-receipts", "open-segmented-upload"]);
 
 const isDropdownOpen = ref(false);
+const dropdownRef = ref(null);
+
+function handleWindowClick(event) {
+  if (dropdownRef.value && !dropdownRef.value.contains(event.target)) {
+    isDropdownOpen.value = false;
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('click', handleWindowClick);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', handleWindowClick);
+});
 </script>
 
 <template>
@@ -45,10 +60,10 @@ const isDropdownOpen = ref(false);
           <CheckCircle2 class="w-4 h-4" /> Ready to submit
         </div>
 
-        <div class="relative inline-block text-left" @click.stop>
+        <div ref="dropdownRef" class="relative inline-block text-left" @click.stop>
           <div>
             <button
-              @click="isDropdownOpen = !isDropdownOpen"
+              @click.stop="isDropdownOpen = !isDropdownOpen"
               class="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-3.5 text-xs font-bold text-white transition-colors hover:bg-primary/90 focus:outline-none"
             >
               <PlusCircle class="h-3.5 w-3.5" />
@@ -74,14 +89,14 @@ const isDropdownOpen = ref(false);
                   @click="$emit('add-receipts'); isDropdownOpen = false"
                 >
                   <UploadCloud class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
-                  Single Upload
+                  Single Receipt
                 </button>
                 <button
                   class="group flex w-full items-center rounded-md px-2 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white"
                   @click="$emit('open-segmented-upload'); isDropdownOpen = false"
                 >
                   <Layers class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
-                  Multiple Upload
+                  Multi Receipt
                 </button>
               </div>
             </div>

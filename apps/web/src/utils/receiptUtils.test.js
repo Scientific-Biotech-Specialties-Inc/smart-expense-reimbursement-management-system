@@ -191,3 +191,79 @@ describe("getMissingReceiptFields and isReceiptFieldMissing", () => {
     expect(isReceiptFieldMissing(receipt, "invoiceNumber")).toBe(true);
   });
 });
+
+describe("itemGrossAmount and receiptGrossAmount (line-total price contract)", () => {
+  it("treats item.price as already the line total without multiplying by quantity", async () => {
+    const { itemGrossAmount, itemsGrossAmount } = await import("./receiptUtils");
+    expect(itemGrossAmount({ name: "Organic Bananas", quantity: 2, price: 3.18 })).toBe(3.18);
+    expect(
+      itemsGrossAmount([
+        { name: "Organic Bananas", qty: 2, price: 3.18 },
+        { name: "Greek Yogurt 6oz", qty: 3, price: 5.97 },
+      ]),
+    ).toBeCloseTo(9.15, 2);
+  });
+
+  it("prioritizes explicit total_amount over items sum on prefill", async () => {
+    const { buildPrefilledReceiptDraft, receiptGrossAmount } = await import("./receiptUtils");
+    const draft = buildPrefilledReceiptDraft({
+      id: 19,
+      receiptData: {
+        total_amount: 44.04,
+        vat_amount: 2.88,
+        items: [
+          { name: "Organic Bananas", quantity: 2, price: 3.18 },
+          { name: "2% Milk Gallon", quantity: 1, price: 4.99 },
+        ],
+      },
+    });
+    expect(draft.amount).toBe(44.04);
+    expect(draft.items[0]).toEqual({ name: "Organic Bananas", qty: 2, price: 3.18 });
+    expect(receiptGrossAmount({ amount: 0, items: draft.items })).toBeCloseTo(8.17, 2);
+  });
+
+  it("preserves extracted subtotal without forcing automatic 12% calculation", async () => {
+    const { buildPrefilledReceiptDraft } = await import("./receiptUtils");
+    // Receipt with exclusive tax: subtotal 100, vat 12, total 112
+    const draft = buildPrefilledReceiptDraft({
+      id: 20,
+      receiptData: {
+        total_amount: 112.00,
+        subtotal: 100.00,
+        vat_amount: 12.00,
+        vat_classification: "vat",
+      },
+    });
+    expect(draft.subtotal).toBe("100.00");
+    expect(draft.amount).toBe(112);
+    expect(draft.tax).toBe("12.00");
+  });
+
+  it("falls back to calculated subtotal for VAT receipts if subtotal was not extracted", async () => {
+    const { buildPrefilledReceiptDraft } = await import("./receiptUtils");
+    const draft = buildPrefilledReceiptDraft({
+      id: 21,
+      receiptData: {
+        total_amount: 50.00,
+        vat_amount: 5.36,
+        vat_classification: "vat",
+      },
+    });
+    expect(draft.subtotal).toBe("44.64");
+    expect(draft.amount).toBe(50);
+  });
+
+  it("defaults subtotal to total_amount for NON-VAT receipts if subtotal not extracted", async () => {
+    const { buildPrefilledReceiptDraft } = await import("./receiptUtils");
+    const draft = buildPrefilledReceiptDraft({
+      id: 22,
+      receiptData: {
+        total_amount: 80.00,
+        vat_classification: "non-vat",
+      },
+    });
+    expect(draft.subtotal).toBe("80.00");
+    expect(draft.tax).toBe("0.00");
+  });
+});
+

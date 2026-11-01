@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { useReimbursementStore } from "@/stores/reimbursement";
 import { useAuthStore } from "@/stores/auth";
@@ -30,6 +30,9 @@ import {
   Clock,
   Wallet,
   Send,
+  ChevronDown,
+  UploadCloud,
+  Layers,
 } from "lucide-vue-next";
 
 const store = useReimbursementStore();
@@ -172,16 +175,43 @@ const {
 const isDeleteModalOpen = ref(false);
 const deletingRequestId = ref(null);
 const newRequestFileInput = ref(null);
+const isDropdownOpen = ref(false);
+const newRequestUploadMode = ref("single");
+
+function triggerNewRequestUpload(mode) {
+  newRequestUploadMode.value = mode;
+  isDropdownOpen.value = false;
+  if (newRequestFileInput.value) {
+    newRequestFileInput.value.multiple = (mode === "multi");
+    newRequestFileInput.value.value = "";
+    newRequestFileInput.value.click();
+  }
+}
 
 function handleNewRequest() {
-  newRequestFileInput.value?.click();
+  triggerNewRequestUpload("single");
 }
 
 function handleNewRequestFiles(e) {
   const files = e.target.files;
   if (files && files.length > 0) {
-    // Store File objects in a module-level holder accessible by the form view
-    window.__serms_pending_files = Array.from(files);
+    const fileArray = Array.from(files);
+    if (newRequestUploadMode.value === "single") {
+      const selected = [fileArray[0]];
+      window.__serms_pending_upload = { mode: "single", files: selected };
+      window.__serms_pending_files = selected;
+    } else {
+      if (fileArray.length >= 2) {
+        const segments = fileArray.slice(0, 6);
+        window.__serms_pending_upload = { mode: "multi", files: segments };
+        window.__serms_pending_files = segments;
+      } else {
+        // Graceful fallback to single receipt if only 1 file was chosen
+        const selected = [fileArray[0]];
+        window.__serms_pending_upload = { mode: "single", files: selected };
+        window.__serms_pending_files = selected;
+      }
+    }
     router.push('/reimbursements/new');
   }
   if (e.target) e.target.value = "";
@@ -222,9 +252,22 @@ const { checkDeepLink } = useNotificationDeepLink({
   onOpenRecord: (record) => openDetails(record),
 });
 
+const dropdownRef = ref(null);
+
+function handleWindowClick(event) {
+  if (dropdownRef.value && !dropdownRef.value.contains(event.target)) {
+    isDropdownOpen.value = false;
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener("click", handleWindowClick);
   await store.fetchAll();
   checkDeepLink();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("click", handleWindowClick);
 });
 </script>
 
@@ -236,7 +279,7 @@ onMounted(async () => {
       type="file"
       class="hidden"
       accept=".jpg,.jpeg,.png,.pdf"
-      multiple
+      :multiple="newRequestUploadMode === 'multi'"
       @change="handleNewRequestFiles"
     />
 
@@ -283,14 +326,53 @@ onMounted(async () => {
       :categories="categoryFilters"
     >
       <template #actions>
-        <BaseButton
-          id="new-reimbursement-btn"
-          variant="primary"
-          class="min-h-[42px] px-5 w-full sm:w-fit font-bold whitespace-nowrap"
-          @click="handleNewRequest"
-        >
-          <Plus class="w-4 h-4" /> New Request
-        </BaseButton>
+        <div ref="dropdownRef" class="relative inline-block text-left w-full sm:w-auto" @click.stop>
+          <button
+            id="new-reimbursement-btn"
+            type="button"
+            class="btn btn-primary min-h-[42px] px-5 w-full sm:w-fit font-bold whitespace-nowrap inline-flex items-center justify-center gap-2"
+            @click.stop="isDropdownOpen = !isDropdownOpen"
+          >
+            <Plus class="w-4 h-4" />
+            <span>New Request</span>
+            <ChevronDown class="w-3.5 h-3.5 ml-1 -mr-1" aria-hidden="true" />
+          </button>
+
+          <transition
+            enter-active-class="transition duration-100 ease-out"
+            enter-from-class="transform scale-95 opacity-0"
+            enter-to-class="transform scale-100 opacity-100"
+            leave-active-class="transition duration-75 ease-in"
+            leave-from-class="transform scale-100 opacity-100"
+            leave-to-class="transform scale-95 opacity-0"
+          >
+            <div
+              v-if="isDropdownOpen"
+              class="absolute z-30 w-48 mt-2 origin-top-right right-0 bg-white divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+            >
+              <div class="px-1 py-1">
+                <button
+                  type="button"
+                  id="new-request-single-btn"
+                  class="group flex w-full items-center rounded-md px-3 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white transition-colors"
+                  @click="triggerNewRequestUpload('single')"
+                >
+                  <UploadCloud class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
+                  Single Receipt
+                </button>
+                <button
+                  type="button"
+                  id="new-request-multi-btn"
+                  class="group flex w-full items-center rounded-md px-3 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white transition-colors"
+                  @click="triggerNewRequestUpload('multi')"
+                >
+                  <Layers class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
+                  Multi Receipt
+                </button>
+              </div>
+            </div>
+          </transition>
+        </div>
       </template>
     </BaseUtilityToolbar>
 

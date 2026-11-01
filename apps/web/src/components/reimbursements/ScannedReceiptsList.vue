@@ -100,38 +100,39 @@ function syncOcrData(receipt) {
     receipt.ocrData.tin = receipt.tin;
     receipt.ocrData.location = receipt.location;
     receipt.ocrData.amount = receipt.amount;
+    receipt.ocrData.subtotal = receipt.subtotal;
     receipt.ocrData.vat = receipt.tax;
     receipt.ocrData.expense_category_id = receipt.categoryId;
     receipt.ocrData.event_type = receipt.eventType;
   }
 }
 
-function recalculateFinancials(receipt) {
-  const amounts = receiptFinancials(
-    { amount: Number(receipt.amount) || 0 },
-    receipt.vatClassification,
-  );
-
-  receipt.vatClassification = amounts.vatClassification;
-  receipt.tax = amounts.vat.toFixed(2);
-  receipt.subtotal = amounts.subtotal.toFixed(2);
+function handleSubtotalChange(receipt) {
   syncOcrData(receipt);
 }
 
-function recalculateFromSubtotal(receipt) {
-  const sub = Number(receipt.subtotal) || 0;
+function handleTaxChange(receipt) {
+  syncOcrData(receipt);
+}
+
+function handleAmountChange(receipt) {
   if (receipt.vatClassification === 'non-vat') {
     receipt.tax = "0.00";
-    receipt.amount = sub.toFixed(2);
-  } else {
-    const tax = Number(receipt.tax) || 0;
-    receipt.amount = (sub + tax).toFixed(2);
+    if (!receipt.subtotal || receipt.subtotal === "" || Number(receipt.subtotal) <= 0) {
+      receipt.subtotal = receipt.amount ? Number(receipt.amount).toFixed(2) : "";
+    }
   }
   syncOcrData(receipt);
 }
 
 function handleVatClassChange(receipt) {
-  recalculateFinancials(receipt);
+  if (receipt.vatClassification === 'non-vat') {
+    receipt.tax = "0.00";
+    if (!receipt.subtotal || receipt.subtotal === "" || Number(receipt.subtotal) <= 0) {
+      receipt.subtotal = receipt.amount ? Number(receipt.amount).toFixed(2) : "";
+    }
+  }
+  syncOcrData(receipt);
 }
 
 function addReceiptItem(receipt) {
@@ -143,8 +144,14 @@ function addReceiptItem(receipt) {
 
 function recalculateFromItems(receipt) {
   const newTotal = itemsGrossAmount(receipt.items || []);
-  receipt.amount = newTotal;
-  recalculateFinancials(receipt);
+  receipt.amount = newTotal > 0 ? newTotal.toFixed(2) : "";
+  if (receipt.vatClassification === 'non-vat') {
+    receipt.tax = "0.00";
+    if (!receipt.subtotal || receipt.subtotal === "" || Number(receipt.subtotal) <= 0) {
+      receipt.subtotal = receipt.amount;
+    }
+  }
+  syncOcrData(receipt);
 }
 
 function removeReceiptItem(receipt, index) {
@@ -438,7 +445,6 @@ function removeReceiptItem(receipt, index) {
                           :class="{ 'cursor-not-allowed bg-slate-100 text-slate-500': disabled }"
                           v-model="item.qty"
                           :disabled="disabled || receipt.isUploading || receipt.isProcessing"
-                          @input="recalculateFromItems(receipt)"
                         />
                       </td>
                       <td class="px-4 py-2">
@@ -520,7 +526,7 @@ function removeReceiptItem(receipt, index) {
                     type="number"
                     v-model="receipt.subtotal"
                     :disabled="disabled || receipt.isUploading || receipt.isProcessing"
-                    @input="recalculateFromSubtotal(receipt)"
+                    @input="handleSubtotalChange(receipt)"
                   />
                   <span v-if="isReceiptFieldMissing(receipt, 'subtotal')" class="text-[10px] text-danger font-medium mt-0.5">
                     Subtotal is required
@@ -534,7 +540,7 @@ function removeReceiptItem(receipt, index) {
                     type="number"
                     v-model="receipt.tax"
                     :disabled="disabled || receipt.vatClassification === 'non-vat' || receipt.isUploading || receipt.isProcessing"
-                    @input="recalculateFromSubtotal(receipt)"
+                    @input="handleTaxChange(receipt)"
                   />
                 </div>
                 <div class="input-wrapper">
@@ -548,7 +554,7 @@ function removeReceiptItem(receipt, index) {
                     }"
                     v-model="receipt.amount"
                     :disabled="disabled || receipt.isUploading || receipt.isProcessing"
-                    @input="recalculateFinancials(receipt)"
+                    @input="handleAmountChange(receipt)"
                   />
                   <span v-if="isReceiptFieldMissing(receipt, 'amount')" class="text-[10px] text-danger font-medium mt-0.5">
                     Total amount is required

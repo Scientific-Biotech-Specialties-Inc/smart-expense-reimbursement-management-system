@@ -17,7 +17,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 const props = defineProps({
   maxSegments: {
     type: Number,
-    default: 4,
+    default: 6,
   },
 });
 

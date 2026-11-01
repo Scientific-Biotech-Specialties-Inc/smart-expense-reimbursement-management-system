@@ -80,6 +80,7 @@ const {
   addReceiptFiles,
   removeReceipt,
   clearDraftReceipts,
+  abortSessionReceipts,
   qualityRejection,
   clearQualityRejection,
   showSegmentedUpload,
@@ -197,6 +198,13 @@ const {
   dismissWithConfirm
 } = useUnsavedChanges(isDirty, isSubmitted);
 
+function onConfirmLeave() {
+  if (!isEditMode.value) {
+    abortSessionReceipts();
+  }
+  handleConfirmLeave();
+}
+
 const isEditMode = computed(() => !!props.id);
 const forwardedReceiptCount = computed(
   () => props.forwardedReceipts.length || storedForwardedReceipts.value.length,
@@ -268,12 +276,25 @@ onMounted(async () => {
   window.addEventListener('open-receipt-upload', handleOpenReceiptUpload);
 
   // Pick up files passed from the Reimbursements page via global
-  if (!props.id && !props.forwardedReceipts.length && window.__serms_pending_files) {
-    const pendingFiles = window.__serms_pending_files;
-    delete window.__serms_pending_files;
-    nextTick(() => {
-      addReceiptFiles(pendingFiles);
-    });
+  const pendingUpload = window.__serms_pending_upload;
+  const pendingFiles = window.__serms_pending_files;
+  delete window.__serms_pending_upload;
+  delete window.__serms_pending_files;
+
+  if (!props.id && !props.forwardedReceipts.length) {
+    if (pendingUpload?.mode === "multi" && pendingUpload.files?.length >= 2) {
+      nextTick(() => {
+        submitSegments(pendingUpload.files);
+      });
+    } else if (pendingUpload?.files?.length) {
+      nextTick(() => {
+        addReceiptFiles(pendingUpload.files);
+      });
+    } else if (pendingFiles?.length) {
+      nextTick(() => {
+        addReceiptFiles(pendingFiles);
+      });
+    }
   }
 
   if (isEditMode.value) {
@@ -302,6 +323,18 @@ onMounted(async () => {
             vatClassification,
           );
 
+          let resolvedSubtotal = "";
+          if (r.subtotal != null && r.subtotal !== "") {
+            resolvedSubtotal = Number(r.subtotal).toFixed(2);
+          } else if (amount > 0) {
+            resolvedSubtotal = amounts.subtotal.toFixed(2);
+          }
+
+          const resolvedTax =
+            r.vat_amount != null && r.vat_amount !== ""
+              ? Number(r.vat_amount).toFixed(2)
+              : (vatClassification === "non-vat" ? "0.00" : amounts.vat.toFixed(2));
+
           return {
             id: r.id,
             fileName: r.vendor_name || `Receipt-${r.id}`,
@@ -309,8 +342,8 @@ onMounted(async () => {
             merchantName: r.vendor_name,
             date: formatDateForInput(r.transaction_date),
             amount: amounts.gross,
-            subtotal: amounts.subtotal.toFixed(2),
-            tax: amounts.vat.toFixed(2),
+            subtotal: resolvedSubtotal,
+            tax: resolvedTax,
             vatClassification: amounts.vatClassification,
             tin: r.tin,
             invoiceNumber: r.invoice_number,
@@ -350,11 +383,17 @@ onMounted(async () => {
         ...r,
         ...(() => {
           const amounts = receiptFinancials(r, r.vatClassification);
+          let sub = "";
+          if (r.subtotal != null && r.subtotal !== "") {
+            sub = Number(r.subtotal).toFixed(2);
+          } else if (amounts.gross > 0) {
+            sub = amounts.subtotal.toFixed(2);
+          }
 
           return {
             amount: amounts.gross,
-            subtotal: amounts.subtotal.toFixed(2),
-            tax: amounts.vat.toFixed(2),
+            subtotal: sub,
+            tax: r.tax != null && r.tax !== "" ? Number(r.tax).toFixed(2) : (amounts.vatClassification === "non-vat" ? "0.00" : amounts.vat.toFixed(2)),
             vatClassification: amounts.vatClassification,
           };
         })(),
@@ -565,7 +604,7 @@ function dismiss() {
       confirm-text="Leave Page"
       cancel-text="Stay"
       :danger="true"
-      @confirm="handleConfirmLeave"
+      @confirm="onConfirmLeave"
       @close="handleCancelLeave"
     />
 

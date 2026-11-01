@@ -108,6 +108,7 @@ export function generateMockOcrData(file = {}) {
   const total = Math.round((150 + Math.random() * 4850) * 100) / 100;
   const { vat } = receiptFinancials({ amount: total }, "vat");
   const vatAmount = Math.round(Number(vat) * 100) / 100;
+  const subtotal = Math.round(Math.max(total - vatAmount, 0) * 100) / 100;
   const items = splitItemsAcrossTotal(total);
 
   return {
@@ -121,6 +122,7 @@ export function generateMockOcrData(file = {}) {
     location,
     total_amount: total,
     amount: total,
+    subtotal: subtotal,
     vat_amount: vatAmount,
     vat: vatAmount,
     vat_classification: "vat",

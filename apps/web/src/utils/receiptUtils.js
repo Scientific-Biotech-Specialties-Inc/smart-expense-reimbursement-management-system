@@ -17,10 +17,7 @@ export function subtotalOf(amount, vatClassification = "vat") {
 }
 
 export function itemGrossAmount(item) {
-  const quantity = Number(item?.quantity ?? item?.qty ?? 1) || 1;
-  const price = Number(item?.price) || 0;
-
-  return quantity * price;
+  return Number(item?.price) || 0;
 }
 
 export function itemsGrossAmount(items = []) {
@@ -28,11 +25,16 @@ export function itemsGrossAmount(items = []) {
 }
 
 export function receiptGrossAmount(receipt) {
+  const explicitAmount = Number(receipt?.amount ?? receipt?.total_amount ?? 0);
+  if (explicitAmount > 0) {
+    return explicitAmount;
+  }
+
   if (receipt?.items?.length) {
     return itemsGrossAmount(receipt.items);
   }
 
-  return Number(receipt?.amount ?? receipt?.total_amount ?? 0);
+  return 0;
 }
 
 export function receiptFinancials(receipt, vatClassification) {
@@ -144,6 +146,13 @@ export function buildPrefilledReceiptDraft({
       : [];
   const amounts = receiptFinancials({ amount, items }, vatClassification);
 
+  let resolvedSubtotal = "";
+  if (receiptData.subtotal != null && receiptData.subtotal !== "") {
+    resolvedSubtotal = Number(receiptData.subtotal).toFixed(2);
+  } else if (amount > 0) {
+    resolvedSubtotal = amounts.subtotal.toFixed(2);
+  }
+
   return {
     id: resolvedId,
     invoiceNumber: receiptData.invoice_number || "",
@@ -154,11 +163,11 @@ export function buildPrefilledReceiptDraft({
     fileType,
     thumbnail,
     amount: amount > 0 ? amounts.gross : "",
-    subtotal: amount > 0 ? amounts.subtotal.toFixed(2) : "",
+    subtotal: resolvedSubtotal,
     tax:
       receiptData.vat_amount != null && receiptData.vat_amount !== ""
         ? Number(receiptData.vat_amount).toFixed(2)
-        : "",
+        : (vatClassification === "non-vat" ? "0.00" : ""),
     vatClassification: amounts.vatClassification,
     currency: receiptData.currency || "",
     date: formatDateForInput(receiptData.transaction_date || receiptData.date),

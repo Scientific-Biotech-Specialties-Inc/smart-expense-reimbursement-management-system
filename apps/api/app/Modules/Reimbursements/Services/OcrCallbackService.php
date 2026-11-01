@@ -71,6 +71,7 @@ class OcrCallbackService
                 'vendor_name'          => $data['vendor_name']       ?? $receipt->vendor_name,
                 'transaction_date'     => $data['transaction_date']  ?? $receipt->transaction_date,
                 'total_amount'         => $data['total_amount']       ?? $receipt->total_amount,
+                'subtotal'             => $data['subtotal']           ?? $receipt->subtotal,
                 'vat_amount'           => $data['vat_amount']         ?? $receipt->vat_amount,
                 'tin'                  => $data['tin']                ?? $receipt->tin,
                 'invoice_number'       => $data['invoice_number']     ?? $receipt->invoice_number,

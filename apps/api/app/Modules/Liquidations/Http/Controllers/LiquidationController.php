@@ -258,6 +258,7 @@ class LiquidationController extends Controller
                 'location' => $mock['location'] ?? null,
                 'ocr_confidence_score' => $mock['ocr_confidence_score'] ?? null,
                 'ocr_flagged' => false,
+                'is_draft' => true,
                 'status' => $isMock ? 'processed' : 'processing',
             ]);
             if ($isMock && !empty($mock['items'])) {
@@ -533,6 +534,11 @@ class LiquidationController extends Controller
                 'shortfall_explanation' => $validated['shortfall_explanation'] ?? null,
                 'report_file_path' => $reportFilePath,
             ]);
+
+            // Commit receipts to user's expense history
+            if (!empty($receiptIds)) {
+                Receipt::whereIn('id', $receiptIds)->update(['is_draft' => false]);
+            }
 
             // Change advance status to under-review while admin audits
             $advance->update(['status' => 'under-review']);

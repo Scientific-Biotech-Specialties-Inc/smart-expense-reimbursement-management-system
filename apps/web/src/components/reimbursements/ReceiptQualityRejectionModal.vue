@@ -60,11 +60,29 @@ watch(
 );
 
 const isDuplicate = computed(() => props.rejectionCode === "duplicate");
+const isNotReceipt = computed(() => props.rejectionCode === "not_a_receipt");
+const isBlurry = computed(() => props.rejectionCode === "blurry");
+
+const headerTitle = computed(() => {
+  if (isDuplicate.value) return "Duplicate Receipt Detected";
+  if (isNotReceipt.value) return "Unrecognized Receipt Image";
+  if (isBlurry.value) return "Blurry Receipt Image Detected";
+  return "Receipt Image Quality Issue";
+});
+
+const headerSubtitle = computed(() => {
+  if (isDuplicate.value) return "This receipt has already been submitted to the system";
+  if (isNotReceipt.value) return "The uploaded image does not appear to be a valid receipt or invoice";
+  if (isBlurry.value) return "The receipt image is out of focus and cannot be read accurately";
+  return "Action required to ensure accurate OCR data extraction";
+});
 
 const badgeLabel = computed(() => {
   switch (props.rejectionCode) {
+    case "not_a_receipt":
+      return "Not a Receipt";
     case "blurry":
-      return "Too Blurry";
+      return "Blurry Image";
     case "too_dark":
       return "Too Dark";
     case "too_small":
@@ -76,8 +94,20 @@ const badgeLabel = computed(() => {
   }
 });
 
+const overrideButtonLabel = computed(() => {
+  if (isNotReceipt.value) return "Continue Anyway (Enter Manually)";
+  if (isBlurry.value) return "Continue Anyway (Override Warning)";
+  return "Continue Anyway (Override Quality)";
+});
+
 const tips = computed(() => {
   switch (props.rejectionCode) {
+    case "not_a_receipt":
+      return [
+        "Ensure you are uploading an official receipt, sales invoice, or billing statement",
+        "Make sure the merchant name, date, and total amount are clearly visible",
+        "Avoid uploading selfies, random photos, or unrelated screenshots",
+      ];
     case "blurry":
       return [
         "Hold your device steady with both hands",
@@ -132,10 +162,10 @@ const tips = computed(() => {
             </span>
             <div>
               <h3 class="font-heading text-base font-bold text-slate-900">
-                {{ isDuplicate ? "Duplicate Receipt Detected" : "Receipt Image Quality Issue" }}
+                {{ headerTitle }}
               </h3>
               <p class="text-xs font-medium text-slate-500">
-                {{ isDuplicate ? "This receipt has already been submitted to the system" : "Action required to ensure accurate OCR data extraction" }}
+                {{ headerSubtitle }}
               </p>
             </div>
           </div>
@@ -216,7 +246,7 @@ const tips = computed(() => {
 
               <!-- Segment suggestion banner if resolution is low/long receipt -->
               <div
-                v-if="(rejectionCode === 'too_small' || showSegmentedOption) && !isDuplicate"
+                v-if="(rejectionCode === 'too_small' || showSegmentedOption) && !isDuplicate && !isNotReceipt"
                 class="rounded-xl border border-accent/20 bg-accent-50 p-3 flex items-start gap-3"
               >
                 <Layers class="h-5 w-5 text-accent shrink-0 mt-0.5" />
@@ -242,7 +272,7 @@ const tips = computed(() => {
             class="text-xs font-semibold text-slate-500 hover:text-slate-800 underline underline-offset-4 transition-colors"
             @click="emit('continue-anyway')"
           >
-            Continue Anyway (Override Quality)
+            {{ overrideButtonLabel }}
           </button>
           <div v-else class="text-xs text-slate-400 font-medium">
             Duplicate receipts cannot be overridden.
@@ -252,7 +282,7 @@ const tips = computed(() => {
             class="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto"
           >
             <button
-              v-if="showSegmentedOption && !isDuplicate"
+              v-if="showSegmentedOption && !isDuplicate && !isNotReceipt"
               type="button"
               class="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-accent/30 bg-white px-3.5 text-xs font-bold text-accent shadow-sm hover:bg-accent-50 transition-colors"
               @click="emit('upload-segmented')"
