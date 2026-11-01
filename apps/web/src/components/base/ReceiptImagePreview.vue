@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { Trash2, ZoomIn } from "lucide-vue-next";
 import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
+import StackedReceiptDeck from "@/components/base/StackedReceiptDeck.vue";
 import ImagePreviewModal from "@/components/base/ImagePreviewModal.vue";
 import { cleanName } from "@/utils/receiptUtils";
 
@@ -9,6 +10,10 @@ const props = defineProps({
   src: {
     type: String,
     default: null,
+  },
+  images: {
+    type: Array,
+    default: () => [],
   },
   fileName: {
     type: String,
@@ -71,6 +76,7 @@ const props = defineProps({
 const emit = defineEmits(["remove", "click-image"]);
 
 const isPreviewModalOpen = ref(false);
+const activeDeckIndex = ref(0);
 
 const displayTitle = computed(() => {
   const raw =
@@ -83,6 +89,26 @@ const displayTitle = computed(() => {
   return cleanName(raw);
 });
 
+const resolvedImages = computed(() => {
+  if (Array.isArray(props.images) && props.images.length > 0) {
+    return props.images;
+  }
+  if (Array.isArray(props.receipt?.images) && props.receipt.images.length > 0) {
+    return props.receipt.images;
+  }
+  if (Array.isArray(props.receipt?.file_url) && props.receipt.file_url.length > 1) {
+    return props.receipt.file_url;
+  }
+  if (Array.isArray(props.receipt?.file_path) && props.receipt.file_path.length > 1) {
+    return props.receipt.file_path;
+  }
+  return [];
+});
+
+const isMultiReceipt = computed(() => {
+  return resolvedImages.value.length > 1;
+});
+
 const isPdf = computed(() => {
   const type = String(props.fileType || props.receipt?.fileType || "").toLowerCase();
   if (type === "application/pdf" || type === "pdf") return true;
@@ -91,17 +117,25 @@ const isPdf = computed(() => {
 });
 
 const canPreview = computed(() => {
-  return (
-    props.enableZoom &&
-    Boolean(props.src) &&
-    !isPdf.value &&
-    !props.isUploading &&
-    !props.isProcessing
-  );
+  if (!props.enableZoom || props.isUploading || props.isProcessing) return false;
+  if (isMultiReceipt.value) return true;
+  return Boolean(props.src) && !isPdf.value;
 });
 
 function handleImageClick(event) {
   emit("click-image", { event, receipt: props.receipt, src: props.src });
+  if (canPreview.value) {
+    isPreviewModalOpen.value = true;
+  }
+}
+
+function handleDeckActiveClick(payload) {
+  activeDeckIndex.value = payload.index;
+  emit("click-image", {
+    receipt: props.receipt,
+    src: payload.src,
+    index: payload.index,
+  });
   if (canPreview.value) {
     isPreviewModalOpen.value = true;
   }
@@ -134,8 +168,36 @@ function handleRemove() {
       </span>
     </div>
 
-    <!-- Image Preview Frame -->
+    <!-- Multi-Receipt Stacked Deck (when merged images are considered one receipt) -->
+    <div v-if="isMultiReceipt" class="relative">
+      <StackedReceiptDeck
+        :images="resolvedImages"
+        :aspect-class="aspectClass"
+        :alt="alt || displayTitle || 'Receipt segment'"
+        :disabled="disabled || isUploading || isProcessing"
+        :enable-zoom="canPreview"
+        v-model:active-index="activeDeckIndex"
+        @click-active="handleDeckActiveClick"
+      />
+
+      <!-- Uploading / Processing State Overlay -->
+      <div
+        v-if="isUploading || isProcessing"
+        class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/80 text-accent backdrop-blur-[1px] z-40 rounded-xl"
+      >
+        <span
+          class="h-8 w-8 rounded-full border-2 border-current border-t-transparent animate-spin"
+          aria-hidden="true"
+        />
+        <span class="text-[10px] font-bold uppercase tracking-widest text-center px-2">
+          {{ isProcessing ? "Extracting OCR Data..." : "Uploading..." }}
+        </span>
+      </div>
+    </div>
+
+    <!-- Single Image Preview Frame (standard single receipt) -->
     <div
+      v-else
       :class="[
         'relative rounded-xl overflow-hidden border border-slate-200 bg-white shadow-sm flex items-center justify-center',
         aspectClass,
@@ -199,7 +261,9 @@ function handleRemove() {
     <ImagePreviewModal
       v-if="canPreview"
       v-model="isPreviewModalOpen"
-      :src="src"
+      :src="isMultiReceipt ? (resolvedImages[activeDeckIndex]?.url || resolvedImages[activeDeckIndex]) : src"
+      :images="isMultiReceipt ? resolvedImages : []"
+      :initial-index="activeDeckIndex"
       :alt="alt || displayTitle || 'Receipt Image'"
       :title="displayTitle ? `Receipt - ${displayTitle}` : 'Receipt Preview'"
     />

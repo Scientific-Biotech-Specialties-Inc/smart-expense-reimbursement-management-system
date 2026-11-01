@@ -55,6 +55,7 @@ describe("StackedReceiptDeck", () => {
     expect(wrapper.emitted("click-active")[0][0]).toEqual({
       index: 0,
       image: sampleImages[0],
+      src: sampleImages[0],
     });
   });
 

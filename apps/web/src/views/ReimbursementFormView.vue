@@ -335,6 +335,20 @@ onMounted(async () => {
               ? Number(r.vat_amount).toFixed(2)
               : (vatClassification === "non-vat" ? "0.00" : amounts.vat.toFixed(2));
 
+          const rawFiles = Array.isArray(r.file_url)
+            ? r.file_url
+            : Array.isArray(r.file_path)
+              ? r.file_path
+              : null;
+          const multiImages =
+            rawFiles && rawFiles.length > 1
+              ? rawFiles.map((f, i) => ({
+                  id: `seg-${r.id}-${i}`,
+                  url: getFileUrl(f),
+                  name: `Segment ${i + 1}`,
+                }))
+              : null;
+
           return {
             id: r.id,
             fileName: r.vendor_name || `Receipt-${r.id}`,
@@ -352,6 +366,8 @@ onMounted(async () => {
             categoryId: r.expense_category_id || data.expense_category_id || null,
             eventType: r.event_type || data.event_type || "",
             thumbnail: getFileUrl(r.file_url || r.file_path) || null,
+            images: multiImages,
+            isMultiReceipt: Boolean(multiImages),
             items,
             isUploading: false,
           };
