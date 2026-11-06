@@ -14,6 +14,7 @@ import {
   receiptFinancials,
   isReceiptFieldMissing,
 } from "@/utils/receiptUtils";
+import { truncateDecimal } from "@/utils/formatters";
 import { REIMBURSEMENT_EVENT_TYPES } from "@/utils/constants";
 import CurrencySelect from "@/components/base/CurrencySelect.vue";
 import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
@@ -115,7 +116,35 @@ function handleTaxChange(receipt) {
   syncOcrData(receipt);
 }
 
+function handleAmountInput(receipt, event) {
+  const rawValue = event?.target?.value ?? receipt.amount;
+  const truncated = truncateDecimal(rawValue, 2);
+  receipt.amount = truncated;
+  if (event?.target && event.target.value !== truncated) {
+    event.target.value = truncated;
+  }
+  handleAmountChange(receipt);
+}
+
+function handleAmountBlur(receipt, event) {
+  if (receipt.amount !== null && receipt.amount !== undefined && receipt.amount !== "") {
+    let str = String(receipt.amount);
+    if (str.endsWith(".")) {
+      str = str.slice(0, -1);
+    }
+    const truncated = truncateDecimal(str, 2);
+    receipt.amount = truncated;
+    if (event?.target && event.target.value !== truncated) {
+      event.target.value = truncated;
+    }
+    syncOcrData(receipt);
+  }
+}
+
 function handleAmountChange(receipt) {
+  if (receipt.amount !== null && receipt.amount !== undefined && receipt.amount !== "") {
+    receipt.amount = truncateDecimal(receipt.amount, 2);
+  }
   if (receipt.vatClassification === 'non-vat') {
     receipt.tax = "0.00";
     if (!receipt.subtotal || receipt.subtotal === "" || Number(receipt.subtotal) <= 0) {
@@ -525,6 +554,8 @@ function removeReceiptItem(receipt, index) {
                       'input-error !border-danger focus:!border-danger': isReceiptFieldMissing(receipt, 'subtotal'),
                     }"
                     type="number"
+                    step="0.01"
+                    min="0"
                     v-model="receipt.subtotal"
                     :disabled="disabled || receipt.isUploading || receipt.isProcessing"
                     @input="handleSubtotalChange(receipt)"
@@ -539,6 +570,8 @@ function removeReceiptItem(receipt, index) {
                     class="input !bg-white disabled:opacity-50 disabled:cursor-not-allowed"
                     :class="{ 'cursor-not-allowed bg-slate-100 text-slate-500': disabled }"
                     type="number"
+                    step="0.01"
+                    min="0"
                     v-model="receipt.tax"
                     :disabled="disabled || receipt.vatClassification === 'non-vat' || receipt.isUploading || receipt.isProcessing"
                     @input="handleTaxChange(receipt)"
@@ -548,6 +581,8 @@ function removeReceiptItem(receipt, index) {
                   <label class="input-label text-accent">Total <span class="text-danger">*</span></label>
                   <input
                     type="number"
+                    step="0.01"
+                    min="0"
                     class="input !bg-white text-lg font-bold text-accent text-right disabled:opacity-50 disabled:cursor-not-allowed"
                     :class="{
                       'cursor-not-allowed !bg-slate-100 !text-slate-500': disabled,
@@ -555,7 +590,8 @@ function removeReceiptItem(receipt, index) {
                     }"
                     v-model="receipt.amount"
                     :disabled="disabled || receipt.isUploading || receipt.isProcessing"
-                    @input="handleAmountChange(receipt)"
+                    @input="handleAmountInput(receipt, $event)"
+                    @blur="handleAmountBlur(receipt, $event)"
                   />
                   <span v-if="isReceiptFieldMissing(receipt, 'amount')" class="text-[10px] text-danger font-medium mt-0.5">
                     Total amount is required

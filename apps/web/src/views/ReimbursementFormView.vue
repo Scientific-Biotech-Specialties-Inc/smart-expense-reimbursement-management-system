@@ -33,6 +33,7 @@ import {
   getItems,
   formatDateForInput,
 } from "@/utils/receiptUtils";
+import { truncateDecimal } from "@/utils/formatters";
 import { getFileUrl } from "@/utils/fileUtils";
 
 const props = defineProps({
@@ -161,9 +162,10 @@ watch(
 );
 
 // Financials
-const totalAmount = computed(() =>
-  receipts.value.reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
-);
+const totalAmount = computed(() => {
+  const sum = receipts.value.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+  return Number(truncateDecimal(sum.toFixed(6), 2));
+});
 const totalVat = computed(() =>
   receipts.value.reduce((sum, r) => sum + (Number(r.tax) || 0), 0),
 );
@@ -355,7 +357,7 @@ onMounted(async () => {
             fileType: r.file_type,
             merchantName: r.vendor_name,
             date: formatDateForInput(r.transaction_date),
-            amount: amounts.gross,
+            amount: amounts.gross > 0 ? Number(truncateDecimal(amounts.gross, 2)) : "",
             subtotal: resolvedSubtotal,
             tax: resolvedTax,
             vatClassification: amounts.vatClassification,
@@ -407,7 +409,7 @@ onMounted(async () => {
           }
 
           return {
-            amount: amounts.gross,
+            amount: amounts.gross > 0 ? Number(truncateDecimal(amounts.gross, 2)) : "",
             subtotal: sub,
             tax: r.tax != null && r.tax !== "" ? Number(r.tax).toFixed(2) : (amounts.vatClassification === "non-vat" ? "0.00" : amounts.vat.toFixed(2)),
             vatClassification: amounts.vatClassification,

@@ -22,6 +22,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
 
+## [1.9.4] - Nov 6, 2026
+
+### Fixed
+- **Reimbursement Total Field Decimal Truncation:**
+  - Added reusable `truncateDecimal(value, digits = 2)` utility in `apps/web/src/utils/formatters.js` to strictly truncate numeric input/values to at most two decimal digits without rounding up centavos.
+  - Updated `ScannedReceiptsList.vue` reimbursement receipt Total input with `step="0.01"`, `min="0"`, real-time decimal truncation on `@input`, trailing-dot cleanup on `@blur`, and defensive sanitization in `handleAmountChange`.
+  - Updated `ReimbursementFormView.vue` and `receiptUtils.js` (`buildPrefilledReceiptDraft`) so pre-filled and edit-mode receipt amounts, as well as calculated total claims, are truncated to two decimal places.
+  - Authored comprehensive unit tests in `apps/web/src/utils/formatters.test.js`, `apps/web/src/components/reimbursements/ScannedReceiptsList.test.js`, and `apps/web/src/utils/receiptUtils.test.js`.
+
 ## [1.9.3] - Oct 28, 2026
 
 ### Added

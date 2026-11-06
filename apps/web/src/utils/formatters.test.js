@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatPeso, formatAmount, formatKpiValue, formatDate, truncateText } from "./formatters";
+import { formatPeso, formatAmount, formatKpiValue, formatDate, truncateText, truncateDecimal } from "./formatters";
 
 describe("formatters", () => {
   describe("formatPeso", () => {
@@ -97,6 +97,42 @@ describe("formatters", () => {
     it("supports custom maxLength", () => {
       expect(truncateText("Hello World!", 5)).toBe("Hello...");
       expect(truncateText("Purchased office supplies and materials for Q4", 30)).toBe("Purchased office supplies and...");
+    });
+  });
+
+  describe("truncateDecimal", () => {
+    it("returns empty string for null, undefined, or empty value", () => {
+      expect(truncateDecimal(null)).toBe("");
+      expect(truncateDecimal(undefined)).toBe("");
+      expect(truncateDecimal("")).toBe("");
+    });
+
+    it("returns integers unchanged", () => {
+      expect(truncateDecimal(100)).toBe("100");
+      expect(truncateDecimal("100")).toBe("100");
+      expect(truncateDecimal(0)).toBe("0");
+    });
+
+    it("preserves trailing dot and values with 1 or 2 decimals while typing", () => {
+      expect(truncateDecimal("100.")).toBe("100.");
+      expect(truncateDecimal("100.5")).toBe("100.5");
+      expect(truncateDecimal("100.55")).toBe("100.55");
+      expect(truncateDecimal(100.5)).toBe("100.5");
+    });
+
+    it("truncates decimal digits exceeding 2 digits without rounding", () => {
+      expect(truncateDecimal("100.559")).toBe("100.55");
+      expect(truncateDecimal(100.559)).toBe("100.55");
+      expect(truncateDecimal("12.345678")).toBe("12.34");
+      expect(truncateDecimal(12.3499)).toBe("12.34");
+      expect(truncateDecimal("0.999")).toBe("0.99");
+      expect(truncateDecimal(".999")).toBe(".99");
+    });
+
+    it("supports custom digit lengths", () => {
+      expect(truncateDecimal("12.3456", 3)).toBe("12.345");
+      expect(truncateDecimal("12.3456", 1)).toBe("12.3");
+      expect(truncateDecimal("12.3456", 0)).toBe("12");
     });
   });
 });

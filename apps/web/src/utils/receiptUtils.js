@@ -1,3 +1,5 @@
+import { truncateDecimal } from "./formatters";
+
 export function vatOf(amount) {
   return amount > 0 ? (amount * 0.12) / 1.12 : 0;
 }
@@ -162,7 +164,7 @@ export function buildPrefilledReceiptDraft({
     fileName,
     fileType,
     thumbnail,
-    amount: amount > 0 ? amounts.gross : "",
+    amount: amount > 0 ? Number(truncateDecimal(amounts.gross, 2)) : "",
     subtotal: resolvedSubtotal,
     tax:
       receiptData.vat_amount != null && receiptData.vat_amount !== ""

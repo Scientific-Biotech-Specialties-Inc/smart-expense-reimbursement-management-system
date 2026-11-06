@@ -265,5 +265,17 @@ describe("itemGrossAmount and receiptGrossAmount (line-total price contract)", (
     expect(draft.subtotal).toBe("80.00");
     expect(draft.tax).toBe("0.00");
   });
+
+  it("truncates total amount into two digits without rounding", async () => {
+    const { buildPrefilledReceiptDraft } = await import("./receiptUtils");
+    const draft = buildPrefilledReceiptDraft({
+      id: 23,
+      receiptData: {
+        total_amount: 150.999,
+        vat_classification: "vat",
+      },
+    });
+    expect(draft.amount).toBe(150.99);
+  });
 });
 
