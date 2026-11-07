@@ -304,8 +304,6 @@ onBeforeUnmount(() => {
         <BaseToggleSwitch
           :model-value="isMockOcr"
           @update:model-value="setMockMode"
-          on-label="Mock OCR"
-          off-label="Real OCR"
           hint="Mock uploads file, fills instantly, skips OCR wait"
         />
       </div>

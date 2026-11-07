@@ -30,9 +30,18 @@ describe("generateMockOcrData (offline OCR replica, no backend)", () => {
     const data = generateMockOcrData(makeFile("sm_receipt.png"));
     const total = Number(data.total_amount);
     const vat = Number(data.vat_amount ?? data.vat);
-    const expected = (total * 0.12) / 1.12;
-    expect(vat).toBeCloseTo(expected, 2);
+    const expected = Math.round(((total * 0.12) / 1.12) * 100) / 100;
+    expect(vat).toBe(expected);
+    expect(Math.abs(vat - (total * 0.12) / 1.12)).toBeLessThanOrEqual(0.01);
     expect(Number(data.vat_amount)).toBeLessThanOrEqual(total);
+  });
+
+  it("handles boundary rounding cleanly without floating-point flakiness", () => {
+    // 1735.58 yields raw VAT of 185.95499999999998, which rounds to 185.96
+    const data = generateMockOcrData(makeFile("sm_receipt.png"), { total: 1735.58 });
+    expect(data.total_amount).toBe(1735.58);
+    expect(data.vat_amount).toBe(185.96);
+    expect(data.subtotal).toBe(1549.62);
   });
 
   it("derives vendor hint from filename when recognizable", () => {

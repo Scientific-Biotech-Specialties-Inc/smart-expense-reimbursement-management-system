@@ -64,6 +64,20 @@ vi.mock("@/composables/useNotificationDeepLink", () => ({
   }),
 }));
 
+vi.mock("@/utils/apiFetch", () => ({
+  apiFetch: vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      data: {
+        id: "mock-receipt-1",
+        status: "processing",
+        total_amount: 100,
+        vat_amount: 10.71,
+      },
+    }),
+  }),
+}));
+
 const toolbarStub = {
   template: "<div><slot name='actions' /><slot /></div>",
 };
