@@ -31,6 +31,11 @@
 | **OPS** — Operations Runbook       | [OPS.md](OPS.md)       | 1.5.1   | Active | Azure student infra, SLO targets, and runbooks        | 2026-09-01 |
 | **QAD** — QA & Test Plan           | [QAD.md](QAD.md)       | 1.5.1   | Active | Testing strategy, Vitest/PHPUnit guides, and gates    | 2026-09-01 |
 | **CHANGELOG** — Historical Changelog | [CHANGELOG.md](CHANGELOG.md) | 1.5.1 | Active | Comprehensive historical changelog for agents & developers | 2026-09-01 |
+| **Tech Stack & Tools** — Full System Audit | [TECH_STACK_AND_TOOLS.md](TECH_STACK_AND_TOOLS.md) | 1.0.0 | Active | Complete stack, frameworks, tools, and runtime matrix across SERMS and ocr-pipeline | Nov 6, 2026 |
+| **Implemented Features** — Feature Catalog | [IMPLEMENTED_FEATURES.md](IMPLEMENTED_FEATURES.md) | 1.0.0 | Active | Functional feature inventory across all 9 modules of SERMS and ocr-pipeline | Nov 6, 2026 |
+| **Known Issues & Limits** — Risk Ledger | [KNOWN_ISSUES_AND_LIMITATIONS.md](KNOWN_ISSUES_AND_LIMITATIONS.md) | 1.0.0 | Active | Failure modes, handwriting/thermal limits, 2B AI ceiling, and G-01..G-12 gaps | Nov 6, 2026 |
+| **API & Integrations** — Interface Specs | [API_DOCUMENTATION_AND_INTEGRATION.md](API_DOCUMENTATION_AND_INTEGRATION.md) | 1.5.0 | Active | Complete REST API reference, payload pre-encryption, and webhook schemas | Nov 6, 2026 |
+| **Technical Implementation** — Code Guide | [TECHNICAL_IMPLEMENTATION_DETAILS.docx](TECHNICAL_IMPLEMENTATION_DETAILS.docx) · [MD](TECHNICAL_IMPLEMENTATION_DETAILS.md) | 1.1.0 | Active | Low-level algorithms, pure-PHP OAEP, seam stitching, and math engines (Word/Docs & MD with image diagrams) | Nov 6, 2026 |
 | **PR Guide** — Pull Request Guide | [../documentations/PR_GUIDE.md](../documentations/PR_GUIDE.md) | 1.0 | Draft | Guidelines, naming conventions, and best practices for creating PRs | 2026-07-13 |
 | **Issue Guide** — Issue Creation Guide | [../documentations/ISSUE_GUIDE.md](../documentations/ISSUE_GUIDE.md) | 1.0 | Draft | Guidelines and templates for reporting bugs and feature requests | 2026-07-13 |
 | **Branch Guide** — Branch Creation Guide | [../documentations/BRANCH_GUIDE.md](../documentations/BRANCH_GUIDE.md) | 1.0 | Draft | GitFlow strategy, branch naming, and syncing guidelines | 2026-07-13 |

@@ -8,6 +8,9 @@ import CurrencySelect from "@/components/base/CurrencySelect.vue";
 import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import {
+  DISCOUNT_TYPE_OPTIONS,
+  formatDiscountTypeLabel,
+  normalizeDiscountType,
   buildReceiptUploadFormPrefill,
   canEditReceipt,
   itemsGrossAmount,
@@ -181,6 +184,8 @@ function buildUpdatePayload(receipt) {
       expense_category_id: receipt.categoryId,
       total_amount: receipt.amount,
       vat_amount: receipt.tax,
+      discount_amount: receipt.discountAmount,
+      discount_type: receipt.discountType,
       vat_classification: receipt.vatClassification,
       currency: receipt.currency,
       location: receipt.location,
@@ -234,6 +239,8 @@ const uploadForm = ref({
   expense_category_id: "",
   total_amount: "",
   vat_amount: "",
+  discount_amount: "0.00",
+  discount_type: "none",
   vat_classification: "vat",
   currency: "",
   items: [],
@@ -243,7 +250,11 @@ const itemsGrossTotal = computed(() => itemsGrossAmount(uploadForm.value.items))
 
 const receiptAmounts = computed(() =>
   receiptFinancials(
-    { amount: Number(uploadForm.value.total_amount) || 0 },
+    {
+      amount: Number(uploadForm.value.total_amount) || 0,
+      discount_amount: Number(uploadForm.value.discount_amount) || 0,
+      discount_type: uploadForm.value.discount_type,
+    },
     uploadForm.value.vat_classification,
   ),
 );
@@ -329,10 +340,32 @@ const {
 
 function recalculateUploadTotalFromItems() {
   if (uploadForm.value.items.length > 0) {
-    const newGross = itemsGrossTotal.value;
+    const discountVal =
+      !uploadForm.value.discount_type || uploadForm.value.discount_type === "none"
+        ? 0
+        : Number(uploadForm.value.discount_amount) || 0;
+    const newGross = Math.max(0, itemsGrossTotal.value - discountVal);
     uploadForm.value.total_amount =
-      newGross > 0 ? Number(newGross.toFixed(2)) : "";
+      newGross > 0 ? Number(newGross.toFixed(2)) : (itemsGrossTotal.value > 0 ? 0 : "");
   }
+}
+
+function handleUploadDiscountTypeChange() {
+  if (!uploadForm.value.discount_type || uploadForm.value.discount_type === "none") {
+    uploadForm.value.discount_type = "none";
+    uploadForm.value.discount_amount = "0.00";
+  }
+  recalculateUploadTotalFromItems();
+}
+
+function handleUploadDiscountAmountInput() {
+  if (
+    Number(uploadForm.value.discount_amount) > 0 &&
+    (!uploadForm.value.discount_type || uploadForm.value.discount_type === "none")
+  ) {
+    uploadForm.value.discount_type = "other";
+  }
+  recalculateUploadTotalFromItems();
 }
 
 watch(
@@ -381,6 +414,11 @@ watch(
     if (isEditMode.value) {
       uploadFile.value = null;
       uploadFilePreview.value = props.receiptToEdit.thumbnail || "";
+      const editDiscAmt = Number(props.receiptToEdit.discountAmount ?? props.receiptToEdit.discount_amount ?? 0) || 0;
+      const editDiscType = normalizeDiscountType(
+        props.receiptToEdit.discountType ?? props.receiptToEdit.discount_type,
+        editDiscAmt,
+      );
       uploadForm.value = {
         invoice_number: props.receiptToEdit.invoiceNumber || "",
         transaction_date: formatDateForInput(props.receiptToEdit.date),
@@ -388,6 +426,8 @@ watch(
         vendor_name: props.receiptToEdit.vendorName || "",
         expense_category_id: props.receiptToEdit.categoryId || "",
         total_amount: props.receiptToEdit.amount || "",
+        discount_amount: editDiscAmt > 0 ? editDiscAmt.toFixed(2) : "0.00",
+        discount_type: editDiscType,
         vat_classification: props.receiptToEdit.vatClassification || "vat",
         currency: props.receiptToEdit.currency || "",
         vat_amount: receiptFinancials(
@@ -452,6 +492,8 @@ function resetUploadForm() {
     expense_category_id: "",
     total_amount: "",
     vat_amount: "",
+    discount_amount: "0.00",
+    discount_type: "none",
     vat_classification: "vat",
     currency: "",
     items: [],
@@ -510,12 +552,16 @@ async function saveReceipt() {
     }
   }
   try {
+    const discType = uploadForm.value.discount_type || "none";
+    const discAmt = discType === "none" ? 0 : (Number(uploadForm.value.discount_amount) || 0);
     const payload = {
       expense_category_id: uploadForm.value.expense_category_id,
       vendor_name: uploadForm.value.vendor_name || null,
       transaction_date: uploadForm.value.transaction_date || null,
       total_amount: uploadForm.value.total_amount || null,
       vat_amount: uploadForm.value.vat_amount || null,
+      discount_amount: discAmt.toFixed(2),
+      discount_type: discType,
       tin: uploadForm.value.tin || null,
       invoice_number: uploadForm.value.invoice_number || null,
       vat_classification: uploadForm.value.vat_classification || null,
@@ -896,6 +942,50 @@ function formatCurrency(amount) {
                 </div>
               </div>
 
+              <!-- Discount Inputs Section -->
+              <div class="grid grid-cols-2 gap-4">
+                <div class="input-wrapper">
+                  <label class="input-label">Discount Type</label>
+                  <div class="relative">
+                    <select
+                      class="input appearance-none cursor-pointer"
+                      v-model="uploadForm.discount_type"
+                      @change="handleUploadDiscountTypeChange"
+                    >
+                      <option
+                        v-for="opt in DISCOUNT_TYPE_OPTIONS"
+                        :key="opt.value"
+                        :value="opt.value"
+                      >
+                        {{ opt.label }}
+                      </option>
+                    </select>
+                    <ChevronDown
+                      class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                    />
+                  </div>
+                </div>
+                <div class="input-wrapper">
+                  <label
+                    class="input-label"
+                    :class="{
+                      'opacity-50': uploadForm.discount_type === 'none',
+                    }"
+                    >Discount Amount</label
+                  >
+                  <input
+                    class="input disabled:opacity-70 disabled:cursor-not-allowed disabled:bg-slate-50"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    v-model="uploadForm.discount_amount"
+                    placeholder="0.00"
+                    :disabled="uploadForm.discount_type === 'none'"
+                    @input="handleUploadDiscountAmountInput"
+                  />
+                </div>
+              </div>
+
               <!-- Totals Inputs Section -->
               <div class="grid grid-cols-2 gap-4">
                 <div class="input-wrapper">
@@ -1017,6 +1107,17 @@ function formatCurrency(amount) {
                 <div
                   class="bg-slate-50 rounded-xl p-5 border border-slate-100 space-y-3"
                 >
+                  <div
+                    v-if="(Number(uploadForm.discount_amount) || 0) > 0"
+                    class="flex justify-between text-sm text-emerald-700"
+                  >
+                    <span>
+                      Discount ({{ formatDiscountTypeLabel(uploadForm.discount_type) }})
+                    </span>
+                    <span class="font-medium">
+                      -{{ formatCurrency(Number(uploadForm.discount_amount) || 0) }}
+                    </span>
+                  </div>
                   <div class="flex justify-between text-sm">
                     <span class="text-slate-500">VAT-Exclusive Subtotal</span>
                     <span class="font-medium text-slate-700">{{

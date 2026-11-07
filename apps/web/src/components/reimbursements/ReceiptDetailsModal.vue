@@ -2,7 +2,14 @@
 import { computed, ref, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { formatAmount, formatDate } from "@/utils/formatters";
-import { normalizeVatClassification, receiptFinancials } from "@/utils/receiptUtils";
+import {
+  DISCOUNT_TYPE_OPTIONS,
+  formatDiscountTypeLabel,
+  normalizeDiscountType,
+  normalizeVatClassification,
+  receiptDiscountAmount,
+  receiptFinancials,
+} from "@/utils/receiptUtils";
 import BaseReceiptDetailModal from "@/components/base/BaseReceiptDetailModal.vue";
 import { CheckCircle, XCircle } from "lucide-vue-next";
 
@@ -21,6 +28,8 @@ const emit = defineEmits([
 
 const auth = useAuthStore();
 const selectedVatClassification = ref("vat");
+const selectedDiscountType = ref("none");
+const selectedDiscountAmount = ref("0.00");
 const TAX_CLASSIFICATIONS = [
   { value: "vat", label: "VAT" },
   { value: "non-vat", label: "Non-VAT" },
@@ -38,7 +47,20 @@ const hasVatClassification = computed(() => !!selectedVatClassification.value);
 const isApproveDisabled = computed(() => isProcessing.value || props.isSubmitting || isOwnSubmission.value || !hasVatClassification.value);
 const isConfirmDecisionDisabled = computed(() => isProcessing.value || props.isSubmitting || isOwnSubmission.value || (props.pendingDecisionAction === "Approve" && !hasVatClassification.value));
 
-const receiptAmounts = computed(() => receiptFinancials(props.receipt, selectedVatClassification.value));
+const effectiveDiscountAmount = computed(() =>
+  selectedDiscountType.value === "none" ? 0 : Math.max(0, Number(selectedDiscountAmount.value) || 0),
+);
+
+const receiptAmounts = computed(() =>
+  receiptFinancials(
+    {
+      ...props.receipt,
+      discount_amount: effectiveDiscountAmount.value,
+      discount_type: selectedDiscountType.value,
+    },
+    selectedVatClassification.value,
+  ),
+);
 const receiptGrossSalesAmount = computed(() => receiptAmounts.value.gross);
 const receiptVatAmount = computed(() => receiptAmounts.value.vat);
 
@@ -48,10 +70,34 @@ const localReviewerNotes = computed({
 });
 
 watch(
-  () => [props.receipt?.id, props.receipt?.vat_classification],
-  ([, vatClassification]) => { selectedVatClassification.value = normalizeVatClassification(vatClassification); },
+  () => [
+    props.receipt?.id,
+    props.receipt?.vat_classification,
+    props.receipt?.discount_type,
+    props.receipt?.discount_amount,
+  ],
+  ([, vatClassification, discountType, discountAmount]) => {
+    selectedVatClassification.value = normalizeVatClassification(vatClassification);
+    const parsedDiscount = receiptDiscountAmount(props.receipt);
+    selectedDiscountType.value = normalizeDiscountType(discountType, parsedDiscount);
+    selectedDiscountAmount.value =
+      selectedDiscountType.value === "none" ? "0.00" : parsedDiscount.toFixed(2);
+  },
   { immediate: true },
 );
+
+function handleDiscountTypeChange() {
+  if (selectedDiscountType.value === "none") {
+    selectedDiscountAmount.value = "0.00";
+  }
+}
+
+function handleDiscountAmountInput() {
+  const num = Number(selectedDiscountAmount.value) || 0;
+  if (num > 0 && selectedDiscountType.value === "none") {
+    selectedDiscountType.value = "other";
+  }
+}
 
 const categoryName = computed(() => {
   const cat = props.receipt?.expense_category ?? props.receipt?.category;
@@ -76,6 +122,8 @@ const normalizedReceipt = computed(() => {
     items: props.receipt.items || [],
     amount: receiptGrossSalesAmount.value || Number(props.receipt.total_amount) || 0,
     vat: receiptVatAmount.value || Number(props.receipt.vat_amount) || 0,
+    discountAmount: effectiveDiscountAmount.value,
+    discountType: selectedDiscountType.value,
     status: props.receipt.status || "pending",
   };
 });
@@ -99,6 +147,34 @@ const normalizedReceipt = computed(() => {
       <p v-else class="text-sm text-slate-700 uppercase">{{ selectedVatClassification || "—" }}</p>
     </template>
 
+    <template #discount-type-field>
+      <select
+        v-if="canEditVatClassification"
+        v-model="selectedDiscountType"
+        class="input !py-1 !text-sm !bg-white"
+        :disabled="isSubmitting"
+        @change="handleDiscountTypeChange"
+      >
+        <option v-for="opt in DISCOUNT_TYPE_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+      </select>
+      <p v-else class="text-sm text-slate-700">{{ formatDiscountTypeLabel(selectedDiscountType) }}</p>
+    </template>
+
+    <template #discount-amount-field>
+      <input
+        v-if="canEditVatClassification"
+        v-model="selectedDiscountAmount"
+        type="number"
+        step="0.01"
+        min="0"
+        class="input !py-1 !text-sm !bg-white disabled:opacity-70 disabled:cursor-not-allowed disabled:bg-slate-50"
+        placeholder="0.00"
+        :disabled="isSubmitting || selectedDiscountType === 'none'"
+        @input="handleDiscountAmountInput"
+      />
+      <p v-else class="text-sm text-slate-700">{{ formatAmount(effectiveDiscountAmount, receipt?.currency || "PHP") }}</p>
+    </template>
+
     <template #actions>
       <!-- Admin Review Actions -->
       <div v-if="auth.isAdmin && receipt && isReviewableReceipt">
@@ -120,7 +196,7 @@ const normalizedReceipt = computed(() => {
           <p class="text-sm text-slate-700">{{ pendingDecisionAction }} this receipt?</p>
           <div class="flex gap-2 shrink-0">
             <button class="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-100" :disabled="isProcessing || isSubmitting" @click="emit('cancel-decision')">Cancel</button>
-            <button class="px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50" :disabled="isConfirmDecisionDisabled" @click="emit('confirm-decision', { vat_classification: selectedVatClassification, vat_amount: receiptVatAmount, total_amount: receiptGrossSalesAmount })">
+            <button class="px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50" :disabled="isConfirmDecisionDisabled" @click="emit('confirm-decision', { vat_classification: selectedVatClassification, vat_amount: receiptVatAmount, total_amount: receiptGrossSalesAmount, discount_amount: effectiveDiscountAmount, discount_type: selectedDiscountType })">
               {{ isSubmitting ? "..." : "Confirm" }}
             </button>
           </div>

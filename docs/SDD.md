@@ -236,6 +236,8 @@ erDiagram
         date transaction_date
         decimal total_amount
         decimal vat_amount
+        decimal discount_amount
+        string discount_type
         string tin
         string invoice_number
         enum vat_classification

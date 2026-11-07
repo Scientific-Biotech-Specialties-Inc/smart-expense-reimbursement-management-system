@@ -29,6 +29,8 @@ const normalizedReceipt = computed(() => {
     items: props.receipt.items || [],
     amount: props.receipt.amount || 0,
     vat: props.receipt.vat || 0,
+    discountAmount: props.receipt.discountAmount ?? props.receipt.discount_amount ?? 0,
+    discountType: props.receipt.discountType ?? props.receipt.discount_type ?? "none",
     status: props.receipt.decision === "accepted" ? "approved" : props.receipt.decision || "pending",
   };
 });

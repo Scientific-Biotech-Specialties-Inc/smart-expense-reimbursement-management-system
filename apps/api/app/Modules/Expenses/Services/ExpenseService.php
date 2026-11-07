@@ -89,6 +89,8 @@ class ExpenseService
                 'transaction_date' => $data['transaction_date'] ?? null,
                 'total_amount' => $data['total_amount'] ?? null,
                 'vat_amount' => $data['vat_amount'] ?? null,
+                'discount_amount' => $data['discount_amount'] ?? 0,
+                'discount_type' => $data['discount_type'] ?? 'none',
                 'tin' => $data['tin'] ?? null,
                 'invoice_number' => $data['invoice_number'] ?? null,
                 'vat_classification' => $data['vat_classification'] ?? null,

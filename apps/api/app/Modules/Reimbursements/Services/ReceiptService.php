@@ -139,6 +139,8 @@ class ReceiptService
                 'total_amount'         => $validated['total_amount'] ?? $mock['total_amount'] ?? null,
                 'subtotal'             => $validated['subtotal'] ?? $mock['subtotal'] ?? null,
                 'vat_amount'           => $validated['vat_amount'] ?? $mock['vat_amount'] ?? null,
+                'discount_amount'      => $validated['discount_amount'] ?? $mock['discount_amount'] ?? 0,
+                'discount_type'        => $validated['discount_type'] ?? $mock['discount_type'] ?? 'none',
                 'tin'                  => $validated['tin'] ?? $mock['tin'] ?? null,
                 'invoice_number'       => $validated['invoice_number'] ?? $mock['invoice_number'] ?? null,
                 'vat_classification'   => $validated['vat_classification'] ?? $mock['vat_classification'] ?? null,

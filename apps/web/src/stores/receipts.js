@@ -205,6 +205,8 @@ export const useReceiptStore = defineStore("receipts", () => {
       isReimbursed: reimbursementCount > 0,
       vendorName: r.vendor_name,
       vatAmount: Number(r.vat_amount) || 0,
+      discountAmount: Number(r.discount_amount) || 0,
+      discountType: r.discount_type || (Number(r.discount_amount) > 0 ? "other" : "none"),
       tin: r.tin,
       invoiceNumber: r.invoice_number,
       vatClassification: r.vat_classification,
@@ -341,6 +343,10 @@ export const useReceiptStore = defineStore("receipts", () => {
       formData.append("total_amount", metadata.total_amount);
     if (metadata.vat_amount != null)
       formData.append("vat_amount", metadata.vat_amount);
+    if (metadata.discount_amount != null)
+      formData.append("discount_amount", metadata.discount_amount);
+    if (metadata.discount_type)
+      formData.append("discount_type", metadata.discount_type);
     if (metadata.tin) formData.append("tin", metadata.tin);
     if (metadata.invoice_number)
       formData.append("invoice_number", metadata.invoice_number);
@@ -438,6 +444,8 @@ export const useReceiptStore = defineStore("receipts", () => {
         date: metadata.transaction_date || rx.date,
         amount: Number(metadata.total_amount) || rx.amount,
         vatAmount: Number(metadata.vat_amount) || 0,
+        discountAmount: Number(metadata.discount_amount) || 0,
+        discountType: metadata.discount_type || rx.discountType || "none",
         tin: metadata.tin || rx.tin,
         invoiceNumber: metadata.invoice_number || rx.invoiceNumber,
         vatClassification: metadata.vat_classification || rx.vatClassification,
@@ -560,6 +568,10 @@ export const useReceiptStore = defineStore("receipts", () => {
       formData.append("total_amount", payload.total_amount);
     if (shouldAppend(payload.vat_amount))
       formData.append("vat_amount", payload.vat_amount);
+    if (shouldAppend(payload.discount_amount))
+      formData.append("discount_amount", payload.discount_amount);
+    if (shouldAppend(payload.discount_type))
+      formData.append("discount_type", payload.discount_type);
     if (shouldAppend(payload.tin)) formData.append("tin", payload.tin);
     if (shouldAppend(payload.invoice_number))
       formData.append("invoice_number", payload.invoice_number);

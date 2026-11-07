@@ -157,6 +157,10 @@ export function useReimbursementDetails(store, addToast) {
         : receiptUpdates.vat_amount ?? selectedReceipt.value?.vat_amount ?? 0;
     const totalAmount =
       receiptUpdates.total_amount ?? selectedReceipt.value?.total_amount ?? 0;
+    const discountAmount =
+      receiptUpdates.discount_amount ?? selectedReceipt.value?.discount_amount ?? 0;
+    const discountType =
+      receiptUpdates.discount_type ?? selectedReceipt.value?.discount_type ?? "none";
 
     try {
       const res = await apiFetch(
@@ -169,6 +173,8 @@ export function useReimbursementDetails(store, addToast) {
             total_amount: totalAmount,
             vat_amount: vatAmount,
             vat_classification: vatClassification,
+            discount_amount: discountAmount,
+            discount_type: discountType,
           }),
         },
       );

@@ -67,12 +67,17 @@ class OcrCallbackService
             }
 
             // Update OCR fields on the receipt.
+            $discountAmount = isset($data['discount_amount']) ? (float) $data['discount_amount'] : (float) ($receipt->discount_amount ?? 0);
+            $discountType = $data['discount_type'] ?? $receipt->discount_type ?? ($discountAmount > 0 ? 'other' : 'none');
+
             $receipt->update([
                 'vendor_name'          => $data['vendor_name']       ?? $receipt->vendor_name,
                 'transaction_date'     => $data['transaction_date']  ?? $receipt->transaction_date,
                 'total_amount'         => $data['total_amount']       ?? $receipt->total_amount,
                 'subtotal'             => $data['subtotal']           ?? $receipt->subtotal,
                 'vat_amount'           => $data['vat_amount']         ?? $receipt->vat_amount,
+                'discount_amount'      => $discountAmount,
+                'discount_type'        => $discountType,
                 'tin'                  => $data['tin']                ?? $receipt->tin,
                 'invoice_number'       => $data['invoice_number']     ?? $receipt->invoice_number,
                 'vat_classification'   => $data['vat_classification'] ?? $receipt->vat_classification,
