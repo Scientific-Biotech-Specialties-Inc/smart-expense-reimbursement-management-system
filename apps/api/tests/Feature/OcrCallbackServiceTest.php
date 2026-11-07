@@ -199,4 +199,28 @@ class OcrCallbackServiceTest extends TestCase
             'vendor_name' => 'Original Vendor',
         ]);
     }
+
+    public function test_ocr_callback_persists_discount_fields(): void
+    {
+        $receipt = $this->makeProcessingReceipt();
+
+        $response = $this->postCallback($receipt, [
+            'receipt_id' => $receipt->id,
+            'vendor_name' => 'Jollibee',
+            'total_amount' => 160.00,
+            'discount_amount' => 40.00,
+            'discount_type' => 'senior',
+            'ocr_confidence_score' => 0.92,
+            'expense_category' => 'Meals',
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receipt->id,
+            'status' => 'processed',
+            'discount_amount' => '40.00',
+            'discount_type' => 'senior',
+        ]);
+    }
 }
+

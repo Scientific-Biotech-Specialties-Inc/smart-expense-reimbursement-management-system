@@ -41,6 +41,8 @@ class StoreReceiptRequest extends FormRequest
             'total_amount' => 'nullable|numeric|min:0',
             'subtotal' => 'nullable|numeric|min:0',
             'vat_amount' => 'nullable|numeric|min:0',
+            'discount_amount' => 'nullable|numeric|min:0',
+            'discount_type' => 'nullable|string|in:none,senior,pwd,student,promo,employee,other',
             'tin' => 'nullable|string|max:255',
             'invoice_number' => 'nullable|string|max:255',
             'location' => 'nullable|string|max:255',

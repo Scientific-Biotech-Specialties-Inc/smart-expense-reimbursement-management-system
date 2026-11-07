@@ -3,11 +3,11 @@
 **Project:** Smart Expense & Reimbursement Management System (SERMS)  
 **Client / Partner:** Science Biotech Specialties Inc. (SBSI) — [https://sbsi.com.ph/about-us/](https://sbsi.com.ph/about-us/)  
 **Academic Context:** 3rd & 4th Year Capstone Project (Capstone 1: Ended July 2026 · Capstone 2: September–December 2026)  
-**Date:** Oct 28, 2026  
-**Version:** 1.9.3  
+**Date:** Nov 7, 2026  
+**Version:** 1.9.6  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** Oct 28, 2026 (Receipt Upload Cancellation & 3-Layer Artifact Purge)  
+**Last reconciled:** Nov 7, 2026 (Receipt Discount UI, Database Persistence, and End-to-End OCR Discount Extraction & Reconciliation)  
 **Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
 
 ---
@@ -21,6 +21,26 @@ All notable changes, architectural decisions, and documentation updates for the 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
+
+## [1.9.6] - Nov 7, 2026
+
+### Added
+- **End-to-End Receipt Discount Extraction, Reconciliation & UI (`discount_amount` & `discount_type`):**
+  - **Database & API Persistence (`apps/api`):** Added migration `2026_11_07_000001_add_discount_fields_to_receipts_table.php` introducing `discount_amount` (`decimal(12, 2)`, default `0.00`) and `discount_type` (`string(50)`, nullable, default `'none'`, canonical values: `none`, `senior`, `pwd`, `student`, `promo`, `employee`, `other`). Updated `Receipt` model, `OcrCallbackRequest`, `OcrCallbackService`, `ReceiptService`, `ExpenseService`, and all receipt Store/Update/Resubmit request validators.
+  - **OCR Pipeline Discount Extraction & Classification (`ocr-pipeline`):** Expanded `LABELS["discount_amount"]` in `app/core/layout.py` and added `classify_discount_type()` to detect Senior Citizen (`SC`/`OSCA`), PWD, Student, Promo/Voucher/Coupon, Employee/Staff, and generic discounts. Updated `app/core/reconcile.py` (`resolve_money`, `_fill_gaps`, `_reconcile`), `app/core/items.py`, and `app/core/extraction.py` to sum multiple discount lines, preserve gross item prices, handle Philippine statutory VAT-exempt discount math (`Less VAT` separate from `discount_amount`), and emit `discount_amount` and `discount_type` in `OcrCallbackPayload`.
+  - **SERMS Discount UI & Admin Review (`apps/web`):** Added `DISCOUNT_TYPE_OPTIONS`, `normalizeDiscountType`, `formatDiscountTypeLabel`, and `receiptDiscountAmount` in `receiptUtils.js`. Added Discount Type dropdown and Discount Amount input to `ScannedReceiptsList.vue` and `ReceiptUploadModal.vue` (with automatic `0.00` reset/disable when `None` is selected, auto-switching to `Other` when a positive amount is typed, and `Total = max(0, sum(items) - discount_amount)` recalculation). Updated `BaseReceiptDetailModal.vue`, `ReceiptViewModal.vue`, `LiquidationReceiptModal.vue`, `ReceiptDetailsModal.vue`, and `useReimbursementDetails.js` so discounts display in receipt summaries and Admins can edit and save `discount_type` and `discount_amount` during reimbursement review.
+
+## [1.9.5] - Nov 6, 2026
+
+### Added
+- **Exported Technical Documentation Suite (`docs/`):**
+  - **`docs/TECH_STACK_AND_TOOLS.md`:** Comprehensive technical stack, framework, and tooling audit comparing SERMS (Laravel 13, Vue 3, MySQL 8.0, Redis) and `ocr-pipeline` (FastAPI, Celery, MongoDB 7, PostgreSQL 16 + pgvector, PaddleOCR, Tesseract, Ollama).
+  - **`docs/IMPLEMENTED_FEATURES.md`:** Complete functional feature inventory covering all 9 SERMS modules (reimbursements, segmented uploads, 3-strike revisions, cash advance approvals, liquidations, variance math, audit logging, export engine) and `ocr-pipeline` features (virtual strip tiling, blur checks, BIR classification, Ollama JSON assist, pgvector deduplication).
+  - **`docs/KNOWN_ISSUES_AND_LIMITATIONS.md`:** Operational risk ledger documenting OCR failure modes on handwritten and faded thermal slips, the $\le 1.5\text{B}-2.0\text{B}$ client AI parameter ceiling, CPU inference latency (5–20s), context truncation (2048/256 tokens), OpenMP CPU thrashing mitigation, Azure \$100 student budget constraints, and compliance gaps G-01 through G-12.
+  - **`docs/API_DOCUMENTATION_AND_INTEGRATION.md`:** Exhaustive REST API reference, Web Crypto API pre-encryption wire envelope (`RSA-OAEP` + `AES-256-GCM`), S2S webhook callback schemas, and PRS synchronization contracts.
+  - **`docs/TECHNICAL_IMPLEMENTATION_DETAILS.md` & `docs/TECHNICAL_IMPLEMENTATION_DETAILS.docx`:** Deep-dive code-level architecture guide covering the pure-PHP OAEP-SHA256 decoding engine, atomic idempotency MySQL locks, daily penalty calculations, Laplacian variance blur math, OpenCV/Tesseract strip stitching, OpenMP thread constraints, and pgvector cosine similarity algorithms. Refactored to native Word/Google Docs format (`.docx`) and standalone pre-rendered PNG diagram assets (`docs/diagrams/`) to resolve Google Docs rendering limitations.
+  - **`docs/diagrams/`:** Exported pre-rendered visual assets: `system_topology.png`, `daily_penalty_accrual.png`, `image_quality_gate.png`, and `end_to_end_sequence.png`.
+  - **`docs/index.md`:** Updated Document Suite registry with active references to the newly exported documentation files and compiled `.docx` guide.
 
 ## [1.9.4] - Nov 6, 2026
 

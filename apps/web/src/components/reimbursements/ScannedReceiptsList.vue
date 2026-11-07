@@ -10,6 +10,7 @@ import {
   PlusCircle,
 } from "lucide-vue-next";
 import {
+  DISCOUNT_TYPE_OPTIONS,
   itemsGrossAmount,
   receiptFinancials,
   isReceiptFieldMissing,
@@ -103,6 +104,8 @@ function syncOcrData(receipt) {
     receipt.ocrData.amount = receipt.amount;
     receipt.ocrData.subtotal = receipt.subtotal;
     receipt.ocrData.vat = receipt.tax;
+    receipt.ocrData.discount_amount = receipt.discountAmount;
+    receipt.ocrData.discount_type = receipt.discountType;
     receipt.ocrData.expense_category_id = receipt.categoryId;
     receipt.ocrData.event_type = receipt.eventType;
   }
@@ -114,6 +117,35 @@ function handleSubtotalChange(receipt) {
 
 function handleTaxChange(receipt) {
   syncOcrData(receipt);
+}
+
+function handleDiscountTypeChange(receipt) {
+  if (!receipt.discountType || receipt.discountType === "none") {
+    receipt.discountType = "none";
+    receipt.discountAmount = "0.00";
+  }
+  if ((receipt.items || []).length > 0) {
+    recalculateFromItems(receipt);
+  } else {
+    syncOcrData(receipt);
+  }
+}
+
+function handleDiscountAmountInput(receipt, event) {
+  const rawValue = event?.target?.value ?? receipt.discountAmount;
+  const truncated = truncateDecimal(rawValue, 2);
+  receipt.discountAmount = truncated;
+  if (event?.target && event.target.value !== truncated) {
+    event.target.value = truncated;
+  }
+  if (Number(receipt.discountAmount) > 0 && (!receipt.discountType || receipt.discountType === "none")) {
+    receipt.discountType = "other";
+  }
+  if ((receipt.items || []).length > 0) {
+    recalculateFromItems(receipt);
+  } else {
+    syncOcrData(receipt);
+  }
 }
 
 function handleAmountInput(receipt, event) {
@@ -172,8 +204,12 @@ function addReceiptItem(receipt) {
 }
 
 function recalculateFromItems(receipt) {
-  const newTotal = itemsGrossAmount(receipt.items || []);
-  receipt.amount = newTotal > 0 ? newTotal.toFixed(2) : "";
+  const itemsSum = itemsGrossAmount(receipt.items || []);
+  const discountVal = (!receipt.discountType || receipt.discountType === "none")
+    ? 0
+    : (Number(receipt.discountAmount) || 0);
+  const newTotal = Math.max(0, itemsSum - discountVal);
+  receipt.amount = newTotal > 0 ? newTotal.toFixed(2) : (itemsSum > 0 ? "0.00" : "");
   if (receipt.vatClassification === 'non-vat') {
     receipt.tax = "0.00";
     if (!receipt.subtotal || receipt.subtotal === "" || Number(receipt.subtotal) <= 0) {
@@ -542,6 +578,45 @@ function removeReceiptItem(receipt, index) {
                     </select>
                     <ChevronDown class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                   </div>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+                <div class="input-wrapper">
+                  <label class="input-label">Discount Type</label>
+                  <div class="relative">
+                    <select
+                      data-testid="receipt-discount-type-select"
+                      class="input !bg-white appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      :class="{ 'cursor-not-allowed bg-slate-100 text-slate-500': disabled }"
+                      v-model="receipt.discountType"
+                      :disabled="disabled || receipt.isUploading || receipt.isProcessing"
+                      @change="handleDiscountTypeChange(receipt)"
+                    >
+                      <option
+                        v-for="opt in DISCOUNT_TYPE_OPTIONS"
+                        :key="opt.value"
+                        :value="opt.value"
+                      >
+                        {{ opt.label }}
+                      </option>
+                    </select>
+                    <ChevronDown class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  </div>
+                </div>
+                <div class="input-wrapper">
+                  <label class="input-label">Discount Amount</label>
+                  <input
+                    data-testid="receipt-discount-amount-input"
+                    class="input !bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    :class="{ 'cursor-not-allowed bg-slate-100 text-slate-500': disabled || !receipt.discountType || receipt.discountType === 'none' }"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    v-model="receipt.discountAmount"
+                    :disabled="disabled || !receipt.discountType || receipt.discountType === 'none' || receipt.isUploading || receipt.isProcessing"
+                    @input="handleDiscountAmountInput(receipt, $event)"
+                  />
                 </div>
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">

@@ -95,17 +95,20 @@ function splitItemsAcrossTotal(total) {
  * Returns the same shape the real pipeline hydrates (vendor_name,
  * transaction_date, tin, invoice_number, location, total/vat, items).
  */
-export function generateMockOcrData(file = {}) {
-  const vendor = vendorFromFile(file);
-  const transactionDate = todayInputDate();
-  const tin = formatTin(`${randomDigits(9)}000`);
+export function generateMockOcrData(file = {}, options = {}) {
+  const vendor = options.vendor || vendorFromFile(file);
+  const transactionDate = options.date || todayInputDate();
+  const tin = options.tin || formatTin(`${randomDigits(9)}000`);
   const stamp = new Date();
   const ymd = `${stamp.getFullYear()}${String(stamp.getMonth() + 1).padStart(2, "0")}${String(
     stamp.getDate(),
   ).padStart(2, "0")}`;
-  const invoiceNumber = `INV-${ymd}-${randomDigits(4)}`;
-  const location = LOCATION_POOL[randomInt(0, LOCATION_POOL.length - 1)];
-  const total = Math.round((150 + Math.random() * 4850) * 100) / 100;
+  const invoiceNumber = options.invoiceNumber || options.invoice_number || `INV-${ymd}-${randomDigits(4)}`;
+  const location = options.location || LOCATION_POOL[randomInt(0, LOCATION_POOL.length - 1)];
+  const total =
+    options.total != null
+      ? Math.round(Number(options.total) * 100) / 100
+      : Math.round((150 + Math.random() * 4850) * 100) / 100;
   const { vat } = receiptFinancials({ amount: total }, "vat");
   const vatAmount = Math.round(Number(vat) * 100) / 100;
   const subtotal = Math.round(Math.max(total - vatAmount, 0) * 100) / 100;
@@ -163,7 +166,7 @@ function safeThumbnail(file, fallback = "") {
  * Mirrors buildPrefilledReceiptDraft output so the form fills identically.
  */
 export function buildMockReimbursementReceipt(file = {}, options = {}) {
-  const ocr = generateMockOcrData(file);
+  const ocr = generateMockOcrData(file, options);
   if (options.categoryId != null) ocr.expense_category_id = options.categoryId;
   const { vat, subtotal } = receiptFinancials({ amount: Number(ocr.total_amount) }, "vat");
   const items = (ocr.items || []).map((item) => ({
@@ -209,7 +212,7 @@ export function buildMockReimbursementReceipt(file = {}, options = {}) {
  * Mirrors hydrateEntry output so the settlement form fills identically.
  */
 export function buildMockFileUploadEntry(file = {}, options = {}) {
-  const ocr = generateMockOcrData(file);
+  const ocr = generateMockOcrData(file, options);
   const { vat, subtotal } = receiptFinancials({ amount: Number(ocr.total_amount) }, "vat");
   const amount = Number(ocr.total_amount) || 0;
   const tax = Number(ocr.vat_amount ?? vat) || 0;

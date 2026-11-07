@@ -279,3 +279,63 @@ describe("itemGrossAmount and receiptGrossAmount (line-total price contract)", (
   });
 });
 
+describe("discount handling in receiptUtils", () => {
+  it("normalizes discount types and auto-defaults to 'other' when discount > 0 and type is missing or 'none'", async () => {
+    const { normalizeDiscountType, formatDiscountTypeLabel } = await import("./receiptUtils");
+    expect(normalizeDiscountType("senior", 50)).toBe("senior");
+    expect(normalizeDiscountType("PWD", 20)).toBe("pwd");
+    expect(normalizeDiscountType("student", 15)).toBe("student");
+    expect(normalizeDiscountType("promo", 10)).toBe("promo");
+    expect(normalizeDiscountType("employee", 25)).toBe("employee");
+    expect(normalizeDiscountType("none", 0)).toBe("none");
+    expect(normalizeDiscountType(null, 50)).toBe("other");
+    expect(normalizeDiscountType("none", 50)).toBe("other");
+    expect(normalizeDiscountType("senior", 0)).toBe("senior");
+    expect(formatDiscountTypeLabel("senior")).toBe("Senior Citizen");
+    expect(formatDiscountTypeLabel("promo")).toBe("Promo / Voucher");
+    expect(formatDiscountTypeLabel("none")).toBe("");
+  });
+
+  it("subtracts discount from items gross sum when calculating fallback receiptGrossAmount", async () => {
+    const { receiptGrossAmount } = await import("./receiptUtils");
+    const gross = receiptGrossAmount({
+      amount: 0,
+      discount_amount: 20,
+      discount_type: "senior",
+      items: [
+        { name: "Meal", qty: 1, price: 100 },
+        { name: "Drink", qty: 1, price: 50 },
+      ],
+    });
+    expect(gross).toBe(130);
+  });
+
+  it("prefills discountAmount and discountType in buildPrefilledReceiptDraft and buildReceiptUploadFormPrefill", async () => {
+    const { buildPrefilledReceiptDraft, buildReceiptUploadFormPrefill } = await import("./receiptUtils");
+    const draft = buildPrefilledReceiptDraft({
+      id: 30,
+      receiptData: {
+        total_amount: 80,
+        discount_amount: 20,
+        discount_type: "student",
+        vat_classification: "vat",
+      },
+    });
+    expect(draft.discountAmount).toBe("20.00");
+    expect(draft.discountType).toBe("student");
+
+    const prefill = buildReceiptUploadFormPrefill({
+      id: 30,
+      receiptData: {
+        total_amount: 80,
+        discount_amount: 20,
+        discount_type: "student",
+        vat_classification: "vat",
+      },
+    });
+    expect(prefill.discount_amount).toBe("20.00");
+    expect(prefill.discount_type).toBe("student");
+  });
+});
+
+

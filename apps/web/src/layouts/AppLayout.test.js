@@ -1,22 +1,37 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import AppLayout from './AppLayout.vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createWebHistory } from 'vue-router'
 import { useNotificationStore } from '@/stores/notification'
 
+const dummy = { template: '<div>Page</div>' }
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', component: { template: '<div>Dashboard</div>' }, meta: { title: 'Dashboard' } },
-    { path: '/expenses', component: { template: '<div>Expenses</div>' }, meta: { title: 'Expenses' } },
+    { path: '/', component: dummy, meta: { title: 'Dashboard' } },
+    { path: '/dashboard', component: dummy },
+    { path: '/reimbursements', component: dummy },
+    { path: '/cash-advances', component: dummy },
+    { path: '/liquidations', component: dummy },
+    { path: '/my-expense', component: dummy },
+    { path: '/payout', component: dummy },
+    { path: '/expenses', component: dummy, meta: { title: 'Expenses' } },
   ]
 })
 
 describe('AppLayout Navigation Chrome', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ unread_count: 0, data: [] })
+    }))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('renders sidebar with canonical background Brand Primary #252578', async () => {
@@ -46,12 +61,6 @@ describe('AppLayout Navigation Chrome', () => {
   })
 
   it('handles notification count badge rendering and caps at 99+', async () => {
-    // Mock global fetch to prevent unhandled ECONNREFUSED in onMounted
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ unread_count: 0, data: [] })
-    }))
-
     const notifStore = useNotificationStore()
     const wrapper = mount(AppLayout, {
       global: { plugins: [router] }
@@ -75,7 +84,5 @@ describe('AppLayout Navigation Chrome', () => {
     notifStore.alerts = Array.from({ length: 105 }, (_, i) => ({ id: i + 1, read: false }))
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="notif-badge"]').text()).toBe('99+')
-
-    vi.unstubAllGlobals()
   })
 })

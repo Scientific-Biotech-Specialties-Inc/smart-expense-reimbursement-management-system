@@ -533,8 +533,6 @@ function dismiss() {
         <BaseToggleSwitch
           :model-value="isMockOcr"
           @update:model-value="setMockMode"
-          on-label="Mock OCR"
-          off-label="Real OCR"
           hint="Mock uploads file, fills instantly, skips OCR wait"
         />
         <p class="text-[11px] text-slate-400">

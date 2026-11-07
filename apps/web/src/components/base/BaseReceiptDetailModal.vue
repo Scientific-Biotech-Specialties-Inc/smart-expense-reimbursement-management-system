@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from "vue";
 import { formatAmount } from "@/utils/formatters";
+import { formatDiscountTypeLabel, normalizeDiscountType } from "@/utils/receiptUtils";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import ImagePreviewModal from "@/components/base/ImagePreviewModal.vue";
@@ -40,6 +41,21 @@ function handleImageClick() {
 }
 
 const hasItems = computed(() => props.receipt?.items?.length > 0);
+
+const discountAmount = computed(
+  () => Number(props.receipt?.discountAmount ?? props.receipt?.discount) || 0,
+);
+
+const discountType = computed(() =>
+  normalizeDiscountType(
+    props.receipt?.discountType ?? props.receipt?.discount_type,
+    discountAmount.value,
+  ),
+);
+
+const discountTypeLabel = computed(() =>
+  formatDiscountTypeLabel(discountType.value),
+);
 
 const subtotal = computed(() => {
   if (hasItems.value) {
@@ -147,6 +163,18 @@ const subtotal = computed(() => {
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Currency</p>
               <p class="text-sm text-slate-700">{{ receipt.currency || "PHP" }}</p>
             </div>
+            <div>
+              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Discount Type</p>
+              <slot name="discount-type-field">
+                <p class="text-sm text-slate-700">{{ discountTypeLabel }}</p>
+              </slot>
+            </div>
+            <div>
+              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Discount Amount</p>
+              <slot name="discount-amount-field">
+                <p class="text-sm text-slate-700">{{ formatAmount(discountAmount, receipt.currency || "PHP") }}</p>
+              </slot>
+            </div>
           </div>
 
           <!-- Items -->
@@ -169,6 +197,10 @@ const subtotal = computed(() => {
             <div class="flex justify-between text-sm">
               <span class="text-slate-400">Subtotal</span>
               <span class="text-slate-600">{{ formatAmount(subtotal, receipt.currency || "PHP") }}</span>
+            </div>
+            <div v-if="discountAmount > 0" class="flex justify-between text-sm text-emerald-700">
+              <span>Discount ({{ discountTypeLabel }})</span>
+              <span>-{{ formatAmount(discountAmount, receipt.currency || "PHP") }}</span>
             </div>
             <div class="flex justify-between text-sm">
               <span class="text-slate-400">VAT</span>
