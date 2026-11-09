@@ -85,4 +85,15 @@ describe('AppLayout Navigation Chrome', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="notif-badge"]').text()).toBe('99+')
   })
+
+  it('renders sidebar branding lockup as a link redirecting to /dashboard', () => {
+    const wrapper = mount(AppLayout, {
+      global: { plugins: [router] }
+    })
+    const brandLink = wrapper.find('[data-testid="sidebar-brand-link"]')
+    expect(brandLink.exists()).toBe(true)
+    expect(brandLink.attributes('href')).toBe('/dashboard')
+    expect(brandLink.find('img').exists()).toBe(true)
+    expect(brandLink.text()).toContain('SMART EXPENSE')
+  })
 })
