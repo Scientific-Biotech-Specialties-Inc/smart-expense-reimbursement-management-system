@@ -961,7 +961,7 @@ async function confirmAcknowledge() {
         This action will finalize your receipt of the funds.
       </p>
 
-      <div class="mt-6 flex justify-center gap-3">
+      <div class="mt-6 flex items-center justify-end gap-3">
         <BaseButton
           variant="secondary"
           class="px-5 min-h-10"

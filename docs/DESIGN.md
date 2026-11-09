@@ -283,8 +283,8 @@ The layout strictly adheres to an **8px grid system**. Arbitrary margins and pad
   - *High-Security Action:* Labeled password confirmation input field.
   - *Rejection Workflow:* Mandatory multiline reason textarea (`textarea` with placeholder and validation).
   - *Pre-Submission Confirmation:* Soft blue tinted summary card displaying key entity metadata.
-- **Centered Action Footer:**
-  - Horizontally centered at bottom of modal with button gap (`justify-center gap-3`).
+- **Right-Aligned Action Footer:**
+  - Horizontally aligned to the right side of modal with button gap (`justify-end gap-3`).
   - **Intrinsic Button Sizing Guardrail (Non-Negotiable)**: Action buttons in confirmation dialog footers must never occupy the entire parent container width (`flex-1` or unconstrained `w-full` are strictly prohibited on non-mobile viewports). Buttons must size intrinsically according to their label text plus canonical horizontal padding (`px-5 py-2.5` or `px-4 min-h-10`).
   - **Cancel Button:** Neutral light gray outline button.
   - **Primary Action Button:** Color-coded:

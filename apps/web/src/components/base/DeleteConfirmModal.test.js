@@ -35,4 +35,23 @@ describe('DeleteConfirmModal Idempotency Shield', () => {
     const confirmBtn = wrapper.findAll('button').find((b) => b.text().includes('Confirm Delete'))
     expect(confirmBtn.attributes('disabled')).toBeDefined()
   })
+
+  it('renders action buttons aligned to the right side of the modal (justify-end)', () => {
+    const wrapper = mount(DeleteConfirmModal, {
+      props: {
+        modelValue: true,
+      },
+      global: {
+        stubs: {
+          BaseModal: {
+            template: '<div><slot /></div>',
+          },
+        },
+      },
+    })
+
+    const footer = wrapper.find('.justify-end')
+    expect(footer.exists()).toBe(true)
+    expect(footer.classes()).toContain('justify-end')
+  })
 })
