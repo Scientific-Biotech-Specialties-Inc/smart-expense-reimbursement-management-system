@@ -98,11 +98,15 @@ async function logout() {
       ]"
     >
       <!-- Branding & Subsystem Lockup -->
-      <div
+      <RouterLink
+        to="/dashboard"
+        data-testid="sidebar-brand-link"
         :class="[
-          'flex items-center px-4 py-4 border-b border-white/10 min-h-[70px]',
+          'flex items-center px-4 py-4 border-b border-white/10 min-h-[70px] cursor-pointer transition-opacity hover:opacity-90 outline-none focus:outline-none',
           sidebarOpen ? 'justify-start gap-3' : 'justify-center',
         ]"
+        title="Dashboard"
+        @click="mobileOpen = false"
       >
         <img
           :src="sidebarOpen ? sbsiLogo : sbsiLogoShort"
@@ -123,7 +127,7 @@ async function logout() {
             MANAGEMENT SYSTEM
           </span>
         </div>
-      </div>
+      </RouterLink>
 
       <!-- Navigation Links -->
       <nav class="flex-1 px-3 py-4 overflow-y-auto scrollbar-thin space-y-1">

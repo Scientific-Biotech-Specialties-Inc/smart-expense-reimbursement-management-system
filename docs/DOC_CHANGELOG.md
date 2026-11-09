@@ -4,10 +4,10 @@
 **Client / Partner:** Science Biotech Specialties Inc. (SBSI) — [https://sbsi.com.ph/about-us/](https://sbsi.com.ph/about-us/)  
 **Academic Context:** 3rd & 4th Year Capstone Project (Capstone 1: Ended July 2026 · Capstone 2: September–December 2026)  
 **Date:** Nov 9, 2026  
-**Version:** 1.9.7  
+**Version:** 1.9.8  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** Nov 9, 2026 (Modal Action Button Standardization to Right-Aligned Layout)  
+**Last reconciled:** Nov 9, 2026 (Sidebar Branding Redirect to Dashboard)  
 **Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
 
 ---
@@ -21,6 +21,14 @@ All notable changes, architectural decisions, and documentation updates for the 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
+
+## [1.9.8] - Nov 9, 2026
+
+### Added
+- **Sidebar Branding Dashboard Navigation (`apps/web`):**
+  - Wrapped the SBSI logo and "Smart Expense Reimbursement Management System" text lockup in the sidebar header with `<RouterLink to="/dashboard">`.
+  - Added click handler to dismiss the mobile drawer (`mobileOpen = false`) when navigated on mobile devices.
+  - Added unit test in `apps/web/src/layouts/AppLayout.test.js` validating the brand link renders, targets `/dashboard`, and encloses the logo image and system label.
 
 ## [1.9.7] - Nov 9, 2026
 
