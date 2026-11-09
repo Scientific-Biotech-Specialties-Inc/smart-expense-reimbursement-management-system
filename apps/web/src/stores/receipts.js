@@ -694,12 +694,17 @@ export const useReceiptStore = defineStore("receipts", () => {
   }
 
   async function softDelete(id) {
-    const rx = receipts.value.find((r) => r.id === id);
-    if (!rx) return;
+    const rx = receipts.value.find(
+      (r) => r.id === id || r.dbId === id || String(r.dbId) === String(id),
+    );
+    const targetDbId =
+      rx?.dbId ??
+      (typeof id === "number" ? id : parseInt(String(id).replace(/\D/g, ""), 10));
+    if (!targetDbId) return;
 
     try {
       const response = await apiFetch(
-        `/api/serms/reimbursements/receipts/${rx.dbId}`,
+        `/api/serms/reimbursements/receipts/${targetDbId}`,
         {
           method: "DELETE",
           credentials: "include",
@@ -708,13 +713,17 @@ export const useReceiptStore = defineStore("receipts", () => {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(
+        const message =
           errData.message ||
-            `Failed to delete receipt (Status ${response.status})`,
-        );
+          errData.errors?.receipt?.[0] ||
+          (errData.errors && Object.values(errData.errors)[0]?.[0]) ||
+          `Failed to delete receipt (Status ${response.status})`;
+        throw new Error(message);
       }
 
-      rx.isDeleted = true;
+      if (rx) {
+        rx.isDeleted = true;
+      }
       const notif = useNotificationStore();
       if (notif) notif.success("Receipt deleted successfully.");
     } catch (error) {
