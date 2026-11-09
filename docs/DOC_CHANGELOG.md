@@ -3,11 +3,11 @@
 **Project:** Smart Expense & Reimbursement Management System (SERMS)  
 **Client / Partner:** Science Biotech Specialties Inc. (SBSI) — [https://sbsi.com.ph/about-us/](https://sbsi.com.ph/about-us/)  
 **Academic Context:** 3rd & 4th Year Capstone Project (Capstone 1: Ended July 2026 · Capstone 2: September–December 2026)  
-**Date:** Nov 7, 2026  
-**Version:** 1.9.6  
+**Date:** Nov 9, 2026  
+**Version:** 1.9.7  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** Nov 7, 2026 (Receipt Discount UI, Database Persistence, and End-to-End OCR Discount Extraction & Reconciliation)  
+**Last reconciled:** Nov 9, 2026 (Modal Action Button Standardization to Right-Aligned Layout)  
 **Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
 
 ---
@@ -21,6 +21,13 @@ All notable changes, architectural decisions, and documentation updates for the 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
+
+## [1.9.7] - Nov 9, 2026
+
+### Changed
+- **Modal Action Button Layout Standardization (`apps/web` & `docs/DESIGN.md`):**
+  - Updated confirmation modal dialog action button containers from horizontally centered (`justify-center`) to right-aligned (`justify-end gap-3`) across `DeleteConfirmModal.vue`, `ConfirmModal.vue`, and `CashAdvanceDetailsModal.vue` acknowledge dialogs.
+  - Aligned all dialogs with `docs/DESIGN.md` Section VI.5 ("Right-Aligned Action Footer") and updated `DialogFooter.vue` design guidelines to mandate right-aligned footers (`sm:justify-end`) consistently across all modal types.
 
 ## [1.9.6] - Nov 7, 2026
 

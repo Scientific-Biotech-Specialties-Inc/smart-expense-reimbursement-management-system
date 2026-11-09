@@ -76,8 +76,8 @@ function handleConfirm() {
         </div>
       </div>
 
-      <!-- Action Footer with BaseButton -->
-      <div class="flex justify-center gap-3 mt-8">
+      <!-- Right-Aligned Action Footer with BaseButton -->
+      <div class="flex items-center justify-end gap-3 mt-8">
         <BaseButton
           variant="secondary"
           class="px-5 min-h-10"
