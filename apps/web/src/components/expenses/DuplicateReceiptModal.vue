@@ -1,11 +1,13 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import { AlertTriangle, RefreshCw } from 'lucide-vue-next';
 
 const authStore = useAuthStore();
 const { addToast } = useToast();
+const router = useRouter();
 
 const showModal = ref(false);
 const similarityScore = ref(0);
@@ -32,6 +34,21 @@ function handleDuplicateEvent(e) {
     message: customMessage.value || 'Duplicate receipt detected.', 
     type: 'error' 
   });
+}
+
+function handleCancel() {
+  showModal.value = false;
+
+  // Dispatch an event to remove the rejected duplicate from the UI
+  if (duplicateReceiptId.value) {
+    window.dispatchEvent(new CustomEvent('remove-duplicate-receipt', {
+      detail: { receiptId: duplicateReceiptId.value }
+    }));
+  }
+
+  if (router) {
+    router.push('/reimbursements');
+  }
 }
 
 function handleUploadNew() {
@@ -78,7 +95,10 @@ function handleUploadNew() {
         </div>
         
         <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
-          <button @click="handleUploadNew" class="btn btn-primary flex items-center gap-2">
+          <button type="button" @click="handleCancel" class="btn btn-secondary px-4 py-2">
+            Cancel
+          </button>
+          <button type="button" @click="handleUploadNew" class="btn btn-primary flex items-center gap-2">
             <RefreshCw class="w-4 h-4" />
             Upload New One
           </button>

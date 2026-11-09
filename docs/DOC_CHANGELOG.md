@@ -28,6 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Modal Action Button Layout Standardization (`apps/web` & `docs/DESIGN.md`):**
   - Updated confirmation modal dialog action button containers from horizontally centered (`justify-center`) to right-aligned (`justify-end gap-3`) across `DeleteConfirmModal.vue`, `ConfirmModal.vue`, and `CashAdvanceDetailsModal.vue` acknowledge dialogs.
   - Aligned all dialogs with `docs/DESIGN.md` Section VI.5 ("Right-Aligned Action Footer") and updated `DialogFooter.vue` design guidelines to mandate right-aligned footers (`sm:justify-end`) consistently across all modal types.
+- **Duplicate Receipt Modal Cancel Action (`apps/web`):**
+  - Added "Cancel" button beside "Upload New One" in `DuplicateReceiptModal.vue`.
+  - Added `handleCancel()` to close the modal, dispatch `remove-duplicate-receipt` to clean up the rejected duplicate from the UI without triggering the file uploader dialog, and redirect the user back to `/reimbursements`.
+  - Added unit test suite `apps/web/src/components/expenses/DuplicateReceiptModal.spec.js` covering modal event trigger, cancel action with `/reimbursements` navigation, and upload new action.
 
 ## [1.9.6] - Nov 7, 2026
 
