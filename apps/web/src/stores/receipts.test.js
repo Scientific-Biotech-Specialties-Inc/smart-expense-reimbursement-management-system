@@ -645,4 +645,51 @@ describe("useReceiptStore", () => {
     const orderedAmounts = store.visibleReceipts.map((r) => r.amount);
     expect(orderedAmounts).toEqual([3000, 4000]);
   });
+
+  describe("softDelete", () => {
+    it("successfully soft-deletes a receipt by string id or dbId", async () => {
+      apiFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: "Receipt deleted successfully." }),
+      });
+
+      const store = useReceiptStore();
+      store.receipts = [
+        {
+          id: "RCPT-2026-005",
+          dbId: 5,
+          isDeleted: false,
+        },
+      ];
+
+      await store.softDelete("RCPT-2026-005");
+
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/serms/reimbursements/receipts/5",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+      expect(store.receipts[0].isDeleted).toBe(true);
+    });
+
+    it("throws an Error with 422 message when deleting receipt attached to reimbursement", async () => {
+      const errorMessage = "Cannot delete a receipt that is attached to a reimbursement.";
+      apiFetch.mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: async () => ({ message: errorMessage }),
+      });
+
+      const store = useReceiptStore();
+      store.receipts = [
+        {
+          id: "RCPT-2026-005",
+          dbId: 5,
+          isDeleted: false,
+        },
+      ];
+
+      await expect(store.softDelete("RCPT-2026-005")).rejects.toThrow(errorMessage);
+      expect(store.receipts[0].isDeleted).toBe(false);
+    });
+  });
 });
