@@ -1,5 +1,4 @@
 <script setup>
-import { computed } from "vue";
 import {
   FileText,
   Image as ImageIcon,
@@ -41,10 +40,6 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["remove-receipt", "update:receipts"]);
-
-const hasUploadingReceipts = computed(() =>
-  props.receipts.some((receipt) => receipt.isUploading || receipt.isProcessing),
-);
 
 function getCategoryOptions() {
   return props.categories;
@@ -234,18 +229,6 @@ function removeReceiptItem(receipt, index) {
         Scanned Receipts
       </h2>
     </div>
-
-    <div
-      v-if="hasUploadingReceipts"
-      class="mb-5 flex items-center gap-2 rounded-xl border border-accent/20 bg-accent-50 px-4 py-3 text-xs font-bold uppercase tracking-widest text-accent"
-    >
-      <span
-        class="h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin"
-        aria-hidden="true"
-      />
-      Uploading and extracting receipt data...
-    </div>
-
     <!-- One block per receipt -->
     <div class="flex flex-col gap-8">
       <div

@@ -231,4 +231,27 @@ describe("ScannedReceiptsList — Required Field Highlighting", () => {
       expect(receipt.amount).toBe("120");
     });
   });
+
+  describe("Uploading banner removal", () => {
+    it("does not render the top uploading and extracting banner during receipt upload or processing", () => {
+      const wrapper = mount(ScannedReceiptsList, {
+        props: {
+          receipts: [
+            {
+              id: "r-1",
+              fileName: "receipt.jpg",
+              amount: "100.00",
+              items: [],
+              isUploading: true,
+              isProcessing: true,
+            },
+          ],
+          categories: [{ id: 1, name: "Meals" }],
+        },
+      });
+
+      expect(wrapper.text()).not.toContain("Uploading and extracting receipt data...");
+    });
+  });
 });
+
