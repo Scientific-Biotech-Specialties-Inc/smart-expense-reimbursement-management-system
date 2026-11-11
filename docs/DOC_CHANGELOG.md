@@ -3,11 +3,11 @@
 **Project:** Smart Expense & Reimbursement Management System (SERMS)  
 **Client / Partner:** Science Biotech Specialties Inc. (SBSI) — [https://sbsi.com.ph/about-us/](https://sbsi.com.ph/about-us/)  
 **Academic Context:** 3rd & 4th Year Capstone Project (Capstone 1: Ended July 2026 · Capstone 2: September–December 2026)  
-**Date:** Nov 9, 2026  
-**Version:** 1.9.8  
+**Date:** Nov 11, 2026  
+**Version:** 1.9.9  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** Nov 9, 2026 (Sidebar Branding Redirect to Dashboard)  
+**Last reconciled:** Nov 11, 2026 (Cash Advance Modal Document Name & Download Fix)  
 **Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
 
 ---
@@ -21,6 +21,16 @@ All notable changes, architectural decisions, and documentation updates for the 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
+
+## [1.9.9] - Nov 11, 2026
+
+### Fixed
+- **Cash Advance View Modal Document Name Truncation & Download (`apps/web`):**
+  - Resolved issue where clicking and downloading an attached document in `CashAdvanceDetailsModal.vue` caused the filename to be hidden or truncated.
+  - Implemented safe `documentDisplayName` and `hasDocument` computed properties that preserve the filename and prevent disappearing text when `store.fetchDocument()` resolves or when `file_name` is absent in API payloads.
+  - Added truncation formatting (`truncate max-w-[260px] sm:max-w-[420px]`, `shrink-0` on icons, `max-w-full`, and `:title="documentDisplayName"`) to ensure long document filenames do not overflow or push action icons off-screen.
+  - Integrated `getFileUrl()` from `@/utils/fileUtils` for robust Supabase storage URL resolution, added loading indicator state (`Loader2`), keyboard accessibility handlers (`@keydown.enter`, `@keydown.space`), and error toast handling.
+  - Added automated test cases in `CashAdvanceDetailsModal.test.js` covering document name truncation, preservation on download click, and fallback behavior.
 
 ## [1.9.8] - Nov 9, 2026
 
