@@ -358,7 +358,7 @@ function attachmentFileSize(file) {
       </div>
     </div>
 
-    <!-- Mini Unified Roadmap (serpentine progress snapshot) -->
+    <!-- Mini Unified Roadmap (horizontal progress snapshot) -->
     <UnifiedRoadmapStepper
       v-if="selectedAdvance"
       :cash-advance="roadmapCashAdvance"
@@ -367,7 +367,6 @@ function attachmentFileSize(file) {
       :penalties="roadmapPenalties"
       :overpayment-amount="overpaymentAmount"
       :aging="roadmapAging"
-      layout="serpentine"
       class="!p-2"
     />
 

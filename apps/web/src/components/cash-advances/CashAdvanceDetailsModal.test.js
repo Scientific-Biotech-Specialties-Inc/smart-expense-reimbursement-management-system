@@ -95,7 +95,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
     expect(mockExportReport).toHaveBeenCalledWith("cash-advance", 21);
   });
 
-  it("passes layout='serpentine' to UnifiedRoadmapStepper when overpayment exists (Admin)", async () => {
+  it("passes layout='horizontal' to UnifiedRoadmapStepper when overpayment exists (Admin)", async () => {
     mockAuth.isAdmin = true;
     const wrapper = mount(CashAdvanceDetailsModal, {
       props: {
@@ -124,10 +124,10 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
     });
 
     const stepper = wrapper.find('[data-testid="stepper"]');
-    expect(stepper.attributes("data-layout")).toBe("serpentine");
+    expect(stepper.attributes("data-layout")).toBe("horizontal");
   });
 
-  it("passes layout='serpentine' to UnifiedRoadmapStepper when overpayment exists (Employee)", async () => {
+  it("passes layout='horizontal' to UnifiedRoadmapStepper when overpayment exists (Employee)", async () => {
     mockAuth.isAdmin = false;
     const wrapper = mount(CashAdvanceDetailsModal, {
       props: {
@@ -156,7 +156,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
     });
 
     const stepper = wrapper.find('[data-testid="stepper"]');
-    expect(stepper.attributes("data-layout")).toBe("serpentine");
+    expect(stepper.attributes("data-layout")).toBe("horizontal");
   });
 
   it("renders BaseAuditTrail in Admin view", () => {

@@ -181,10 +181,7 @@ const roadmapOverpayment = computed(() => {
   return Math.max(0, total - bal);
 });
 
-const roadmapLayout = computed(() => {
-  if (roadmapOverpayment.value > 0) return "serpentine";
-  return "horizontal";
-});
+const roadmapLayout = computed(() => "horizontal");
 
 function handleRoadmapNavigate(payload) {
   const step = payload?.step;
