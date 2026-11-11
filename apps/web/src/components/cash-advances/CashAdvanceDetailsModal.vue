@@ -12,6 +12,7 @@ import DecisionConfirmationModal from "@/components/base/DecisionConfirmationMod
 import UnifiedRoadmapStepper from "@/components/base/UnifiedRoadmapStepper.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
 import { formatPeso, formatDate } from "@/utils/formatters";
+import { getFileUrl } from "@/utils/fileUtils";
 import {
   X,
   CheckCircle,
@@ -21,6 +22,7 @@ import {
   ShieldCheck,
   RotateCcw,
   FileText,
+  Loader2,
 } from "lucide-vue-next";
 
 const props = defineProps({
@@ -218,6 +220,34 @@ const adminPassword = ref("");
 
 const documentData = ref(null);
 const isLoadingDocument = ref(false);
+
+const hasDocument = computed(() => {
+  return Boolean(
+    documentData.value?.file_name ||
+    documentData.value?.file_path ||
+    documentData.value?.file_url ||
+    props.record?.documentFileName ||
+    props.record?.document_file_name ||
+    props.record?.document ||
+    props.record?.documentUrl ||
+    props.record?.document_url ||
+    props.record?.document_path ||
+    props.record?.file_path,
+  );
+});
+
+const documentDisplayName = computed(() => {
+  return (
+    documentData.value?.file_name ||
+    documentData.value?.fileName ||
+    documentData.value?.data?.file_name ||
+    props.record?.documentFileName ||
+    props.record?.document_file_name ||
+    props.record?.document?.file_name ||
+    props.record?.document?.fileName ||
+    (hasDocument.value ? "Document Attached" : "")
+  );
+});
 const isOwnSubmission = computed(() => {
   const currentUserId = auth.user?.id;
   const ownerId =
@@ -262,6 +292,13 @@ watch(
         } catch {}
       }
     }
+  },
+);
+
+watch(
+  () => props.record,
+  (newRec) => {
+    documentData.value = newRec?.document || null;
   },
 );
 
@@ -318,7 +355,10 @@ async function downloadDocument() {
   if (!documentData.value && props.record.id) {
     isLoadingDocument.value = true;
     try {
-      documentData.value = await store.fetchDocument(props.record.id);
+      const fetched = await store.fetchDocument(props.record.id);
+      if (fetched) {
+        documentData.value = fetched;
+      }
     } catch (error) {
       console.error("Failed to load document", error);
     } finally {
@@ -326,22 +366,37 @@ async function downloadDocument() {
     }
   }
 
-  const fileName =
-    documentData.value?.file_name ||
-    props.record.documentFileName ||
-    "document.pdf";
-  const fileUrl =
+  const fileName = documentDisplayName.value || "document.pdf";
+  const rawPath =
+    documentData.value?.file_path ||
+    props.record?.document?.file_path ||
     documentData.value?.file_url ||
-    props.record.documentUrl ||
+    props.record?.documentUrl ||
+    props.record?.document_path ||
+    props.record?.file_path;
+
+  const fileUrl =
+    getFileUrl(rawPath, "cash_advances") ||
+    documentData.value?.file_url ||
+    props.record?.documentUrl ||
     "/mock_receipt.png";
 
-  const a = document.createElement("a");
-  a.href = fileUrl;
-  a.download = fileName;
-  a.target = "_blank";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  try {
+    const a = document.createElement("a");
+    a.href = fileUrl;
+    a.download = fileName;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (error) {
+    console.error("Download failed", error);
+    addToast({
+      message: "Failed to download document.",
+      type: "error",
+    });
+  }
 }
 
 function requestConfirmation(action) {
@@ -582,15 +637,22 @@ async function confirmAcknowledge() {
           </section>
 
           <!-- Document Attachment -->
-          <section v-if="documentData || record.documentFileName" class="pt-2 border-t border-slate-100">
+          <section v-if="hasDocument" class="pt-2 border-t border-slate-100">
             <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Document</p>
             <a
-              class="inline-flex items-center gap-2 text-sm text-primary hover:underline cursor-pointer"
-              @click="downloadDocument"
+              role="button"
+              tabindex="0"
+              class="inline-flex max-w-full items-center gap-2 text-sm text-primary hover:underline cursor-pointer group"
+              :class="{ 'opacity-70 pointer-events-none': isLoadingDocument }"
+              :title="documentDisplayName"
+              @click.stop.prevent="downloadDocument"
+              @keydown.enter.stop.prevent="downloadDocument"
+              @keydown.space.stop.prevent="downloadDocument"
             >
-              <FileText class="w-3.5 h-3.5" />
-              <span>{{ documentData ? documentData.file_name : record.documentFileName }}</span>
-              <Download class="w-3 h-3" />
+              <FileText class="w-3.5 h-3.5 shrink-0" />
+              <span class="truncate max-w-[260px] sm:max-w-[420px]">{{ documentDisplayName }}</span>
+              <Loader2 v-if="isLoadingDocument" class="w-3 h-3 shrink-0 animate-spin" />
+              <Download v-else class="w-3 h-3 shrink-0" />
             </a>
           </section>
 
@@ -812,15 +874,22 @@ async function confirmAcknowledge() {
           </section>
 
           <!-- Document -->
-          <section v-if="documentData || record.documentFileName" class="pt-2 border-t border-slate-100">
+          <section v-if="hasDocument" class="pt-2 border-t border-slate-100">
             <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Document</p>
             <a
-              class="inline-flex items-center gap-2 text-sm text-primary hover:underline cursor-pointer"
-              @click="downloadDocument"
+              role="button"
+              tabindex="0"
+              class="inline-flex max-w-full items-center gap-2 text-sm text-primary hover:underline cursor-pointer group"
+              :class="{ 'opacity-70 pointer-events-none': isLoadingDocument }"
+              :title="documentDisplayName"
+              @click.stop.prevent="downloadDocument"
+              @keydown.enter.stop.prevent="downloadDocument"
+              @keydown.space.stop.prevent="downloadDocument"
             >
-              <FileText class="w-3.5 h-3.5" />
-              <span>{{ documentData ? documentData.file_name : record.documentFileName }}</span>
-              <Download class="w-3 h-3" />
+              <FileText class="w-3.5 h-3.5 shrink-0" />
+              <span class="truncate max-w-[260px] sm:max-w-[420px]">{{ documentDisplayName }}</span>
+              <Loader2 v-if="isLoadingDocument" class="w-3 h-3 shrink-0 animate-spin" />
+              <Download v-else class="w-3 h-3 shrink-0" />
             </a>
           </section>
 
