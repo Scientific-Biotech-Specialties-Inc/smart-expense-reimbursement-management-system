@@ -15,10 +15,6 @@ vi.mock("@/composables/useToast", () => ({
   useToast: () => ({ addToast: addToastMock }),
 }));
 
-vi.mock("@/composables/useOcrMode", () => ({
-  useOcrMode: () => ({ isMockOcr: ref(false) }),
-}));
-
 describe("useReceiptUploads — OCR missing fields notification", () => {
   beforeEach(() => {
     vi.clearAllMocks();

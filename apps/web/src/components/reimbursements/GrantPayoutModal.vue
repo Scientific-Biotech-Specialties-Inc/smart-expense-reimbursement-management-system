@@ -1,10 +1,14 @@
 <script setup>
 import { ref, computed, watch } from "vue";
+import { getActivePinia } from "pinia";
+import { useAuthStore } from "@/stores/auth";
 import BaseModal from "@/components/base/BaseModal.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import { formatAmount, formatDate } from "@/utils/formatters";
-import { Wallet, AlertTriangle, Eye, EyeOff, X } from "lucide-vue-next";
+import { Wallet, AlertTriangle, Eye, EyeOff, X, CheckCircle2 } from "lucide-vue-next";
+
+const auth = getActivePinia() ? useAuthStore() : null;
 
 const props = defineProps({
   isOpen: {
@@ -42,10 +46,10 @@ watch(
     if (open) {
       isConfirmStep.value = false;
       showPassword.value = false;
-      grantedBy.value = props.defaultGrantedBy || "Finance / Admin";
+      grantedBy.value = props.defaultGrantedBy || auth?.user?.name || "Finance / Admin";
       payoutMethod.value = "Cash";
       payoutMethodOther.value = "";
-      granterSignature.value = "";
+      granterSignature.value = auth?.user?.signature || "";
       password.value = "";
     }
   },
@@ -205,8 +209,8 @@ function handleConfirm() {
           </div>
         </div>
 
-        <!-- Granter Signature Pad (G2-046) -->
-        <div class="pt-2 border-t border-slate-100">
+        <!-- Granter Signature Pad (G2-046 & G2-109) -->
+        <div class="pt-2 border-t border-slate-100 space-y-1.5 flex flex-col items-center">
           <BaseSignaturePad
             v-model="granterSignature"
             label="Granter's Signature *"

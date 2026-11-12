@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { formatAmount, formatDate } from "@/utils/formatters";
 import BaseButton from "@/components/base/BaseButton.vue";
@@ -7,6 +7,7 @@ import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
 import { useReportExport } from "@/composables/useReportExport";
+import { useHorizontalScroll } from "@/composables/useHorizontalScroll";
 import {
   X,
   FileText,
@@ -42,6 +43,22 @@ const emit = defineEmits([
 
 const auth = useAuthStore();
 const { isExporting, exportReport } = useReportExport();
+
+const scrollContainerRef = ref(null);
+const { canScrollLeft, canScrollRight, scrollToActive } = useHorizontalScroll(
+  scrollContainerRef,
+  {
+    activeSelector: '[aria-current="step"]',
+    autoScrollOnMount: true,
+  },
+);
+
+watch(
+  () => props.viewingRecord?.status,
+  () => {
+    scrollToActive();
+  },
+);
 
 const activeReceiptItems = computed(() => props.viewingRecord?.receipts || []);
 const isOwnSubmission = computed(() => {
@@ -121,94 +138,129 @@ function categoryName(record) {
           </div>
 
           <template v-else>
-            <!-- Timeline -->
-            <section class="relative">
-              <!-- Horizontal line -->
-              <div class="absolute top-4 -translate-y-1/2 left-[16.66%] right-[16.66%] h-0.5 bg-slate-100"></div>
+            <!-- Timeline with horizontal scroll on narrow/overflow viewports -->
+            <section class="relative w-full" aria-label="Reimbursement Timeline">
+              <!-- Left dynamic edge fade (only when canScrollLeft) -->
+              <div
+                v-show="canScrollLeft"
+                class="pointer-events-none absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-white to-transparent z-20 transition-opacity duration-200"
+                aria-hidden="true"
+              ></div>
 
-              <div class="flex justify-between gap-2">
-                <!-- Step 1: Submitted -->
-                <div class="relative flex flex-col items-center text-center flex-1">
-                  <div class="h-8 w-8 rounded-full bg-emerald-500 text-white flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2">
-                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                  </div>
-                  <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Submitted</p>
-                  <p class="text-xs text-slate-700 font-medium truncate max-w-full px-1">
-                    {{ viewingRecord.user?.name || viewingRecord.submitted_by_name || "Employee" }}
-                  </p>
-                </div>
+              <!-- Right dynamic edge fade (only when canScrollRight) -->
+              <div
+                v-show="canScrollRight"
+                class="pointer-events-none absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-white to-transparent z-20 transition-opacity duration-200"
+                aria-hidden="true"
+              ></div>
 
-                <!-- Step 2: Under Review -->
-                <div class="relative flex flex-col items-center text-center flex-1">
+              <!-- Scrollable Viewport: only scrolls if content overflows container -->
+              <div
+                ref="scrollContainerRef"
+                class="relative w-full overflow-x-auto scrollbar-none py-1"
+                tabindex="0"
+                aria-label="Reimbursement steps roadmap"
+              >
+                <!-- Inner track with responsive min-width: fills full width on large screens, scrolls on narrow screens -->
+                <div class="relative flex items-start justify-between min-w-full" style="min-width: 440px;">
+                  <!-- Horizontal connector line -->
+                  <div class="pointer-events-none absolute top-4 -translate-y-1/2 left-[12.5%] right-[12.5%] h-0.5 bg-slate-100 z-0" aria-hidden="true"></div>
+
+                  <!-- Step 1: Submitted -->
                   <div
-                    :class="[
-                      'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
-                      ['approved', 'granted', 'rejected'].includes(normalizeStatus(viewingRecord.status))
-                        ? 'bg-emerald-500 text-white'
-                        : normalizeStatus(viewingRecord.status) === 'pending'
-                          ? 'bg-amber-400 text-white animate-pulse'
+                    class="relative flex flex-col items-center text-center flex-1 min-w-[110px] px-1 z-10"
+                    :aria-current="normalizeStatus(viewingRecord.status) === 'draft' ? 'step' : undefined"
+                  >
+                    <div class="h-8 w-8 rounded-full bg-emerald-500 text-white flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                    </div>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Submitted</p>
+                    <p class="text-xs text-slate-700 font-medium truncate max-w-full px-1">
+                      {{ viewingRecord.user?.name || viewingRecord.submitted_by_name || "Employee" }}
+                    </p>
+                  </div>
+
+                  <!-- Step 2: Under Review -->
+                  <div
+                    class="relative flex flex-col items-center text-center flex-1 min-w-[110px] px-1 z-10"
+                    :aria-current="normalizeStatus(viewingRecord.status) === 'pending' ? 'step' : undefined"
+                  >
+                    <div
+                      :class="[
+                        'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
+                        ['approved', 'granted', 'rejected'].includes(normalizeStatus(viewingRecord.status))
+                          ? 'bg-emerald-500 text-white'
+                          : normalizeStatus(viewingRecord.status) === 'pending'
+                            ? 'bg-amber-400 text-white animate-pulse'
+                            : 'bg-slate-200 text-slate-400'
+                      ]"
+                    >
+                      <svg v-if="['approved', 'granted', 'rejected'].includes(normalizeStatus(viewingRecord.status))" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      <svg v-else-if="normalizeStatus(viewingRecord.status) === 'pending'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3" /><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none" /></svg>
+                      <span v-else class="text-[10px] font-bold">2</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Review</p>
+                    <p class="text-xs font-medium truncate max-w-full px-1"
+                      :class="normalizeStatus(viewingRecord.status) === 'pending' ? 'text-amber-600' : 'text-slate-700'"
+                    >
+                      {{ normalizeStatus(viewingRecord.status) === 'pending' ? 'In Progress' : 'Reviewed' }}
+                    </p>
+                  </div>
+
+                  <!-- Step 3: Decision -->
+                  <div
+                    class="relative flex flex-col items-center text-center flex-1 min-w-[110px] px-1 z-10"
+                    :aria-current="['approved', 'rejected'].includes(normalizeStatus(viewingRecord.status)) ? 'step' : undefined"
+                  >
+                    <div
+                      :class="[
+                        'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
+                        normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted'
+                          ? 'bg-emerald-500 text-white'
+                          : normalizeStatus(viewingRecord.status) === 'rejected'
+                            ? 'bg-red-500 text-white'
+                            : 'bg-slate-200 text-slate-400'
+                      ]"
+                    >
+                      <svg v-if="normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      <svg v-else-if="normalizeStatus(viewingRecord.status) === 'rejected'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                      <span v-else class="text-[10px] font-bold">3</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Decision</p>
+                    <p class="text-xs font-medium truncate max-w-full px-1"
+                      :class="[
+                        normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted' ? 'text-emerald-600' : '',
+                        normalizeStatus(viewingRecord.status) === 'rejected' ? 'text-red-600' : '',
+                        normalizeStatus(viewingRecord.status) === 'pending' ? 'text-slate-400' : '',
+                      ]"
+                    >
+                      {{ normalizeStatus(viewingRecord.status) === 'approved' ? 'Approved' : normalizeStatus(viewingRecord.status) === 'granted' ? 'Granted' : normalizeStatus(viewingRecord.status) === 'rejected' ? 'Rejected' : 'Awaiting' }}
+                    </p>
+                  </div>
+
+                  <!-- Step 4: Released -->
+                  <div
+                    class="relative flex flex-col items-center text-center flex-1 min-w-[110px] px-1 z-10"
+                    :aria-current="normalizeStatus(viewingRecord.status) === 'granted' ? 'step' : undefined"
+                  >
+                    <div
+                      :class="[
+                        'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
+                        normalizeStatus(viewingRecord.status) === 'granted'
+                          ? 'bg-emerald-500 text-white'
                           : 'bg-slate-200 text-slate-400'
-                    ]"
-                  >
-                    <svg v-if="['approved', 'granted', 'rejected'].includes(normalizeStatus(viewingRecord.status))" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                    <svg v-else-if="normalizeStatus(viewingRecord.status) === 'pending'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3" /><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none" /></svg>
-                    <span v-else class="text-[10px] font-bold">2</span>
+                      ]"
+                    >
+                      <svg v-if="normalizeStatus(viewingRecord.status) === 'granted'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      <span v-else class="text-[10px] font-bold">4</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Released</p>
+                    <p class="text-xs font-medium truncate max-w-full px-1"
+                      :class="normalizeStatus(viewingRecord.status) === 'granted' ? 'text-emerald-600' : 'text-slate-400'"
+                    >
+                      {{ normalizeStatus(viewingRecord.status) === 'granted' ? 'Disbursed' : 'Pending' }}
+                    </p>
                   </div>
-                  <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Review</p>
-                  <p class="text-xs font-medium truncate max-w-full px-1"
-                    :class="normalizeStatus(viewingRecord.status) === 'pending' ? 'text-amber-600' : 'text-slate-700'"
-                  >
-                    {{ normalizeStatus(viewingRecord.status) === 'pending' ? 'In Progress' : 'Reviewed' }}
-                  </p>
-                </div>
-
-                <!-- Step 3: Decision -->
-                <div class="relative flex flex-col items-center text-center flex-1">
-                  <div
-                    :class="[
-                      'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
-                      normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted'
-                        ? 'bg-emerald-500 text-white'
-                        : normalizeStatus(viewingRecord.status) === 'rejected'
-                          ? 'bg-red-500 text-white'
-                          : 'bg-slate-200 text-slate-400'
-                    ]"
-                  >
-                    <svg v-if="normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                    <svg v-else-if="normalizeStatus(viewingRecord.status) === 'rejected'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                    <span v-else class="text-[10px] font-bold">3</span>
-                  </div>
-                  <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Decision</p>
-                  <p class="text-xs font-medium truncate max-w-full px-1"
-                    :class="[
-                      normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted' ? 'text-emerald-600' : '',
-                      normalizeStatus(viewingRecord.status) === 'rejected' ? 'text-red-600' : '',
-                      normalizeStatus(viewingRecord.status) === 'pending' ? 'text-slate-400' : '',
-                    ]"
-                  >
-                    {{ normalizeStatus(viewingRecord.status) === 'approved' ? 'Approved' : normalizeStatus(viewingRecord.status) === 'granted' ? 'Granted' : normalizeStatus(viewingRecord.status) === 'rejected' ? 'Rejected' : 'Awaiting' }}
-                  </p>
-                </div>
-
-                <!-- Step 4: Released -->
-                <div class="relative flex flex-col items-center text-center flex-1">
-                  <div
-                    :class="[
-                      'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
-                      normalizeStatus(viewingRecord.status) === 'granted'
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-slate-200 text-slate-400'
-                    ]"
-                  >
-                    <svg v-if="normalizeStatus(viewingRecord.status) === 'granted'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                    <span v-else class="text-[10px] font-bold">4</span>
-                  </div>
-                  <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Released</p>
-                  <p class="text-xs font-medium truncate max-w-full px-1"
-                    :class="normalizeStatus(viewingRecord.status) === 'granted' ? 'text-emerald-600' : 'text-slate-400'"
-                  >
-                    {{ normalizeStatus(viewingRecord.status) === 'granted' ? 'Disbursed' : 'Pending' }}
-                  </p>
                 </div>
               </div>
             </section>

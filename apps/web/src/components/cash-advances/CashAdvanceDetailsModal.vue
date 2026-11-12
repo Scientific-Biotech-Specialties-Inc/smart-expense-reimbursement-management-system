@@ -11,7 +11,9 @@ import StatusBadge from "@/components/base/StatusBadge.vue";
 import DecisionConfirmationModal from "@/components/base/DecisionConfirmationModal.vue";
 import UnifiedRoadmapStepper from "@/components/base/UnifiedRoadmapStepper.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
+import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import { formatPeso, formatDate } from "@/utils/formatters";
+import { getFileUrl } from "@/utils/fileUtils";
 import {
   X,
   CheckCircle,
@@ -21,6 +23,7 @@ import {
   ShieldCheck,
   RotateCcw,
   FileText,
+  Loader2,
 } from "lucide-vue-next";
 
 const props = defineProps({
@@ -181,10 +184,7 @@ const roadmapOverpayment = computed(() => {
   return Math.max(0, total - bal);
 });
 
-const roadmapLayout = computed(() => {
-  if (roadmapOverpayment.value > 0) return "serpentine";
-  return "horizontal";
-});
+const roadmapLayout = computed(() => "horizontal");
 
 function handleRoadmapNavigate(payload) {
   const step = payload?.step;
@@ -209,9 +209,7 @@ function handleRoadmapNavigate(payload) {
   }
 }
 
-const signatureCanvas = ref(null);
-const isSigning = ref(false);
-const signatureStarted = ref(false);
+const acknowledgementSignature = ref(auth?.user?.signature || "");
 const adminReviewNotes = ref("");
 const confirmationAction = ref("");
 const isAdminDecisionSubmitting = ref(false);
@@ -221,8 +219,36 @@ const adminPassword = ref("");
 
 const documentData = ref(null);
 const isLoadingDocument = ref(false);
+
+const hasDocument = computed(() => {
+  return Boolean(
+    documentData.value?.file_name ||
+    documentData.value?.file_path ||
+    documentData.value?.file_url ||
+    props.record?.documentFileName ||
+    props.record?.document_file_name ||
+    props.record?.document ||
+    props.record?.documentUrl ||
+    props.record?.document_url ||
+    props.record?.document_path ||
+    props.record?.file_path,
+  );
+});
+
+const documentDisplayName = computed(() => {
+  return (
+    documentData.value?.file_name ||
+    documentData.value?.fileName ||
+    documentData.value?.data?.file_name ||
+    props.record?.documentFileName ||
+    props.record?.document_file_name ||
+    props.record?.document?.file_name ||
+    props.record?.document?.fileName ||
+    (hasDocument.value ? "Document Attached" : "")
+  );
+});
 const isOwnSubmission = computed(() => {
-  const currentUserId = auth.user?.id;
+  const currentUserId = auth?.user?.id;
   const ownerId =
     props.record?.userId ??
     props.record?.user_id ??
@@ -239,7 +265,14 @@ const isOwnSubmission = computed(() => {
 });
 
 const showSignatureSection = computed(
-  () => Boolean(props.record?.signatureImage) || isOwnSubmission.value,
+  () =>
+    Boolean(
+      props.record?.signatureImage ||
+      props.record?.signature ||
+      props.record?.acknowledgedAt ||
+      props.record?.status === "disbursed" ||
+      props.record?.status === "signed",
+    ) && (isOwnSubmission.value || auth?.isAdmin),
 );
 
 const canAcknowledgeFromCurrentView = computed(
@@ -258,13 +291,21 @@ watch(
       showAcknowledgeModal.value = false;
       documentData.value = props.record?.document || null;
       adminPassword.value = "";
-      clearSignature();
+      acknowledgementSignature.value = auth?.user?.signature || "";
       if (liquidationStore.settlements.length === 0) {
         try {
           await liquidationStore.fetchSettlements();
         } catch {}
       }
     }
+  },
+);
+
+watch(
+  () => props.record,
+  (newRec) => {
+    documentData.value = newRec?.document || null;
+    acknowledgementSignature.value = auth?.user?.signature || "";
   },
 );
 
@@ -321,7 +362,10 @@ async function downloadDocument() {
   if (!documentData.value && props.record.id) {
     isLoadingDocument.value = true;
     try {
-      documentData.value = await store.fetchDocument(props.record.id);
+      const fetched = await store.fetchDocument(props.record.id);
+      if (fetched) {
+        documentData.value = fetched;
+      }
     } catch (error) {
       console.error("Failed to load document", error);
     } finally {
@@ -329,22 +373,37 @@ async function downloadDocument() {
     }
   }
 
-  const fileName =
-    documentData.value?.file_name ||
-    props.record.documentFileName ||
-    "document.pdf";
-  const fileUrl =
+  const fileName = documentDisplayName.value || "document.pdf";
+  const rawPath =
+    documentData.value?.file_path ||
+    props.record?.document?.file_path ||
     documentData.value?.file_url ||
-    props.record.documentUrl ||
+    props.record?.documentUrl ||
+    props.record?.document_path ||
+    props.record?.file_path;
+
+  const fileUrl =
+    getFileUrl(rawPath, "cash_advances") ||
+    documentData.value?.file_url ||
+    props.record?.documentUrl ||
     "/mock_receipt.png";
 
-  const a = document.createElement("a");
-  a.href = fileUrl;
-  a.download = fileName;
-  a.target = "_blank";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  try {
+    const a = document.createElement("a");
+    a.href = fileUrl;
+    a.download = fileName;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (error) {
+    console.error("Download failed", error);
+    addToast({
+      message: "Failed to download document.",
+      type: "error",
+    });
+  }
 }
 
 function requestConfirmation(action) {
@@ -410,82 +469,10 @@ async function confirmAdminDecision() {
   }
 }
 
-function prepareSignatureCanvas() {
-  const canvas = signatureCanvas.value;
-  if (!canvas) return null;
-
-  const rect = canvas.getBoundingClientRect();
-  const scale = window.devicePixelRatio || 1;
-
-  if (
-    canvas.width !== Math.floor(rect.width * scale) ||
-    canvas.height !== Math.floor(rect.height * scale)
-  ) {
-    canvas.width = Math.floor(rect.width * scale);
-    canvas.height = Math.floor(rect.height * scale);
-    const resizedContext = canvas.getContext("2d");
-    resizedContext.scale(scale, scale);
-    resizedContext.lineWidth = 2;
-    resizedContext.lineCap = "round";
-    resizedContext.lineJoin = "round";
-    resizedContext.strokeStyle = "#14532D";
-  }
-
-  return canvas.getContext("2d");
-}
-
-function signaturePoint(event) {
-  const rect = signatureCanvas.value.getBoundingClientRect();
-  return {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top,
-  };
-}
-
-function startSignature(event) {
-  const context = prepareSignatureCanvas();
-  if (!context) return;
-
-  isSigning.value = true;
-  signatureStarted.value = true;
-  signatureCanvas.value.setPointerCapture?.(event.pointerId);
-
-  const point = signaturePoint(event);
-  context.beginPath();
-  context.moveTo(point.x, point.y);
-}
-
-function drawSignature(event) {
-  if (!isSigning.value) return;
-  const context = prepareSignatureCanvas();
-  if (!context) return;
-
-  const point = signaturePoint(event);
-  context.lineTo(point.x, point.y);
-  context.stroke();
-}
-
-function stopSignature() {
-  isSigning.value = false;
-}
-
-function clearSignature() {
-  const canvas = signatureCanvas.value;
-  if (!canvas) {
-    signatureStarted.value = false;
-    return;
-  }
-
-  const context = canvas.getContext("2d");
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  signatureStarted.value = false;
-}
-
 async function confirmAcknowledge() {
   if (!props.record || isAcknowledging.value) return;
-  const canvas = signatureCanvas.value;
-  if (!canvas) return;
-  const signatureData = canvas.toDataURL("image/png");
+  const signatureData = acknowledgementSignature.value;
+  if (!signatureData) return;
 
   try {
     isAcknowledging.value = true;
@@ -585,15 +572,22 @@ async function confirmAcknowledge() {
           </section>
 
           <!-- Document Attachment -->
-          <section v-if="documentData || record.documentFileName" class="pt-2 border-t border-slate-100">
+          <section v-if="hasDocument" class="pt-2 border-t border-slate-100">
             <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Document</p>
             <a
-              class="inline-flex items-center gap-2 text-sm text-primary hover:underline cursor-pointer"
-              @click="downloadDocument"
+              role="button"
+              tabindex="0"
+              class="inline-flex max-w-full items-center gap-2 text-sm text-primary hover:underline cursor-pointer group"
+              :class="{ 'opacity-70 pointer-events-none': isLoadingDocument }"
+              :title="documentDisplayName"
+              @click.stop.prevent="downloadDocument"
+              @keydown.enter.stop.prevent="downloadDocument"
+              @keydown.space.stop.prevent="downloadDocument"
             >
-              <FileText class="w-3.5 h-3.5" />
-              <span>{{ documentData ? documentData.file_name : record.documentFileName }}</span>
-              <Download class="w-3 h-3" />
+              <FileText class="w-3.5 h-3.5 shrink-0" />
+              <span class="truncate max-w-[260px] sm:max-w-[420px]">{{ documentDisplayName }}</span>
+              <Loader2 v-if="isLoadingDocument" class="w-3 h-3 shrink-0 animate-spin" />
+              <Download v-else class="w-3 h-3 shrink-0" />
             </a>
           </section>
 
@@ -605,22 +599,31 @@ async function confirmAcknowledge() {
 
           <!-- Signature Section -->
           <section v-if="showSignatureSection" class="space-y-3 pt-3 border-t border-slate-100">
-            <div v-if="record.status === 'disbursed'">
+            <div v-if="record.status === 'disbursed' && !record.acknowledgedAt">
               <p class="text-sm text-slate-600 mb-3">
                 Employee certifies receipt of
                 <span class="font-semibold text-primary">{{ formatPeso(record.amount) }}</span>.
+              </p>
+            </div>
+            <div v-else-if="record.acknowledgedAt || record.signatureImage || record.signature">
+              <p class="text-sm text-slate-600 mb-3">
+                Employee certified receipt of
+                <span class="font-semibold text-primary">{{ formatPeso(record.amount) }}</span>
+                <span v-if="record.acknowledgedAt" class="text-slate-400 text-xs">
+                  on {{ formatDate(record.acknowledgedAt) }}
+                </span>.
               </p>
             </div>
 
             <div>
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-2">Signature</p>
               <div
-                v-if="record.acknowledgedAt || record.signatureImage"
-                class="relative flex h-32 w-full items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white"
+                v-if="record.acknowledgedAt || record.signatureImage || record.signature"
+                class="relative flex h-32 w-full max-w-lg mx-auto items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white"
               >
                 <img
-                  :src="record.signatureImage"
-                  class="max-h-full max-w-full"
+                  :src="record.signatureImage || record.signature"
+                  class="max-h-full max-w-full object-contain"
                   alt="Signature"
                 />
                 <span class="absolute bottom-2 right-3 text-[10px] font-medium text-emerald-600">
@@ -629,41 +632,24 @@ async function confirmAcknowledge() {
               </div>
               <div
                 v-else-if="canAcknowledgeFromCurrentView"
-                class="relative h-32 overflow-hidden rounded-lg border border-slate-200 bg-white"
+                class="space-y-2 flex flex-col items-center"
               >
-                <canvas
-                  ref="signatureCanvas"
-                  class="h-full w-full touch-none"
-                  @pointerdown="startSignature"
-                  @pointermove="drawSignature"
-                  @pointerup="stopSignature"
-                  @pointerleave="stopSignature"
-                  @pointercancel="stopSignature"
+                <BaseSignaturePad
+                  v-model="acknowledgementSignature"
+                  label=""
+                  placeholder="Draw your signature here to acknowledge receipt"
                 />
-                <span
-                  v-if="!signatureStarted"
-                  class="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-slate-400"
-                >
-                  Draw your signature here
-                </span>
-              </div>
 
-              <div v-if="canAcknowledgeFromCurrentView" class="mt-2 flex justify-end gap-2">
-                <button
-                  class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                  type="button"
-                  @click="clearSignature"
-                >
-                  Clear
-                </button>
-                <button
-                  class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-                  type="button"
-                  :disabled="!signatureStarted"
-                  @click="showAcknowledgeModal = true"
-                >
-                  I acknowledge
-                </button>
+                <div class="mt-2 flex w-full max-w-lg justify-end gap-2">
+                  <button
+                    class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                    type="button"
+                    :disabled="!acknowledgementSignature"
+                    @click="showAcknowledgeModal = true"
+                  >
+                    I acknowledge
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -815,15 +801,22 @@ async function confirmAcknowledge() {
           </section>
 
           <!-- Document -->
-          <section v-if="documentData || record.documentFileName" class="pt-2 border-t border-slate-100">
+          <section v-if="hasDocument" class="pt-2 border-t border-slate-100">
             <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Document</p>
             <a
-              class="inline-flex items-center gap-2 text-sm text-primary hover:underline cursor-pointer"
-              @click="downloadDocument"
+              role="button"
+              tabindex="0"
+              class="inline-flex max-w-full items-center gap-2 text-sm text-primary hover:underline cursor-pointer group"
+              :class="{ 'opacity-70 pointer-events-none': isLoadingDocument }"
+              :title="documentDisplayName"
+              @click.stop.prevent="downloadDocument"
+              @keydown.enter.stop.prevent="downloadDocument"
+              @keydown.space.stop.prevent="downloadDocument"
             >
-              <FileText class="w-3.5 h-3.5" />
-              <span>{{ documentData ? documentData.file_name : record.documentFileName }}</span>
-              <Download class="w-3 h-3" />
+              <FileText class="w-3.5 h-3.5 shrink-0" />
+              <span class="truncate max-w-[260px] sm:max-w-[420px]">{{ documentDisplayName }}</span>
+              <Loader2 v-if="isLoadingDocument" class="w-3 h-3 shrink-0 animate-spin" />
+              <Download v-else class="w-3 h-3 shrink-0" />
             </a>
           </section>
 
@@ -844,22 +837,32 @@ async function confirmAcknowledge() {
             <p class="text-sm text-slate-700">{{ record.adminNotes }}</p>
           </div>
 
-          <!-- Signature Section (Employee Acknowledgment for Disbursed) -->
-          <section v-if="record.status === 'disbursed'" class="space-y-3 pt-3 border-t border-slate-100">
-            <p class="text-sm text-slate-600">
+          <!-- Signature Section -->
+          <section
+            v-if="record.status === 'disbursed' || record.status === 'signed' || record.acknowledgedAt || record.signatureImage || record.signature"
+            class="space-y-3 pt-3 border-t border-slate-100"
+          >
+            <p v-if="record.status === 'disbursed' && !record.acknowledgedAt" class="text-sm text-slate-600">
               I certify that I received the cash advance of
               <span class="font-semibold text-primary">{{ formatPeso(record.amount) }}</span>.
+            </p>
+            <p v-else-if="record.acknowledgedAt || record.signatureImage || record.signature" class="text-sm text-slate-600">
+              Acknowledged and certified receipt of
+              <span class="font-semibold text-primary">{{ formatPeso(record.amount) }}</span>
+              <span v-if="record.acknowledgedAt" class="text-slate-400 text-xs">
+                on {{ formatDate(record.acknowledgedAt) }}
+              </span>.
             </p>
 
             <div>
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-2">Signature</p>
               <div
-                v-if="record.acknowledgedAt"
-                class="relative flex h-32 w-full items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white"
+                v-if="record.acknowledgedAt || record.signatureImage || record.signature"
+                class="relative flex h-32 w-full max-w-lg mx-auto items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white"
               >
                 <img
-                  :src="record.signatureImage"
-                  class="max-h-full max-w-full"
+                  :src="record.signatureImage || record.signature"
+                  class="max-h-full max-w-full object-contain"
                   alt="Signature"
                 />
                 <span class="absolute bottom-2 right-3 text-[10px] font-medium text-emerald-600">
@@ -868,40 +871,23 @@ async function confirmAcknowledge() {
               </div>
               <div
                 v-else
-                class="relative h-32 overflow-hidden rounded-lg border border-slate-200 bg-white"
+                class="space-y-2 flex flex-col items-center"
               >
-                <canvas
-                  ref="signatureCanvas"
-                  class="h-full w-full touch-none"
-                  @pointerdown="startSignature"
-                  @pointermove="drawSignature"
-                  @pointerup="stopSignature"
-                  @pointerleave="stopSignature"
-                  @pointercancel="stopSignature"
+                <BaseSignaturePad
+                  v-model="acknowledgementSignature"
+                  label=""
+                  placeholder="Draw your signature here to acknowledge receipt"
                 />
-                <span
-                  v-if="!signatureStarted"
-                  class="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-slate-400"
-                >
-                  Draw your signature here
-                </span>
-              </div>
-              <div v-if="!record.acknowledgedAt" class="mt-2 flex justify-end gap-2">
-                <button
-                  class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                  type="button"
-                  @click="clearSignature"
-                >
-                  Clear
-                </button>
-                <button
-                  class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-                  type="button"
-                  :disabled="!signatureStarted"
-                  @click="showAcknowledgeModal = true"
-                >
-                  I acknowledge
-                </button>
+                <div v-if="!record.acknowledgedAt" class="mt-2 flex w-full max-w-lg justify-end gap-2">
+                  <button
+                    class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                    type="button"
+                    :disabled="!acknowledgementSignature"
+                    @click="showAcknowledgeModal = true"
+                  >
+                    I acknowledge
+                  </button>
+                </div>
               </div>
             </div>
           </section>

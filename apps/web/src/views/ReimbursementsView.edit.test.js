@@ -50,13 +50,6 @@ vi.mock("@/composables/useToast", () => ({
   }),
 }));
 
-vi.mock("@/composables/useOcrMode", () => ({
-  useOcrMode: () => ({
-    isMockOcr: false,
-    setMockMode: vi.fn(),
-  }),
-}));
-
 vi.mock("@/composables/useNotificationDeepLink", () => ({
   useNotificationDeepLink: () => ({
     checkDeepLink: vi.fn(),

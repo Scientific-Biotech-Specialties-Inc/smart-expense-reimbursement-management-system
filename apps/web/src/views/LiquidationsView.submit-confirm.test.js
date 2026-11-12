@@ -59,13 +59,6 @@ vi.mock("@/composables/useToast", () => ({
   }),
 }));
 
-vi.mock("@/composables/useOcrMode", () => ({
-  useOcrMode: () => ({
-    isMockOcr: ref(false),
-    setMockMode: vi.fn(),
-  }),
-}));
-
 vi.mock("@/composables/useUnsavedChanges", () => ({
   useUnsavedChanges: () => ({
     showConfirmModal: ref(false),

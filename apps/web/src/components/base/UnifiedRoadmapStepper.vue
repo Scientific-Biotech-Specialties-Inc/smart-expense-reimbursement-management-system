@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import {
   Check,
   Clock,
@@ -10,11 +10,10 @@ import {
   ShieldCheck,
   Wallet,
   ArrowRight,
-  ArrowLeft,
-  ArrowDown,
   CircleDot,
 } from "lucide-vue-next";
 import { formatPeso, formatDate } from "@/utils/formatters";
+import { useHorizontalScroll } from "@/composables/useHorizontalScroll";
 import RoadmapStepItem from "./RoadmapStepItem.vue";
 
 const props = defineProps({
@@ -665,9 +664,6 @@ const allSteps = computed(() => {
   return steps;
 });
 
-const row1Steps = computed(() => allSteps.value.slice(0, 4));
-const row2Steps = computed(() => allSteps.value.slice(4));
-
 const currentIndex = computed(() => {
   const ca = caStatus.value;
   const liq = liqStatus.value;
@@ -814,40 +810,29 @@ function stepSublabel(step, state) {
   return step.subDefault;
 }
 
-// Serpentine progress calculations
-const row1ProgressPercent = computed(() => {
+// Single continuous horizontal track progress percent
+const progressPercent = computed(() => {
+  const total = allSteps.value.length;
+  if (total <= 1) return 0;
   if (isRejectedFlow.value && rejectedAtIndex.value !== -1) {
-    if (rejectedAtIndex.value < 1) return 0;
-    if (rejectedAtIndex.value === 1) return 33.33;
-    if (rejectedAtIndex.value === 2) return 66.66;
-    return 100;
+    return (rejectedAtIndex.value / (total - 1)) * 100;
   }
   const cur = currentIndex.value;
   if (cur <= 0) return 0;
-  if (cur === 1) return 33.33;
-  if (cur === 2) return 66.66;
-  return 100;
+  return (Math.min(cur, total - 1) / (total - 1)) * 100;
 });
 
-const isTurnConnected = computed(() => {
-  if (isRejectedFlow.value && rejectedAtIndex.value !== -1) {
-    return rejectedAtIndex.value >= 4;
-  }
-  return currentIndex.value >= 4;
-});
+const scrollContainerRef = ref(null);
+const { canScrollLeft, canScrollRight, scrollToActive } = useHorizontalScroll(
+  scrollContainerRef,
+  {
+    activeSelector: '[aria-current="step"]',
+    autoScrollOnMount: true,
+  },
+);
 
-const row2ProgressPercent = computed(() => {
-  const count = row2Steps.value.length;
-  if (count <= 1) return 0;
-
-  if (isRejectedFlow.value && rejectedAtIndex.value !== -1) {
-    if (rejectedAtIndex.value <= 4) return 0;
-    return ((rejectedAtIndex.value - 4) / (count - 1)) * 100;
-  }
-
-  const cur = currentIndex.value;
-  if (cur <= 4) return 0;
-  return (Math.min(cur - 4, count - 1) / (count - 1)) * 100;
+watch(currentIndex, () => {
+  scrollToActive();
 });
 
 function handleStepClick(step, state) {
@@ -864,113 +849,54 @@ function handleStepClick(step, state) {
     class="relative rounded-xl border border-slate-100 bg-white p-3 sm:p-4"
     aria-label="Unified Cash Advance to Liquidation Roadmap"
   >
-    <!-- Mobile vertical background line -->
-    <div
-      class="pointer-events-none absolute left-7 top-7 bottom-7 w-0.5 bg-slate-100 sm:hidden"
-      aria-hidden="true"
-    ></div>
+    <div class="relative w-full">
+      <!-- Left dynamic edge fade (only when canScrollLeft) -->
+      <div
+        v-show="canScrollLeft"
+        class="pointer-events-none absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-white to-transparent z-20 transition-opacity duration-200"
+        aria-hidden="true"
+      ></div>
 
-    <!-- 1. SERPENTINE / REVERTED 'S' LAYOUT (Default 4x2 Grid) -->
-    <div v-if="effectiveLayout === 'serpentine'" class="relative flex flex-col gap-4 sm:gap-5">
-      <!-- Phase 1: Cash Advance (Steps 1 -> 4, Left to Right) -->
-      <div class="relative">
-        <div class="mb-2 flex items-center justify-between px-1">
-          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            Phase 1: Cash Advance
-          </span>
-          <span class="hidden sm:inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
-            Flow <ArrowRight class="h-2.5 w-2.5" />
-          </span>
-        </div>
+      <!-- Right dynamic edge fade (only when canScrollRight) -->
+      <div
+        v-show="canScrollRight"
+        class="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent z-20 transition-opacity duration-200"
+        aria-hidden="true"
+      ></div>
 
-        <div class="relative flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-start">
-          <!-- Row 1 Desktop connector line (Left to Right) -->
+      <!-- Scrollable Viewport: only triggers horizontal scroll when contents exceed container width -->
+      <div
+        ref="scrollContainerRef"
+        class="relative w-full overflow-x-auto scrollbar-none pt-2.5 pb-1"
+        tabindex="0"
+        aria-label="Workflow step roadmap"
+      >
+        <!-- Inner track with responsive min-width: fills 100% on wide containers, naturally scrolls on narrow screens -->
+        <div
+          class="relative flex items-start justify-between min-w-full"
+          :style="{ minWidth: `${allSteps.length * 132}px` }"
+        >
+          <!-- Horizontal connector line desktop & mobile -->
           <div
-            class="pointer-events-none absolute top-4 -translate-y-1/2 hidden h-0.5 bg-slate-100 sm:block"
-            style="left: 12.5%; right: 12.5%;"
+            v-if="allSteps.length > 1"
+            class="pointer-events-none absolute top-4 -translate-y-1/2 h-0.5 bg-slate-100 z-0"
+            :style="{
+              left: `${100 / (2 * allSteps.length)}%`,
+              right: `${100 / (2 * allSteps.length)}%`,
+            }"
             aria-hidden="true"
           >
             <div
               class="h-full bg-emerald-200 transition-all duration-300"
-              :style="{ width: `${row1ProgressPercent}%` }"
+              :style="{ width: `${progressPercent}%` }"
             ></div>
           </div>
 
-          <!-- Steps 1 to 4 -->
+          <!-- All Steps in a single continuous linear track -->
           <div
-            v-for="step in row1Steps"
+            v-for="step in allSteps"
             :key="step.key"
-            class="relative sm:w-1/4"
-          >
-            <RoadmapStepItem
-              :step="step"
-              :state="stepState(step.idx)"
-              :sublabel="stepSublabel(step, stepState(step.idx))"
-              :history-entry="resolveStepHistory(step, stepState(step.idx))"
-              :revision-count="revisionCountForStep(step.key)"
-              :is-overdue="isOverdue"
-              :total-penalty="totalPenalty"
-              :overdue-days="overdueDays"
-              :overpayment-amount="overpaymentAmount"
-              @click="handleStepClick"
-            />
-          </div>
-        </div>
-      </div>
-
-      <!-- Serpentine Transition Link (Step 4 to Step 5 on the right) -->
-      <div class="relative hidden sm:flex items-center justify-end px-[12.5%] -my-3 z-0 pointer-events-none">
-        <div class="flex flex-col items-center translate-x-1/2">
-          <div
-            class="w-0.5 h-3.5 transition-colors duration-300"
-            :class="isTurnConnected ? 'bg-emerald-200' : 'bg-slate-100'"
-          ></div>
-          <div
-            class="flex items-center justify-center h-4 w-4 rounded-full border transition-colors duration-300"
-            :class="
-              isTurnConnected
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-600'
-                : 'border-slate-200 bg-slate-50 text-slate-400'
-            "
-          >
-            <ArrowDown class="h-2.5 w-2.5" />
-          </div>
-          <div
-            class="w-0.5 h-3.5 transition-colors duration-300"
-            :class="isTurnConnected ? 'bg-emerald-200' : 'bg-slate-100'"
-          ></div>
-        </div>
-      </div>
-
-      <!-- Phase 2: Liquidation (Steps 5 <- 8, Right to Left) -->
-      <div class="relative pt-2 border-t border-slate-100 sm:border-t-0 sm:pt-0">
-        <div class="mb-2 flex items-center justify-between px-1">
-          <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            Phase 2: Liquidation & Settlement
-          </span>
-          <span class="hidden sm:inline-flex items-center gap-1 text-[10px] font-medium text-slate-400">
-            <ArrowLeft class="h-2.5 w-2.5" /> Flow
-          </span>
-        </div>
-
-        <div class="relative flex flex-col gap-3 sm:flex-row-reverse sm:justify-between sm:items-start">
-          <!-- Row 2 Desktop connector line (Right to Left) -->
-          <div
-            class="pointer-events-none absolute top-4 -translate-y-1/2 hidden h-0.5 bg-slate-100 sm:block"
-            style="left: 12.5%; right: 12.5%;"
-            aria-hidden="true"
-          >
-            <div
-              class="h-full bg-emerald-200 transition-all duration-300 ml-auto"
-              :style="{ width: `${row2ProgressPercent}%` }"
-            ></div>
-          </div>
-
-          <!-- Phase 2 Steps (rendered sequentially on mobile; flex-row-reverse places Step 5 on right under Step 4, Step 6 on left) -->
-          <div
-            v-for="step in row2Steps"
-            :key="step.key"
-            class="relative sm:w-1/4"
+            class="relative flex-1 min-w-[132px] px-1 z-10"
           >
             <RoadmapStepItem
               :step="step"
@@ -989,56 +915,7 @@ function handleStepClick(step, state) {
       </div>
     </div>
 
-    <!-- 2. HORIZONTAL 1-ROW LAYOUT (Optional) -->
-    <div
-      v-else
-      class="relative flex flex-col gap-3 sm:flex-row sm:justify-between sm:gap-1 sm:items-start"
-    >
-      <!-- Connector lines desktop -->
-      <div
-        v-if="allSteps.length > 1"
-        class="pointer-events-none absolute top-4 -translate-y-1/2 hidden h-0.5 bg-slate-100 sm:block"
-        :style="{
-          left: `${100 / (2 * allSteps.length)}%`,
-          right: `${100 / (2 * allSteps.length)}%`,
-        }"
-        aria-hidden="true"
-      >
-        <!-- progress overlay -->
-        <div
-          class="h-full bg-emerald-200 transition-all duration-300"
-          :style="{
-            width:
-              currentIndex === 0
-                ? '0%'
-                : isRejectedFlow
-                  ? `${(rejectedAtIndex / (allSteps.length - 1)) * 100}%`
-                  : `${(Math.min(currentIndex, allSteps.length - 1) / (allSteps.length - 1)) * 100}%`,
-          }"
-        ></div>
-      </div>
-
-      <div
-        v-for="step in allSteps"
-        :key="step.key"
-        class="relative flex flex-row items-start gap-3 sm:flex-1 sm:flex-col sm:items-center sm:text-center sm:gap-0"
-      >
-        <RoadmapStepItem
-          :step="step"
-          :state="stepState(step.idx)"
-          :sublabel="stepSublabel(step, stepState(step.idx))"
-          :history-entry="resolveStepHistory(step, stepState(step.idx))"
-          :revision-count="revisionCountForStep(step.key)"
-          :is-overdue="isOverdue"
-          :total-penalty="totalPenalty"
-          :overdue-days="overdueDays"
-          :overpayment-amount="overpaymentAmount"
-          @click="handleStepClick"
-        />
-      </div>
-    </div>
-
-    <!-- Footer Legend -->
+    <!-- Pinned Footer Legend -->
     <div
       class="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-50 pt-2 text-[10px] leading-none text-slate-400"
     >
