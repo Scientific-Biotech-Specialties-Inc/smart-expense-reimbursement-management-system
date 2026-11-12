@@ -56,6 +56,14 @@ const unreadCount = computed(() => notif.unreadCount);
 
 const pageTitle = computed(() => route.meta?.title || "SERMS");
 
+const hideSidebar = computed(() => {
+  return (
+    route.meta?.hideSidebar === true ||
+    route.name === "Profile" ||
+    route.path === "/profile"
+  );
+});
+
 const userInitials = computed(() => {
   if (!auth.user?.name) return "US";
   return auth.user.name
@@ -82,7 +90,7 @@ async function logout() {
     <!-- Mobile overlay -->
     <Transition name="fade">
       <div
-        v-if="mobileOpen"
+        v-if="mobileOpen && !hideSidebar"
         class="fixed inset-0 z-20 bg-slate-900/50 backdrop-blur-sm lg:hidden"
         @click="mobileOpen = false"
       />
@@ -90,6 +98,7 @@ async function logout() {
 
     <!-- ======================== SIDEBAR (Section VI.1) ======================== -->
     <aside
+      v-if="!hideSidebar"
       :class="[
         'flex flex-col z-30 transition-[width,transform] duration-300 ease-out flex-shrink-0',
         'fixed lg:relative inset-y-0 left-0 bg-primary select-none',
@@ -204,6 +213,7 @@ async function logout() {
         <!-- Left Section: Sidebar Toggle & Page Title -->
         <div class="flex items-center gap-4">
           <button
+            v-if="!hideSidebar"
             class="p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors"
             title="Toggle Sidebar"
             @click="sidebarOpen = !sidebarOpen; mobileOpen = !mobileOpen"
@@ -211,7 +221,7 @@ async function logout() {
             <PanelLeft class="w-5 h-5" />
           </button>
 
-          <div class="h-6 w-px bg-slate-200 hidden sm:block" />
+          <div v-if="!hideSidebar" class="h-6 w-px bg-slate-200 hidden sm:block" />
 
           <h1 class="font-sans font-bold text-lg text-slate-700 tracking-tight">
             {{ pageTitle }}
@@ -247,7 +257,16 @@ async function logout() {
               <div
                 class="flex items-center gap-2.5 p-1.5 pr-2.5 rounded-xl cursor-pointer hover:bg-slate-100/80 transition-colors"
               >
+                <img
+                  v-if="auth.user?.avatar_url"
+                  :src="auth.user.avatar_url"
+                  :alt="auth.user?.name || 'Profile Photo'"
+                  data-testid="topbar-avatar-img"
+                  class="w-8 h-8 rounded-full object-cover border border-slate-200 shadow-sm"
+                />
                 <div
+                  v-else
+                  data-testid="topbar-avatar-initials"
                   class="w-8 h-8 rounded-full bg-avatar flex items-center justify-center text-white text-xs font-bold font-sans shadow-sm"
                 >
                   {{ userInitials }}

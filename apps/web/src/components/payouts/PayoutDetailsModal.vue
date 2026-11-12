@@ -1,11 +1,15 @@
 <script setup>
 import { ref, watch } from "vue";
+import { getActivePinia } from "pinia";
+import { useAuthStore } from "@/stores/auth";
 import { formatAmount, formatDate } from "@/utils/formatters";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
 import { X, PenTool, Clock, CheckCircle2 } from "lucide-vue-next";
+
+const auth = getActivePinia() ? useAuthStore() : null;
 
 const props = defineProps({
   record: {
@@ -29,8 +33,9 @@ const employeeSignature = ref("");
 watch(
   () => props.record,
   () => {
-    employeeSignature.value = "";
+    employeeSignature.value = (!props.isAdmin && auth?.user?.signature) ? auth.user.signature : "";
   },
+  { immediate: true },
 );
 
 function handleAcknowledge() {
@@ -206,6 +211,13 @@ function handleAcknowledge() {
               v-else-if="!isAdmin"
               class="space-y-3"
             >
+              <div
+                v-if="auth?.user?.signature && employeeSignature === auth?.user?.signature"
+                class="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md font-sans"
+              >
+                <CheckCircle2 class="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                <span>Pre-filled from your profile signature. You can use this or click Clear to redraw.</span>
+              </div>
               <BaseSignaturePad
                 v-model="employeeSignature"
                 label="Employee's Signature *"
