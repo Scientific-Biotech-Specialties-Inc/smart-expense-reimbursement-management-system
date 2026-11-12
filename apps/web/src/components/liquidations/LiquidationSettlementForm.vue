@@ -12,13 +12,11 @@ import {
   Download,
 } from "lucide-vue-next";
 import BaseButton from "@/components/base/BaseButton.vue";
-import BaseToggleSwitch from "@/components/base/BaseToggleSwitch.vue";
 import FileUpload from "@/components/base/FileUpload.vue";
 import ScannedReceiptsList from "@/components/reimbursements/ScannedReceiptsList.vue";
 import UnifiedRoadmapStepper from "@/components/base/UnifiedRoadmapStepper.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
 import { useLiquidationStore } from "@/stores/liquidation";
-import { useOcrMode } from "@/composables/useOcrMode";
 import { useReportExport } from "@/composables/useReportExport";
 import { formatPeso } from "@/utils/formatters";
 import { apiFetch } from "@/utils/apiFetch";
@@ -108,7 +106,6 @@ const emit = defineEmits([
 
 const reportAttachmentInput = ref(null);
 
-const { isMockOcr, setMockMode } = useOcrMode();
 const { isExporting, exportReport } = useReportExport();
 
 function handleExportLiquidationReport() {
@@ -413,12 +410,6 @@ function attachmentFileSize(file) {
           Receipt Attachments ({{ receipts.length }})
         </label>
         <div class="flex items-center gap-3">
-          <BaseToggleSwitch
-            v-if="!isFormDisabled"
-            :model-value="isMockOcr"
-            @update:model-value="setMockMode"
-            hint="Mock uploads file, fills instantly, skips OCR wait"
-          />
           <BaseButton
             data-testid="export-liquidation-report-btn"
             variant="secondary"
@@ -435,14 +426,10 @@ function attachmentFileSize(file) {
       </div>
 
       <template v-if="!isFormDisabled">
-        <p class="text-[11px] text-slate-400">
-          {{ isMockOcr ? "Fast — real file upload, instant mock data." : "Online — uses ocr-pipeline with polling." }}
-        </p>
         <FileUpload
           :model-value="receipts"
           @update:model-value="$emit('update:receipts', $event)"
           :max-size-mb="2"
-          :mock-mode="isMockOcr"
           empty-action-label="Upload Receipt"
           add-action-label="Upload Receipt"
           @upload-error="$emit('upload-error', $event)"

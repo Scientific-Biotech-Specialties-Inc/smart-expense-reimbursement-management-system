@@ -24,6 +24,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [2.0.0] - Nov 12, 2026
 
+### Removed
+- **Mock OCR Engine & UI Toggle Removal (`apps/api` & `apps/web`):**
+  - **Backend (`apps/api`):** Deleted `MockOcrService.php` and its dedicated test `MockOcrUploadTest.php`. Cleaned up `ReceiptService.php` and `LiquidationController.php` by removing mock request detection (`is_mock`/`mock`/`X-Mock-OCR`), fake data generation fallbacks, and mock status overrides. All receipt uploads and liquidation scans now strictly route to the asynchronous OCR pipeline job dispatch (`DispatchReceiptToAiService`). Removed obsolete `is_mock` and `mock` validation rules from `StoreReceiptRequest.php`.
+  - **Frontend (`apps/web`):** Deleted `useOcrMode.js`, `useOcrMode.test.js`, `mockOcr.js`, and `mockOcr.test.js`. Removed the OCR Mode toggle switches (`BaseToggleSwitch`) and explanatory helper text from `ReimbursementFormView.vue`, `ReimbursementsView.vue`, `LiquidationsView.vue`, and `LiquidationSettlementForm.vue`. Removed `mockMode` prop from `FileUpload.vue` and removed mock mode request flags (`is_mock`, `X-Mock-OCR`) from `useReceiptUploads.js` and `FileUpload.vue`. Cleaned up mock imports across all 9 affected Vitest test files.
+
 ### Added
 - **Unified Profile Signature on Signature Pads & Test Seeder (`apps/web` & `apps/api`):**
   - **`BaseSignaturePad.vue` Enhancements:** Added `allowProfileSignature`, `savedSignature`, and `showHelperNote` props; added automatic pre-fill from `auth.user.signature` on mount; integrated a "Use Saved Signature" (`Sparkles`) toolbar button that appears when a saved signature is available and the pad is blank or redrawn; and unified the "Pre-filled from your profile signature" helper badge across all signature touchpoints.

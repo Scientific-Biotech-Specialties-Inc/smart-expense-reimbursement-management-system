@@ -22,7 +22,6 @@ const props = defineProps({
   maxSizeMb: { type: Number, default: 2 },
   emptyActionLabel: { type: String, default: 'Select Files' },
   addActionLabel: { type: String, default: 'Add More Receipts' },
-  mockMode: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'ocr-result', 'upload-error'])
@@ -378,15 +377,9 @@ async function simulateOCR(entry) {
     entry.pages.forEach(file => {
       formData.append('files[]', file)
     })
-    // Fast mock path — real file upload, instant mock data, skip OCR wait + polling.
-    if (props.mockMode) {
-      formData.append('is_mock', '1')
-    }
-
     const response = await apiFetch('/api/serms/liquidations/scan', {
       method: 'POST',
       body: formData,
-      headers: props.mockMode ? { 'X-Mock-OCR': '1' } : {},
     })
 
     if (!response.ok) {

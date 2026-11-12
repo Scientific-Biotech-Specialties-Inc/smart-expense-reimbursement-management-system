@@ -11,7 +11,6 @@ import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
 import FileUpload from "@/components/base/FileUpload.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseModal from "@/components/base/BaseModal.vue";
-import BaseToggleSwitch from "@/components/base/BaseToggleSwitch.vue";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import BaseUtilityToolbar from "@/components/base/BaseUtilityToolbar.vue";
@@ -28,7 +27,6 @@ import LiquidationSettlementForm from "@/components/liquidations/LiquidationSett
 import { useLiquidationDecisions } from "@/composables/liquidations/useLiquidationDecisions";
 import { useLiquidationForwarding } from "@/composables/liquidations/useLiquidationForwarding";
 import { useLiquidationSubmit } from "@/composables/liquidations/useLiquidationSubmit";
-import { useOcrMode } from "@/composables/useOcrMode";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
 import { formatPeso, formatDate, truncateText } from "@/utils/formatters";
@@ -57,7 +55,6 @@ const receiptStore = useReceiptStore();
 const auth = useAuthStore();
 const router = useRouter();
 const { addToast } = useToast();
-const { isMockOcr, setMockMode } = useOcrMode();
 
 /** Refresh both stores in parallel — balance is now authoritative in the DB */
 async function refreshAll() {
@@ -1787,24 +1784,6 @@ onMounted(async () => {
         </BaseButton>
       </template>
     </BaseUtilityToolbar>
-
-    <div
-      v-if="!auth.isAdmin"
-      class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3"
-    >
-      <BaseToggleSwitch
-        :model-value="isMockOcr"
-        @update:model-value="setMockMode"
-        hint="Mock uploads file, fills instantly, skips OCR wait"
-      />
-      <p class="text-[11px] text-slate-400">
-        {{
-          isMockOcr
-            ? "Fast — real file upload, instant mock data."
-            : "Online — uses ocr-pipeline with polling."
-        }}
-      </p>
-    </div>
 
     <section
       v-if="!auth.isAdmin"

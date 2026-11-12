@@ -91,22 +91,23 @@ class ReimbursementLogicTest extends TestCase
 
     public function test_receipt_upload_allows_missing_category(): void
     {
+        \Illuminate\Support\Facades\Queue::fake();
+
         $response = $this
             ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
             ->actingAs($this->employee)
             ->post('/api/reimbursements/receipts', [
                 'file' => UploadedFile::fake()->create('receipt.pdf', 100, 'application/pdf'),
-                'is_mock' => '1',
             ]);
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.expense_category_id', null);
-        $response->assertJsonPath('data.status', 'processed');
+        $response->assertJsonPath('data.status', 'processing');
 
         $this->assertDatabaseHas('receipts', [
             'uploaded_by' => $this->employee->id,
             'expense_category_id' => null,
-            'status' => 'processed',
+            'status' => 'processing',
         ]);
     }
 
