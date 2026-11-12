@@ -22,6 +22,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
 
+## [2.0.0] - Nov 12, 2026
+
+### Added
+- **User Profile Module (Sprint 6 EP 12 / G2-104 to G2-110) (`apps/api` & `apps/web`):**
+  - **Database Migration (`users` table):** Added `first_name`, `middle_name`, `last_name`, `contact_number`, `signature` (`longText`), `signature_path`, and `last_login_at` columns with automatic `employee_id` (`EMP-000X`), `avatar_url`, and `has_signature` Eloquent model accessors.
+  - **Backend API & Dual-Sync Service (`ProfileService` & `ProfileController`):** Delivered `/api/profile` endpoints supporting profile updates (dual-synced with `capstone-auth-module`), photo upload/deletion (`supabase` bucket `avatars/`), hybrid signature saving/removal (`supabase` bucket `signatures/` + Base64 PNG), client-encrypted password updates (RSA forwarded to `capstone-auth-module`), and user-scoped login/change activity logs.
+  - **Login Tracking & Audit Trail Integration:** Updated `AuthenticateWithExternalService` to record `USER_LOGIN` audit logs once per unique JWT token (`jti` cache-locking) and registered profile mutation actions (`PROFILE_UPDATED`, `PROFILE_PHOTO_UPDATED`, `PROFILE_PHOTO_REMOVED`, `PASSWORD_CHANGED`, `SIGNATURE_UPDATED`, `SIGNATURE_REMOVED`) with field-level diff tracking in `AuditLogService`.
+  - **Frontend Profile Page (`ProfileView.vue`):** Built a responsive, clinical design layout featuring a top header card with avatar upload/removal, role pill, joined date, admin compliance notice (G2-105), and 3 integrated tabs:
+    1. **Personal & Work:** View/Edit personal details (first/middle/last name, contact number) while preserving read-only company fields (email, role, employee ID, department, date joined), paired with a Digital Signature card (with "Configured" status).
+    2. **Security:** Change password form with client-side payload pre-encryption, visibility toggles, and live 6-point complexity checklist.
+    3. **Activity Log:** 2-column feed displaying Last Login time callout, recent logins list, and chronological account changes with sanitized field diffs.
+  - **Removed Redundant Status Indicators:** Removed non-essential "Active" pulsing indicators and synthetic account status badges from the profile header, personal details, signature configuration, and login history cards to align with actual SERMS entity models.
+  - **Signature Pre-Filling Integration:** Enhanced `<BaseSignaturePad />` to draw existing Base64 PNG signatures on canvas and wired saved signature pre-filling into `GrantPayoutModal.vue` (`Granter's Signature`) and `PayoutDetailsModal.vue` (`Employee's Signature`) with clear/redraw support.
+  - **Top Bar Avatar Display:** Updated `AppLayout.vue` top bar to render the user's custom profile photo image with fallback to initials.
+  - **Distraction-Free Layout & Back Navigation (`AppLayout.vue` & `ProfileView.vue`):** Configured `/profile` route with `hideSidebar: true`, dynamically hiding the sidebar chrome, overlay, and toggle button to grant full width to the profile canvas; removed the breadcrumbs label and replaced it with a clean, borderless and transparent Back button (`<ArrowLeft /> Back`) that redirects the user to the last page they visited (with safe `/dashboard` fallback).
+  - **Comprehensive Automated Test Coverage:** Authored 10 PHPUnit feature tests in `ProfileControllerTest.php` and 8 Vitest unit tests in `ProfileView.test.js` & `AppLayout.test.js`, passing with 100% green status.
+
 ## [1.9.9] - Nov 11, 2026
 
 ### Fixed

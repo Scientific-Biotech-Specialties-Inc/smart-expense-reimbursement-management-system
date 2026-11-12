@@ -18,6 +18,7 @@ const router = createRouter({
     { path: '/my-expense', component: dummy },
     { path: '/payout', component: dummy },
     { path: '/expenses', component: dummy, meta: { title: 'Expenses' } },
+    { path: '/profile', component: dummy, meta: { title: 'My Profile', hideSidebar: true } },
   ]
 })
 
@@ -95,5 +96,13 @@ describe('AppLayout Navigation Chrome', () => {
     expect(brandLink.attributes('href')).toBe('/dashboard')
     expect(brandLink.find('img').exists()).toBe(true)
     expect(brandLink.text()).toContain('SMART EXPENSE')
+  })
+
+  it('hides sidebar when on /profile route', async () => {
+    await router.push('/profile')
+    const wrapper = mount(AppLayout, {
+      global: { plugins: [router] }
+    })
+    expect(wrapper.find('aside').exists()).toBe(false)
   })
 })

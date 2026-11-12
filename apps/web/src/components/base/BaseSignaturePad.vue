@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, watch, onMounted, nextTick } from "vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import { PenTool, RotateCcw } from "lucide-vue-next";
 
@@ -55,6 +55,44 @@ function prepareCanvas() {
   return canvas.getContext("2d");
 }
 
+function renderDataUrlOnCanvas(dataUrl) {
+  const canvas = signatureCanvas.value;
+  if (!canvas) return;
+  const ctx = prepareCanvas();
+  if (!ctx) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width || 400;
+  const height = rect.height || 144;
+
+  if (!dataUrl) {
+    return;
+  }
+
+  hasSignature.value = true;
+  if (typeof Image !== "undefined") {
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, width, height);
+    };
+    img.src = dataUrl;
+  }
+}
+
+watch(
+  () => props.modelValue,
+  (newVal, oldVal) => {
+    if (newVal !== oldVal) {
+      if (newVal) {
+        hasSignature.value = true;
+        nextTick(() => renderDataUrlOnCanvas(newVal));
+      } else {
+        hasSignature.value = false;
+      }
+    }
+  }
+);
+
 function getPoint(e) {
   const rect = signatureCanvas.value.getBoundingClientRect();
   return {
@@ -102,7 +140,8 @@ function clearSignature() {
   if (canvas) {
     const ctx = canvas.getContext("2d");
     if (ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const rect = canvas.getBoundingClientRect();
+      ctx.clearRect(0, 0, rect.width || canvas.width, rect.height || canvas.height);
     }
   }
   hasSignature.value = false;
@@ -111,6 +150,9 @@ function clearSignature() {
 
 onMounted(() => {
   prepareCanvas();
+  if (props.modelValue) {
+    renderDataUrlOnCanvas(props.modelValue);
+  }
 });
 </script>
 
