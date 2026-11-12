@@ -209,21 +209,14 @@ function handleAcknowledge() {
             <!-- Case 2: Unacknowledged & Employee (can draw and submit signature) -->
             <div
               v-else-if="!isAdmin"
-              class="space-y-3"
+              class="space-y-3 flex flex-col items-center"
             >
-              <div
-                v-if="auth?.user?.signature && employeeSignature === auth?.user?.signature"
-                class="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md font-sans"
-              >
-                <CheckCircle2 class="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-                <span>Pre-filled from your profile signature. You can use this or click Clear to redraw.</span>
-              </div>
               <BaseSignaturePad
                 v-model="employeeSignature"
                 label="Employee's Signature *"
                 placeholder="Draw your signature here to acknowledge receipt"
               />
-              <p class="text-[11px] text-slate-400">
+              <p class="text-[11px] text-slate-400 w-full max-w-lg">
                 By signing, you confirm that you have received {{ formatAmount(record.amount || 0, record.currency || "PHP") }} in full.
               </p>
             </div>

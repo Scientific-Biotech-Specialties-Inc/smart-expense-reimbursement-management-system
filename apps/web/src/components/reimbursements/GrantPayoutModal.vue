@@ -210,14 +210,7 @@ function handleConfirm() {
         </div>
 
         <!-- Granter Signature Pad (G2-046 & G2-109) -->
-        <div class="pt-2 border-t border-slate-100 space-y-1.5">
-          <div
-            v-if="auth?.user?.signature && granterSignature === auth?.user?.signature"
-            class="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md font-sans"
-          >
-            <CheckCircle2 class="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-            <span>Pre-filled from your profile signature. You can use this or click Clear to redraw.</span>
-          </div>
+        <div class="pt-2 border-t border-slate-100 space-y-1.5 flex flex-col items-center">
           <BaseSignaturePad
             v-model="granterSignature"
             label="Granter's Signature *"

@@ -464,4 +464,85 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
       clickSpy.mockRestore();
     });
   });
+
+  describe("CashAdvanceDetailsModal — Signature & Acknowledgement", () => {
+    it("renders BaseSignaturePad and pre-fills from auth.user.signature when acknowledging disbursed advance", async () => {
+      mockAuth.isAdmin = false;
+      mockAuth.user = {
+        id: 10,
+        name: "Test Employee",
+        signature: "data:image/png;base64,empSavedSig",
+      };
+
+      const wrapper = mount(CashAdvanceDetailsModal, {
+        props: {
+          isOpen: true,
+          record: {
+            id: 88,
+            userId: 10,
+            amount: 5000,
+            balance: 5000,
+            status: "disbursed",
+            acknowledgedAt: null,
+            signatureImage: null,
+          },
+        },
+        global: {
+          stubs: {
+            UnifiedRoadmapStepper: true,
+            StatusBadge: true,
+            DecisionConfirmationModal: true,
+            BaseModal: true,
+            BaseAuditTrail: true,
+          },
+        },
+      });
+
+      const sigPad = wrapper.findComponent({ name: "BaseSignaturePad" });
+      expect(sigPad.exists()).toBe(true);
+
+      const acknowledgeBtn = wrapper.findAll("button").find((b) => b.text().includes("I acknowledge"));
+      expect(acknowledgeBtn).toBeTruthy();
+      expect(acknowledgeBtn.attributes("disabled")).toBeUndefined();
+    });
+
+    it("renders verified signature preview when viewing an already signed cash advance in Employee view", () => {
+      mockAuth.isAdmin = false;
+      mockAuth.user = {
+        id: 10,
+        name: "Test Employee",
+      };
+
+      const wrapper = mount(CashAdvanceDetailsModal, {
+        props: {
+          isOpen: true,
+          record: {
+            id: 12,
+            userId: 10,
+            amount: 5500,
+            balance: 5500,
+            status: "signed",
+            acknowledgedAt: "2026-11-10T08:00:00Z",
+            signatureImage: "data:image/png;base64,signedSigImage",
+          },
+        },
+        global: {
+          stubs: {
+            UnifiedRoadmapStepper: true,
+            StatusBadge: true,
+            DecisionConfirmationModal: true,
+            BaseModal: true,
+            BaseAuditTrail: true,
+          },
+        },
+      });
+
+      expect(wrapper.text()).toContain("Signature");
+      expect(wrapper.text()).toContain("Verified");
+      const img = wrapper.find('img[alt="Signature"]');
+      expect(img.exists()).toBe(true);
+      expect(img.attributes("src")).toBe("data:image/png;base64,signedSigImage");
+      expect(wrapper.findComponent({ name: "BaseSignaturePad" }).exists()).toBe(false);
+    });
+  });
 });
