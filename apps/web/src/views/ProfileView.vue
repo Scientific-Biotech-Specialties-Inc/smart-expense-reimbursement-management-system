@@ -924,6 +924,7 @@ onMounted(() => {
                 label="Draw Your Signature"
                 placeholder="Draw your signature using mouse or finger"
                 heightClass="h-40"
+                :allow-profile-signature="false"
               />
 
               <p class="text-[11px] text-slate-400 leading-relaxed font-sans">
