@@ -3,11 +3,11 @@
 **Project:** Smart Expense & Reimbursement Management System (SERMS)  
 **Client / Partner:** Science Biotech Specialties Inc. (SBSI) — [https://sbsi.com.ph/about-us/](https://sbsi.com.ph/about-us/)  
 **Academic Context:** 3rd & 4th Year Capstone Project (Capstone 1: Ended July 2026 · Capstone 2: September–December 2026)  
-**Date:** Nov 11, 2026  
-**Version:** 1.9.9  
+**Date:** Nov 9, 2026  
+**Version:** 1.9.8  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** Nov 11, 2026 (Cash Advance Modal Document Name & Download Fix)  
+**Last reconciled:** Nov 9, 2026 (Sidebar Branding Redirect to Dashboard)  
 **Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
 
 ---
@@ -21,44 +21,6 @@ All notable changes, architectural decisions, and documentation updates for the 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
-
-## [2.0.0] - Nov 12, 2026
-
-### Removed
-- **Mock OCR Engine & UI Toggle Removal (`apps/api` & `apps/web`):**
-  - **Backend (`apps/api`):** Deleted `MockOcrService.php` and its dedicated test `MockOcrUploadTest.php`. Cleaned up `ReceiptService.php` and `LiquidationController.php` by removing mock request detection (`is_mock`/`mock`/`X-Mock-OCR`), fake data generation fallbacks, and mock status overrides. All receipt uploads and liquidation scans now strictly route to the asynchronous OCR pipeline job dispatch (`DispatchReceiptToAiService`). Removed obsolete `is_mock` and `mock` validation rules from `StoreReceiptRequest.php`.
-  - **Frontend (`apps/web`):** Deleted `useOcrMode.js`, `useOcrMode.test.js`, `mockOcr.js`, and `mockOcr.test.js`. Removed the OCR Mode toggle switches (`BaseToggleSwitch`) and explanatory helper text from `ReimbursementFormView.vue`, `ReimbursementsView.vue`, `LiquidationsView.vue`, and `LiquidationSettlementForm.vue`. Removed `mockMode` prop from `FileUpload.vue` and removed mock mode request flags (`is_mock`, `X-Mock-OCR`) from `useReceiptUploads.js` and `FileUpload.vue`. Cleaned up mock imports across all 9 affected Vitest test files.
-
-### Added
-- **Unified Profile Signature on Signature Pads & Test Seeder (`apps/web` & `apps/api`):**
-  - **`BaseSignaturePad.vue` Enhancements:** Added `allowProfileSignature`, `savedSignature`, and `showHelperNote` props; added automatic pre-fill from `auth.user.signature` on mount; integrated a "Use Saved Signature" (`Sparkles`) toolbar button that appears when a saved signature is available and the pad is blank or redrawn; and unified the "Pre-filled from your profile signature" helper badge across all signature touchpoints.
-  - **Cash Advance Acknowledgement Unification (`CashAdvanceDetailsModal.vue`):** Replaced legacy raw `<canvas>` and manual stroke capture handlers with reusable `<BaseSignaturePad />`, eliminating duplicate drawing logic (Axiom A-09) and enabling 1-click saved signature acknowledgement for disbursed cash advances.
-  - **Payout Modals Cleanup (`GrantPayoutModal.vue` & `PayoutDetailsModal.vue`):** Delegated pre-fill notification and re-application to `BaseSignaturePad.vue`, preventing duplicate badge markup.
-  - **Dedicated Test Seeder (`SignatureTestingSeeder.php`):** Created idempotent seeder populating demo signatures on `employee@example.com` and `sum@sbsi.com`, plus 4 test scenarios: disbursed Cash Advance (ready for employee signature acknowledgement), signed Cash Advance (ready for liquidation testing), approved Reimbursement (ready for admin payout grant with signature), and granted Reimbursement with Payout (ready for employee payout acknowledgement signature).
-  - **Automated Tests:** Authored Vitest unit tests in `BaseSignaturePad.test.js` & `CashAdvanceDetailsModal.test.js` and PHPUnit feature tests in `SignatureTestingSeederTest.php` (all passing).
-- **User Profile Module (Sprint 6 EP 12 / G2-104 to G2-110) (`apps/api` & `apps/web`):**
-  - **Database Migration (`users` table):** Added `first_name`, `middle_name`, `last_name`, `contact_number`, `signature` (`longText`), `signature_path`, and `last_login_at` columns with automatic `employee_id` (`EMP-000X`), `avatar_url`, and `has_signature` Eloquent model accessors.
-  - **Backend API & Dual-Sync Service (`ProfileService` & `ProfileController`):** Delivered `/api/profile` endpoints supporting profile updates (dual-synced with `capstone-auth-module`), photo upload/deletion (`supabase` bucket `avatars/`), hybrid signature saving/removal (`supabase` bucket `signatures/` + Base64 PNG), client-encrypted password updates (RSA forwarded to `capstone-auth-module`), and user-scoped login/change activity logs.
-  - **Login Tracking & Audit Trail Integration:** Updated `AuthenticateWithExternalService` to record `USER_LOGIN` audit logs once per unique JWT token (`jti` cache-locking) and registered profile mutation actions (`PROFILE_UPDATED`, `PROFILE_PHOTO_UPDATED`, `PROFILE_PHOTO_REMOVED`, `PASSWORD_CHANGED`, `SIGNATURE_UPDATED`, `SIGNATURE_REMOVED`) with field-level diff tracking in `AuditLogService`.
-  - **Frontend Profile Page (`ProfileView.vue`):** Built a responsive, clinical design layout featuring a top header card with avatar upload/removal, role pill, joined date, admin compliance notice (G2-105), and 3 integrated tabs:
-    1. **Personal & Work:** View/Edit personal details (first/middle/last name, contact number) while preserving read-only company fields (email, role, employee ID, department, date joined), paired with a Digital Signature card (with "Configured" status).
-    2. **Security:** Change password form with client-side payload pre-encryption, visibility toggles, and live 6-point complexity checklist.
-    3. **Activity Log:** 2-column feed displaying Last Login time callout, recent logins list, and chronological account changes with sanitized field diffs.
-  - **Removed Redundant Status Indicators:** Removed non-essential "Active" pulsing indicators and synthetic account status badges from the profile header, personal details, signature configuration, and login history cards to align with actual SERMS entity models.
-  - **Signature Pre-Filling Integration:** Enhanced `<BaseSignaturePad />` to draw existing Base64 PNG signatures on canvas and wired saved signature pre-filling into `GrantPayoutModal.vue` (`Granter's Signature`) and `PayoutDetailsModal.vue` (`Employee's Signature`) with clear/redraw support.
-  - **Top Bar Avatar Display:** Updated `AppLayout.vue` top bar to render the user's custom profile photo image with fallback to initials.
-  - **Distraction-Free Layout & Back Navigation (`AppLayout.vue` & `ProfileView.vue`):** Configured `/profile` route with `hideSidebar: true`, dynamically hiding the sidebar chrome, overlay, and toggle button to grant full width to the profile canvas; removed the breadcrumbs label and replaced it with a clean, borderless and transparent Back button (`<ArrowLeft /> Back`) that redirects the user to the last page they visited (with safe `/dashboard` fallback).
-  - **Comprehensive Automated Test Coverage:** Authored 10 PHPUnit feature tests in `ProfileControllerTest.php` and 8 Vitest unit tests in `ProfileView.test.js` & `AppLayout.test.js`, passing with 100% green status.
-
-## [1.9.9] - Nov 11, 2026
-
-### Fixed
-- **Cash Advance View Modal Document Name Truncation & Download (`apps/web`):**
-  - Resolved issue where clicking and downloading an attached document in `CashAdvanceDetailsModal.vue` caused the filename to be hidden or truncated.
-  - Implemented safe `documentDisplayName` and `hasDocument` computed properties that preserve the filename and prevent disappearing text when `store.fetchDocument()` resolves or when `file_name` is absent in API payloads.
-  - Added truncation formatting (`truncate max-w-[260px] sm:max-w-[420px]`, `shrink-0` on icons, `max-w-full`, and `:title="documentDisplayName"`) to ensure long document filenames do not overflow or push action icons off-screen.
-  - Integrated `getFileUrl()` from `@/utils/fileUtils` for robust Supabase storage URL resolution, added loading indicator state (`Loader2`), keyboard accessibility handlers (`@keydown.enter`, `@keydown.space`), and error toast handling.
-  - Added automated test cases in `CashAdvanceDetailsModal.test.js` covering document name truncation, preservation on download click, and fallback behavior.
 
 ## [1.9.8] - Nov 9, 2026
 

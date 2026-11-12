@@ -59,9 +59,7 @@ class AuthenticateWithExternalService
                 return response()->json(['message' => 'Unauthorized. Invalid token payload (missing email).'], 401);
             }
 
-            $firstName = trim((string) ($decoded->first_name ?? ''));
-            $lastName = trim((string) ($decoded->last_name ?? ''));
-            $fullName = trim($firstName . ' ' . $lastName);
+            $fullName = trim(($decoded->first_name ?? '') . ' ' . ($decoded->last_name ?? ''));
             $department = $decoded->department ?? 'General';
             $normalizedDepartment = strtolower(trim((string) $department));
             $sermsRole = $normalizedDepartment === 'accounting' ? 'admin' : 'employee';
@@ -82,9 +80,7 @@ class AuthenticateWithExternalService
                 if ($user) {
                     $user->update([
                         'auth_id' => $userId,
-                        'name' => $user->name ?: $fullName,
-                        'first_name' => $user->first_name ?: ($firstName ?: null),
-                        'last_name' => $user->last_name ?: ($lastName ?: null),
+                        'name' => $fullName,
                         'role' => $sermsRole,
                         'department' => $department,
                     ]);
@@ -93,45 +89,18 @@ class AuthenticateWithExternalService
                         'auth_id' => $userId,
                         'email' => $email,
                         'name' => $fullName,
-                        'first_name' => $firstName ?: null,
-                        'last_name' => $lastName ?: null,
                         'role' => $sermsRole,
                         'department' => $department,
                     ]);
                 }
             } else {
-                // Update company-controlled details; only backfill name parts if not yet set locally
-                $updateFields = [
+                // Update user details if they changed
+                $user->update([
                     'email' => $email,
+                    'name' => $fullName,
                     'role' => $sermsRole,
                     'department' => $department,
-                ];
-                if (empty($user->first_name) && $firstName !== '') {
-                    $updateFields['first_name'] = $firstName;
-                }
-                if (empty($user->last_name) && $lastName !== '') {
-                    $updateFields['last_name'] = $lastName;
-                }
-                if (empty($user->name) && $fullName !== '') {
-                    $updateFields['name'] = $fullName;
-                }
-                $user->update($updateFields);
-            }
-
-            // Record login activity once per unique JWT token (G2-110)
-            $loginCacheKey = 'serms_login_logged:' . ($decoded->jti ?? sha1($token));
-            if (\Illuminate\Support\Facades\Cache::add($loginCacheKey, true, 86400)) {
-                $user->forceFill(['last_login_at' => now()])->save();
-                \App\Modules\AuditLogs\Services\AuditLogService::log(
-                    $user->id,
-                    $user->role ?? $sermsRole,
-                    'USER_LOGIN',
-                    'user',
-                    $user->id,
-                    null,
-                    ['login_at' => now()->toIso8601String()],
-                    $request->ip()
-                );
+                ]);
             }
 
             // Fetch fine-grained permissions from shared Redis cache
@@ -141,13 +110,14 @@ class AuthenticateWithExternalService
             }
 
             // Assign permissions to user object dynamically so it can be used throughout the app
-            $user->permissions = $permissions;
+            $user->setAttribute('permissions', $permissions);
+            $user->setAttribute('is_admin', $user->hasAdminPrivileges());
 
             // Dynamically register gates for this request based on fetched permissions
             if (is_array($permissions)) {
                 foreach ($permissions as $permission) {
                     \Illuminate\Support\Facades\Gate::define($permission, function ($u) use ($permission) {
-                        $userPermissions = $u->permissions ?? [];
+                        $userPermissions = $u->getAttribute('permissions') ?? [];
                         return in_array($permission, $userPermissions);
                     });
                 }

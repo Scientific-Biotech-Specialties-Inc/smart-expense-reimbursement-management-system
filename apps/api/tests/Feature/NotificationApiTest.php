@@ -205,18 +205,19 @@ class NotificationApiTest extends TestCase
     {
         $receiptService = app(\App\Modules\Reimbursements\Services\ReceiptService::class);
 
-        // Employee uploads a receipt
+        // Employee uploads a mock receipt
         $receipt = $receiptService->storeReceipt($this->employee, [
             'vendor_name' => 'National Book Store',
             'transaction_date' => '2026-10-22',
             'total_amount' => 1250.50,
             'vat_amount' => 134.00,
+            'is_mock' => true,
         ], null);
 
         // Employee receives notification
         $this->assertDatabaseHas('notifications', [
             'user_id' => $this->employee->id,
-            'type' => 'receipt_uploaded',
+            'type' => 'receipt_processed',
             'module' => 'My Expense',
         ]);
 

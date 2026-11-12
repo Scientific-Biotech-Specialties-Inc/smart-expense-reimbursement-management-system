@@ -76,6 +76,13 @@ vi.mock("@/composables/useToast", () => ({
   }),
 }));
 
+vi.mock("@/composables/useOcrMode", () => ({
+  useOcrMode: () => ({
+    isMockOcr: false,
+    setMockMode: vi.fn(),
+  }),
+}));
+
 describe("ReimbursementFormView — Revised reimbursement edit & resubmit", () => {
   beforeEach(() => {
     setActivePinia(createPinia());

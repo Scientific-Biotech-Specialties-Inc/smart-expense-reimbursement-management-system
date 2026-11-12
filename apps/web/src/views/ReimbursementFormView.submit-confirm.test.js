@@ -28,6 +28,10 @@ vi.mock("@/composables/useToast", () => ({
   useToast: () => ({ addToast: vi.fn() }),
 }));
 
+vi.mock("@/composables/useOcrMode", () => ({
+  useOcrMode: () => ({ isMockOcr: ref(false), setMockMode: vi.fn() }),
+}));
+
 vi.mock("@/composables/reimbursements/useReimbursementSubmit", () => ({
   useReimbursementSubmit: () => ({
     submitting: ref(false),

@@ -45,15 +45,17 @@ describe("UnifiedRoadmapStepper", () => {
       },
     });
 
-    // Verify actor names appear in button tooltips as human-readable strings
-    expect(wrapper.html()).toContain("General Employee");
-    expect(wrapper.html()).toContain("Finance Manager");
+    const renderedText = wrapper.text();
+
+    // Verify actor names appear as human-readable strings
+    expect(renderedText).toContain("General Employee");
+    expect(renderedText).toContain("Finance Manager");
 
     // Verify raw JSON object strings are NOT leaked into the rendered output
-    expect(wrapper.html()).not.toContain('{"id":');
-    expect(wrapper.html()).not.toContain('"auth_id":');
-    expect(wrapper.html()).not.toContain('"role":');
-    expect(wrapper.html()).not.toContain("[object Object]");
+    expect(renderedText).not.toContain('{"id":');
+    expect(renderedText).not.toContain('"auth_id":');
+    expect(renderedText).not.toContain('"role":');
+    expect(renderedText).not.toContain("[object Object]");
   });
 
   it("handles string actor and JSON-stringified actor in statusHistory", () => {
@@ -79,9 +81,10 @@ describe("UnifiedRoadmapStepper", () => {
       },
     });
 
-    expect(wrapper.html()).toContain("Jane Doe");
-    expect(wrapper.html()).toContain("John Admin");
-    expect(wrapper.html()).not.toContain('"role":');
+    const renderedText = wrapper.text();
+    expect(renderedText).toContain("Jane Doe");
+    expect(renderedText).toContain("John Admin");
+    expect(renderedText).not.toContain('"role":');
   });
 
   it("renders horizontal 1-row layout by default (for cash advance pages and modals)", () => {
@@ -92,18 +95,18 @@ describe("UnifiedRoadmapStepper", () => {
       },
     });
 
-    const connectorLines = wrapper.findAll(".h-0\\.5.bg-slate-100");
-    expect(connectorLines.length).toBe(1);
+    const desktopLines = wrapper.findAll(".sm\\:block.h-0\\.5");
+    expect(desktopLines.length).toBe(1);
 
-    expect(connectorLines[0].classes()).toContain("top-4");
-    expect(connectorLines[0].classes()).toContain("-translate-y-1/2");
+    expect(desktopLines[0].classes()).toContain("top-4");
+    expect(desktopLines[0].classes()).toContain("-translate-y-1/2");
 
-    const styleAttr = connectorLines[0].attributes("style");
+    const styleAttr = desktopLines[0].attributes("style");
     // For 6 steps horizontal, offset is 100 / (2 * 6) = 8.333%
     expect(styleAttr).toContain("8.33");
   });
 
-  it("renders 6-step unified horizontal layout without stacked serpentine phases", () => {
+  it("renders 6-step serpentine layout when layout='serpentine' without Under Review or Decision steps", () => {
     const wrapper = mount(UnifiedRoadmapStepper, {
       props: {
         cashAdvance: baseCashAdvance,
@@ -113,9 +116,8 @@ describe("UnifiedRoadmapStepper", () => {
     });
 
     const text = wrapper.text();
-    // Serpentine stacked phase division headers are deprecated in favor of streamlined flow
-    expect(text).not.toContain("Phase 1: Cash Advance");
-    expect(text).not.toContain("Phase 2: Liquidation & Settlement");
+    expect(text).toContain("Phase 1: Cash Advance");
+    expect(text).toContain("Phase 2: Liquidation & Settlement");
 
     // Must NOT contain removed steps
     expect(text).not.toContain("Under Review");
@@ -129,17 +131,16 @@ describe("UnifiedRoadmapStepper", () => {
     expect(text).toContain("Liquidation");
     expect(text).toContain("Settled");
 
-    // Single unified connector line across all 6 steps
-    const lines = wrapper.findAll(".h-0\\.5.bg-slate-100");
-    expect(lines.length).toBe(1);
-    expect(lines[0].classes()).toContain("top-4");
-    expect(lines[0].classes()).toContain("-translate-y-1/2");
+    // Check connector lines for row 1 and row 2
+    const lines = wrapper.findAll(".sm\\:block.h-0\\.5");
+    expect(lines.length).toBe(2);
 
-    // Scrollable container exists with scrollbar-none
-    const scroller = wrapper.find('[aria-label="Workflow step roadmap"]');
-    expect(scroller.exists()).toBe(true);
-    expect(scroller.classes()).toContain("overflow-x-auto");
-    expect(scroller.classes()).toContain("scrollbar-none");
+    lines.forEach((line) => {
+      expect(line.classes()).toContain("top-4");
+      expect(line.classes()).toContain("-translate-y-1/2");
+      const styleAttr = line.attributes("style");
+      expect(styleAttr).toContain("12.5%");
+    });
   });
 
   it("renders Step 5 (Liquidation) as Pending when advance is signed but liquidation is not yet submitted", () => {
@@ -289,18 +290,18 @@ describe("UnifiedRoadmapStepper", () => {
     const stepItems = wrapper.findAllComponents({ name: "RoadmapStepItem" });
     expect(stepItems.length).toBe(6);
 
-    // Step 2 (Approval) should have the approver in tooltip
-    expect(stepItems[1].find("button").attributes("title")).toContain("Finance Manager Approver");
+    // Step 2 (Approval) should have the approver
+    expect(stepItems[1].text()).toContain("Finance Manager Approver");
 
-    // Step 3 (Disbursed) should have the disburser in tooltip
-    expect(stepItems[2].find("button").attributes("title")).toContain("Finance Disburser");
+    // Step 3 (Disbursed) should have the disburser
+    expect(stepItems[2].text()).toContain("Finance Disburser");
 
-    // Step 4 (Acknowledged) should have the employee in tooltip
-    expect(stepItems[3].find("button").attributes("title")).toContain("General Employee");
+    // Step 4 (Acknowledged) should have the employee
+    expect(stepItems[3].text()).toContain("General Employee");
 
     // Step 5 (Liquidation) must NOT have been tackled yet — must NOT contain Finance Manager Approver or Finance Disburser
-    expect(stepItems[4].find("button").attributes("title")).not.toContain("Finance Manager Approver");
-    expect(stepItems[4].find("button").attributes("title")).not.toContain("Finance Disburser");
+    expect(stepItems[4].text()).not.toContain("Finance Manager Approver");
+    expect(stepItems[4].text()).not.toContain("Finance Disburser");
     expect(stepItems[4].props("historyEntry")).toBeNull();
   });
 
@@ -352,10 +353,10 @@ describe("UnifiedRoadmapStepper", () => {
     const stepItems = wrapper.findAllComponents({ name: "RoadmapStepItem" });
     expect(stepItems.length).toBe(6);
 
-    // Step 5 (Liquidation) must show the employee who submitted in tooltip, NOT the approver or disburser
-    expect(stepItems[4].find("button").attributes("title")).toContain("General Employee");
-    expect(stepItems[4].find("button").attributes("title")).not.toContain("Finance Manager Approver");
-    expect(stepItems[4].find("button").attributes("title")).not.toContain("Finance Disburser");
+    // Step 5 (Liquidation) must show the employee who submitted, NOT the approver or disburser
+    expect(stepItems[4].text()).toContain("General Employee");
+    expect(stepItems[4].text()).not.toContain("Finance Manager Approver");
+    expect(stepItems[4].text()).not.toContain("Finance Disburser");
   });
 
   it("resolves Step 2 (Approval) metadata from approval_actions when statusHistory is empty", () => {
@@ -381,7 +382,7 @@ describe("UnifiedRoadmapStepper", () => {
     const step2 = stepItems[1];
     expect(step2.props("state")).toBe("completed");
     expect(step2.props("sublabel")).toBe("Approved");
-    expect(step2.find("button").attributes("title")).toContain("Finance Director");
+    expect(step2.text()).toContain("Finance Director");
     expect(step2.props("historyEntry")).not.toBeNull();
     expect(step2.props("historyEntry").actor).toBe("Finance Director");
   });
@@ -406,7 +407,7 @@ describe("UnifiedRoadmapStepper", () => {
     const stepItems = wrapper.findAllComponents({ name: "RoadmapStepItem" });
     const step3 = stepItems[2];
     expect(step3.props("sublabel")).toBe("Released");
-    expect(step3.find("button").attributes("title")).toContain("Disbursement Officer");
+    expect(step3.text()).toContain("Disbursement Officer");
     expect(step3.props("historyEntry").actor).toBe("Disbursement Officer");
     expect(step3.props("historyEntry").comment).toBe("REF-99881");
   });
@@ -466,13 +467,11 @@ describe("UnifiedRoadmapStepper", () => {
       },
     });
 
-    const penaltyBadge = wrapper.find('[title="Overdue penalty"]');
-    expect(penaltyBadge.exists()).toBe(true);
-    expect(penaltyBadge.text()).toBe("₱2,250");
+    expect(wrapper.text()).toContain("PHP 2,250");
     expect(wrapper.text()).not.toContain("(Day");
   });
 
-  it("renders continuous horizontal layout when overpayment is added (>6 steps)", () => {
+  it("splits into 2-row serpentine layout when overpayment is added (>6 steps)", () => {
     const wrapper = mount(UnifiedRoadmapStepper, {
       props: {
         cashAdvance: {
@@ -485,18 +484,12 @@ describe("UnifiedRoadmapStepper", () => {
     });
 
     const text = wrapper.text();
-    expect(text).not.toContain("Phase 1: Cash Advance");
-    expect(text).not.toContain("Phase 2: Liquidation & Settlement");
+    expect(text).toContain("Phase 1: Cash Advance");
+    expect(text).toContain("Phase 2: Liquidation & Settlement");
     expect(text).toContain("Overpayment");
     expect(text).toContain("₱5,000.00 → Reimbursement");
 
     const stepItems = wrapper.findAllComponents({ name: "RoadmapStepItem" });
     expect(stepItems.length).toBe(7);
-
-    // Connector line spans 7 steps (100 / (2 * 7) = 7.14%)
-    const lines = wrapper.findAll(".h-0\\.5.bg-slate-100");
-    expect(lines.length).toBe(1);
-    const styleAttr = lines[0].attributes("style");
-    expect(styleAttr).toContain("7.14");
   });
 });

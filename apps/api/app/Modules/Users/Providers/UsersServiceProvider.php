@@ -23,10 +23,5 @@ class UsersServiceProvider extends ServiceProvider
         if (is_dir($migrationPath)) {
             $this->loadMigrationsFrom($migrationPath);
         }
-
-        $routesPath = __DIR__ . '/../routes/api.php';
-        if (file_exists($routesPath)) {
-            $this->loadRoutesFrom($routesPath);
-        }
     }
 }

@@ -4,7 +4,6 @@ import { ref } from "vue";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import CashAdvanceDetailsModal from "./CashAdvanceDetailsModal.vue";
-import { useCashAdvanceStore } from "@/stores/cashAdvance";
 
 const mockExportReport = vi.fn(() => Promise.resolve(true));
 vi.mock("@/composables/useReportExport", () => ({
@@ -96,7 +95,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
     expect(mockExportReport).toHaveBeenCalledWith("cash-advance", 21);
   });
 
-  it("passes layout='horizontal' to UnifiedRoadmapStepper when overpayment exists (Admin)", async () => {
+  it("passes layout='serpentine' to UnifiedRoadmapStepper when overpayment exists (Admin)", async () => {
     mockAuth.isAdmin = true;
     const wrapper = mount(CashAdvanceDetailsModal, {
       props: {
@@ -125,10 +124,10 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
     });
 
     const stepper = wrapper.find('[data-testid="stepper"]');
-    expect(stepper.attributes("data-layout")).toBe("horizontal");
+    expect(stepper.attributes("data-layout")).toBe("serpentine");
   });
 
-  it("passes layout='horizontal' to UnifiedRoadmapStepper when overpayment exists (Employee)", async () => {
+  it("passes layout='serpentine' to UnifiedRoadmapStepper when overpayment exists (Employee)", async () => {
     mockAuth.isAdmin = false;
     const wrapper = mount(CashAdvanceDetailsModal, {
       props: {
@@ -157,7 +156,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
     });
 
     const stepper = wrapper.find('[data-testid="stepper"]');
-    expect(stepper.attributes("data-layout")).toBe("horizontal");
+    expect(stepper.attributes("data-layout")).toBe("serpentine");
   });
 
   it("renders BaseAuditTrail in Admin view", () => {
@@ -297,252 +296,6 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
       expect(disburseBtn.classes()).not.toContain("flex-1");
       expect(disburseBtn.classes()).not.toContain("sm:max-w-[220px]");
       expect(disburseBtn.classes()).toContain("px-5");
-    });
-  });
-
-  describe("Document Attachment & Download", () => {
-    it("renders document attachment link with truncate classes and title tooltip in Admin view", () => {
-      mockAuth.isAdmin = true;
-      const longName = "very_long_cash_advance_document_travel_form_2026_q4_operations.pdf";
-      const wrapper = mount(CashAdvanceDetailsModal, {
-        props: {
-          isOpen: true,
-          record: {
-            id: 50,
-            userId: 10,
-            amount: 5000,
-            balance: 5000,
-            status: "pending",
-            documentFileName: longName,
-          },
-        },
-        global: {
-          stubs: {
-            UnifiedRoadmapStepper: true,
-            StatusBadge: true,
-            DecisionConfirmationModal: true,
-            BaseModal: true,
-          },
-        },
-      });
-
-      const docLink = wrapper.find('a[role="button"]');
-      expect(docLink.exists()).toBe(true);
-      expect(docLink.attributes("title")).toBe(longName);
-      expect(docLink.classes()).toContain("max-w-full");
-
-      const span = docLink.find("span");
-      expect(span.text()).toBe(longName);
-      expect(span.classes()).toContain("truncate");
-    });
-
-    it("renders document attachment link with truncate classes in Employee view", () => {
-      mockAuth.isAdmin = false;
-      const fileName = "employee_itinerary_receipt.pdf";
-      const wrapper = mount(CashAdvanceDetailsModal, {
-        props: {
-          isOpen: true,
-          record: {
-            id: 51,
-            userId: 99,
-            amount: 3000,
-            balance: 3000,
-            status: "pending",
-            documentFileName: fileName,
-          },
-        },
-        global: {
-          stubs: {
-            UnifiedRoadmapStepper: true,
-            StatusBadge: true,
-            DecisionConfirmationModal: true,
-            BaseModal: true,
-          },
-        },
-      });
-
-      const docLink = wrapper.find('a[role="button"]');
-      expect(docLink.exists()).toBe(true);
-      expect(docLink.attributes("title")).toBe(fileName);
-
-      const span = docLink.find("span");
-      expect(span.text()).toBe(fileName);
-      expect(span.classes()).toContain("truncate");
-    });
-
-    it("preserves document filename without hiding it when clicking download", async () => {
-      mockAuth.isAdmin = true;
-      const store = useCashAdvanceStore();
-      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-
-      // Simulate API returning document where file_name is missing or structured differently
-      store.fetchDocument = vi.fn().mockResolvedValue({
-        id: 1,
-        file_path: "documents/cash_advances/advance_52.pdf",
-        file_url: "https://example.com/advance_52.pdf",
-      });
-
-      const initialName = "initial_receipt_name.pdf";
-      const wrapper = mount(CashAdvanceDetailsModal, {
-        props: {
-          isOpen: true,
-          record: {
-            id: 52,
-            userId: 10,
-            amount: 4000,
-            balance: 4000,
-            status: "pending",
-            documentFileName: initialName,
-          },
-        },
-        global: {
-          stubs: {
-            UnifiedRoadmapStepper: true,
-            StatusBadge: true,
-            DecisionConfirmationModal: true,
-            BaseModal: true,
-          },
-        },
-      });
-
-      const docLink = wrapper.find('a[role="button"]');
-      expect(docLink.text()).toContain(initialName);
-
-      await docLink.trigger("click");
-
-      expect(store.fetchDocument).toHaveBeenCalledWith(52);
-      expect(clickSpy).toHaveBeenCalled();
-
-      // Ensure the filename was NOT hidden or blanked out
-      expect(docLink.text()).toContain(initialName);
-      expect(docLink.find("span").text()).toBe(initialName);
-
-      clickSpy.mockRestore();
-    });
-
-    it("updates document filename when fetched document has a distinct file_name", async () => {
-      mockAuth.isAdmin = true;
-      const store = useCashAdvanceStore();
-      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-
-      const updatedName = "official_signed_permit.pdf";
-      store.fetchDocument = vi.fn().mockResolvedValue({
-        id: 2,
-        file_name: updatedName,
-        file_path: "documents/cash_advances/permit.pdf",
-        file_url: "https://example.com/permit.pdf",
-      });
-
-      const wrapper = mount(CashAdvanceDetailsModal, {
-        props: {
-          isOpen: true,
-          record: {
-            id: 53,
-            userId: 10,
-            amount: 4000,
-            balance: 4000,
-            status: "pending",
-            documentFileName: "generic_request.pdf",
-          },
-        },
-        global: {
-          stubs: {
-            UnifiedRoadmapStepper: true,
-            StatusBadge: true,
-            DecisionConfirmationModal: true,
-            BaseModal: true,
-          },
-        },
-      });
-
-      const docLink = wrapper.find('a[role="button"]');
-      await docLink.trigger("click");
-
-      expect(docLink.find("span").text()).toBe(updatedName);
-      expect(docLink.attributes("title")).toBe(updatedName);
-
-      clickSpy.mockRestore();
-    });
-  });
-
-  describe("CashAdvanceDetailsModal — Signature & Acknowledgement", () => {
-    it("renders BaseSignaturePad and pre-fills from auth.user.signature when acknowledging disbursed advance", async () => {
-      mockAuth.isAdmin = false;
-      mockAuth.user = {
-        id: 10,
-        name: "Test Employee",
-        signature: "data:image/png;base64,empSavedSig",
-      };
-
-      const wrapper = mount(CashAdvanceDetailsModal, {
-        props: {
-          isOpen: true,
-          record: {
-            id: 88,
-            userId: 10,
-            amount: 5000,
-            balance: 5000,
-            status: "disbursed",
-            acknowledgedAt: null,
-            signatureImage: null,
-          },
-        },
-        global: {
-          stubs: {
-            UnifiedRoadmapStepper: true,
-            StatusBadge: true,
-            DecisionConfirmationModal: true,
-            BaseModal: true,
-            BaseAuditTrail: true,
-          },
-        },
-      });
-
-      const sigPad = wrapper.findComponent({ name: "BaseSignaturePad" });
-      expect(sigPad.exists()).toBe(true);
-
-      const acknowledgeBtn = wrapper.findAll("button").find((b) => b.text().includes("I acknowledge"));
-      expect(acknowledgeBtn).toBeTruthy();
-      expect(acknowledgeBtn.attributes("disabled")).toBeUndefined();
-    });
-
-    it("renders verified signature preview when viewing an already signed cash advance in Employee view", () => {
-      mockAuth.isAdmin = false;
-      mockAuth.user = {
-        id: 10,
-        name: "Test Employee",
-      };
-
-      const wrapper = mount(CashAdvanceDetailsModal, {
-        props: {
-          isOpen: true,
-          record: {
-            id: 12,
-            userId: 10,
-            amount: 5500,
-            balance: 5500,
-            status: "signed",
-            acknowledgedAt: "2026-11-10T08:00:00Z",
-            signatureImage: "data:image/png;base64,signedSigImage",
-          },
-        },
-        global: {
-          stubs: {
-            UnifiedRoadmapStepper: true,
-            StatusBadge: true,
-            DecisionConfirmationModal: true,
-            BaseModal: true,
-            BaseAuditTrail: true,
-          },
-        },
-      });
-
-      expect(wrapper.text()).toContain("Signature");
-      expect(wrapper.text()).toContain("Verified");
-      const img = wrapper.find('img[alt="Signature"]');
-      expect(img.exists()).toBe(true);
-      expect(img.attributes("src")).toBe("data:image/png;base64,signedSigImage");
-      expect(wrapper.findComponent({ name: "BaseSignaturePad" }).exists()).toBe(false);
     });
   });
 });

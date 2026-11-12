@@ -5,6 +5,7 @@ import {
   buildPrefilledReceiptDraft,
   getMissingReceiptFields,
 } from "@/utils/receiptUtils";
+import { useOcrMode } from "@/composables/useOcrMode";
 import { isOcrOfflineFailure } from "@/utils/ocrErrors";
 
 export function useReceiptUploads(options = {}) {
@@ -286,6 +287,13 @@ export function useReceiptUploads(options = {}) {
     const allowedMimeTypes = ["image/jpeg", "image/png", "application/pdf"];
     const files = Array.from(fileList || []);
 
+    let isMockMode = false;
+    try {
+      isMockMode = Boolean(useOcrMode()?.isMockOcr?.value);
+    } catch {
+      isMockMode = false;
+    }
+
     const accepted = files.filter((file) =>
       allowedMimeTypes.includes(file.type),
     );
@@ -325,10 +333,15 @@ export function useReceiptUploads(options = {}) {
         if (forceProcess) {
           formData.append("force_process", "1");
         }
+        // Fast mock path — real file upload, instant mock data, skip OCR wait.
+        if (isMockMode) {
+          formData.append("is_mock", "1");
+        }
 
         const headers = { Accept: "application/json" };
         if (authStore.token)
           headers["Authorization"] = `Bearer ${authStore.token}`;
+        if (isMockMode) headers["X-Mock-OCR"] = "1";
 
         const res = await fetch("/api/serms/reimbursements/receipts", {
           method: "POST",
@@ -554,6 +567,13 @@ export function useReceiptUploads(options = {}) {
   async function submitSegments(files) {
     if (!files || files.length < 2) return;
 
+    let isMockMode = false;
+    try {
+      isMockMode = Boolean(useOcrMode()?.isMockOcr?.value);
+    } catch {
+      isMockMode = false;
+    }
+
     const tempId = `temp-seg-${Date.now()}`;
     const firstFile = files[0];
     const segmentImages = files.map((file, idx) => ({
@@ -579,10 +599,12 @@ export function useReceiptUploads(options = {}) {
         formData.append("files[]", file);
       });
       if (isDraftMode) formData.append("is_draft", "1");
+      if (isMockMode) formData.append("is_mock", "1");
 
       const headers = { Accept: "application/json" };
       if (authStore.token)
         headers["Authorization"] = `Bearer ${authStore.token}`;
+      if (isMockMode) headers["X-Mock-OCR"] = "1";
 
       const res = await fetch("/api/serms/reimbursements/receipts/segmented", {
         method: "POST",
