@@ -22,7 +22,6 @@ class DatabaseSeeder extends Seeder
         $this->call([
             \App\Modules\Reimbursements\Database\Seeders\ExpenseCategorySeeder::class,
             \App\Modules\CashAdvances\Database\Seeders\OverdueCashAdvanceSeeder::class,
-            \App\Modules\CashAdvances\Database\Seeders\SignatureTestingSeeder::class,
         ]);
     }
 }

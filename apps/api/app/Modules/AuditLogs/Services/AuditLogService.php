@@ -40,14 +40,6 @@ class AuditLogService
         'LIQUIDATION_REJECTED' => ['label' => 'Rejected', 'tone' => 'danger', 'domain' => 'liquidation', 'domain_label' => 'Liquidation'],
 
         'OVERDUE_PENALTY' => ['label' => 'Daily Penalty Applied', 'tone' => 'danger', 'domain' => 'cash_advance', 'domain_label' => 'Cash Advance'],
-
-        'USER_LOGIN' => ['label' => 'Signed In', 'tone' => 'info', 'domain' => 'profile', 'domain_label' => 'Account Security'],
-        'PROFILE_UPDATED' => ['label' => 'Profile Details Updated', 'tone' => 'neutral', 'domain' => 'profile', 'domain_label' => 'Profile'],
-        'PROFILE_PHOTO_UPDATED' => ['label' => 'Profile Photo Updated', 'tone' => 'info', 'domain' => 'profile', 'domain_label' => 'Profile'],
-        'PROFILE_PHOTO_REMOVED' => ['label' => 'Profile Photo Removed', 'tone' => 'warning', 'domain' => 'profile', 'domain_label' => 'Profile'],
-        'PASSWORD_CHANGED' => ['label' => 'Password Changed', 'tone' => 'success', 'domain' => 'profile', 'domain_label' => 'Account Security'],
-        'SIGNATURE_UPDATED' => ['label' => 'Digital Signature Saved', 'tone' => 'info', 'domain' => 'profile', 'domain_label' => 'Profile'],
-        'SIGNATURE_REMOVED' => ['label' => 'Digital Signature Removed', 'tone' => 'warning', 'domain' => 'profile', 'domain_label' => 'Profile'],
     ];
 
     private const DIFF_FIELDS = [
@@ -65,11 +57,6 @@ class AuditLogService
         'admin_note' => 'Admin Note',
         'payout_method' => 'Payout Method',
         'status' => 'Status',
-        'name' => 'Full Name',
-        'first_name' => 'First Name',
-        'middle_name' => 'Middle Name',
-        'last_name' => 'Last Name',
-        'contact_number' => 'Contact Number',
     ];
 
     /**
