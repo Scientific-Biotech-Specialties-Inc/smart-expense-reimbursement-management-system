@@ -208,6 +208,232 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
+  /**
+   * Update local user state and sync with localStorage.
+   * @param {object} updatedUser
+   */
+  function updateUserState(updatedUser) {
+    if (!updatedUser) return;
+    user.value = { ...(user.value || {}), ...updatedUser };
+    localStorage.setItem("serms_user", JSON.stringify(user.value));
+  }
+
+  /**
+   * Update personal and contact details (Dual-Sync with auth module).
+   * @param {object} payload - { first_name, middle_name, last_name, contact_number }
+   */
+  async function updateProfile(payload) {
+    const headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+    if (token.value) {
+      headers["Authorization"] = `Bearer ${token.value}`;
+    }
+
+    const response = await fetch("/api/serms/profile", {
+      method: "PUT",
+      headers,
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      const errorMsg = data.errors
+        ? Object.values(data.errors).flat().join(" ")
+        : data.message || "Failed to update profile.";
+      throw new Error(errorMsg);
+    }
+
+    if (data.user) {
+      updateUserState(data.user);
+    }
+    return data;
+  }
+
+  /**
+   * Upload a new avatar photo to Supabase storage.
+   * @param {File} file
+   */
+  async function uploadProfilePhoto(file) {
+    const headers = {
+      Accept: "application/json",
+    };
+    if (token.value) {
+      headers["Authorization"] = `Bearer ${token.value}`;
+    }
+
+    const formData = new FormData();
+    formData.append("photo", file);
+
+    const response = await fetch("/api/serms/profile/photo", {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: formData,
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      const errorMsg = data.errors
+        ? Object.values(data.errors).flat().join(" ")
+        : data.message || "Failed to upload profile photo.";
+      throw new Error(errorMsg);
+    }
+
+    if (data.user) {
+      updateUserState(data.user);
+    }
+    return data;
+  }
+
+  /**
+   * Remove the current avatar photo and revert to initials.
+   */
+  async function removeProfilePhoto() {
+    const headers = {
+      Accept: "application/json",
+    };
+    if (token.value) {
+      headers["Authorization"] = `Bearer ${token.value}`;
+    }
+
+    const response = await fetch("/api/serms/profile/photo", {
+      method: "DELETE",
+      headers,
+      credentials: "include",
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || "Failed to remove profile photo.");
+    }
+
+    if (data.user) {
+      updateUserState(data.user);
+    }
+    return data;
+  }
+
+  /**
+   * Save a digital signature (Base64 PNG) to profile.
+   * @param {string} signatureDataUrl
+   */
+  async function saveSignature(signatureDataUrl) {
+    const headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+    if (token.value) {
+      headers["Authorization"] = `Bearer ${token.value}`;
+    }
+
+    const response = await fetch("/api/serms/profile/signature", {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify({ signature: signatureDataUrl }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      const errorMsg = data.errors
+        ? Object.values(data.errors).flat().join(" ")
+        : data.message || "Failed to save signature.";
+      throw new Error(errorMsg);
+    }
+
+    if (data.user) {
+      updateUserState(data.user);
+    }
+    return data;
+  }
+
+  /**
+   * Remove the saved digital signature.
+   */
+  async function removeSignature() {
+    const headers = {
+      Accept: "application/json",
+    };
+    if (token.value) {
+      headers["Authorization"] = `Bearer ${token.value}`;
+    }
+
+    const response = await fetch("/api/serms/profile/signature", {
+      method: "DELETE",
+      headers,
+      credentials: "include",
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || "Failed to remove signature.");
+    }
+
+    if (data.user) {
+      updateUserState(data.user);
+    }
+    return data;
+  }
+
+  /**
+   * Change account password with client-side payload pre-encryption.
+   * @param {object} payload - { current_password, new_password, new_password_confirmation }
+   */
+  async function changePassword(payload) {
+    const envelope = await encryptPayload(JSON.stringify(payload));
+
+    const headers = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+    if (token.value) {
+      headers["Authorization"] = `Bearer ${token.value}`;
+    }
+
+    const response = await fetch("/api/serms/profile/password", {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify(envelope),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      const errorMsg = data.errors
+        ? Object.values(data.errors).flat().join(" ")
+        : data.message || "Failed to change password.";
+      throw new Error(errorMsg);
+    }
+
+    return data;
+  }
+
+  /**
+   * Fetch user-scoped login and account activity logs.
+   */
+  async function fetchProfileActivity() {
+    const headers = {
+      Accept: "application/json",
+    };
+    if (token.value) {
+      headers["Authorization"] = `Bearer ${token.value}`;
+    }
+
+    const response = await fetch("/api/serms/profile/activity", {
+      headers,
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to load activity logs.");
+    }
+
+    return await response.json();
+  }
+
   return {
     user,
     isAuthenticated,
@@ -221,5 +447,13 @@ export const useAuthStore = defineStore("auth", () => {
     logout,
     clearSession,
     verifyPassword,
+    updateUserState,
+    updateProfile,
+    uploadProfilePhoto,
+    removeProfilePhoto,
+    saveSignature,
+    removeSignature,
+    changePassword,
+    fetchProfileActivity,
   };
 });

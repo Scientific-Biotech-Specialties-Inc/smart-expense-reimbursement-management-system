@@ -6,7 +6,6 @@ use App\Modules\Users\Models\User;
 use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
-use App\Modules\Ai\Services\MockOcrService;
 use App\Modules\Reimbursements\Jobs\DispatchReceiptToAiService;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -123,8 +122,6 @@ class ReceiptService
 
             $this->validateDuplicateReceipt($storedFile['file_hash']);
 
-            $isMock = MockOcrService::isMockRequest($validated);
-            $mock = $isMock ? MockOcrService::generate($files[0]?->getClientOriginalName() ?? 'receipt.jpg') : [];
             $isDraft = (bool) ($validated['is_draft'] ?? false);
 
             $receipt = Receipt::create([
@@ -134,60 +131,27 @@ class ReceiptService
                 'file_type'            => $storedFile['file_type'],
                 'file_size_bytes'      => $storedFile['file_size_bytes'],
                 'expense_category_id'  => $validated['expense_category_id'] ?? null,
-                'vendor_name'          => $validated['vendor_name'] ?? $mock['vendor_name'] ?? null,
-                'transaction_date'     => $validated['transaction_date'] ?? $mock['transaction_date'] ?? null,
-                'total_amount'         => $validated['total_amount'] ?? $mock['total_amount'] ?? null,
-                'subtotal'             => $validated['subtotal'] ?? $mock['subtotal'] ?? null,
-                'vat_amount'           => $validated['vat_amount'] ?? $mock['vat_amount'] ?? null,
-                'discount_amount'      => $validated['discount_amount'] ?? $mock['discount_amount'] ?? 0,
-                'discount_type'        => $validated['discount_type'] ?? $mock['discount_type'] ?? 'none',
-                'tin'                  => $validated['tin'] ?? $mock['tin'] ?? null,
-                'invoice_number'       => $validated['invoice_number'] ?? $mock['invoice_number'] ?? null,
-                'vat_classification'   => $validated['vat_classification'] ?? $mock['vat_classification'] ?? null,
-                'currency'             => $validated['currency'] ?? $mock['currency'] ?? ($isMock ? 'PHP' : null),
-                'location'             => $validated['location'] ?? $mock['location'] ?? null,
-                'ocr_confidence_score' => $mock['ocr_confidence_score'] ?? null,
+                'vendor_name'          => $validated['vendor_name'] ?? null,
+                'transaction_date'     => $validated['transaction_date'] ?? null,
+                'total_amount'         => $validated['total_amount'] ?? null,
+                'subtotal'             => $validated['subtotal'] ?? null,
+                'vat_amount'           => $validated['vat_amount'] ?? null,
+                'discount_amount'      => $validated['discount_amount'] ?? 0,
+                'discount_type'        => $validated['discount_type'] ?? 'none',
+                'tin'                  => $validated['tin'] ?? null,
+                'invoice_number'       => $validated['invoice_number'] ?? null,
+                'vat_classification'   => $validated['vat_classification'] ?? null,
+                'currency'             => $validated['currency'] ?? null,
+                'location'             => $validated['location'] ?? null,
+                'ocr_confidence_score' => null,
                 'ocr_flagged'          => false,
                 'is_archived'          => false,
                 'is_draft'             => $isDraft,
-                'status'               => $isMock ? 'processed' : 'processing',
+                'status'               => 'processing',
             ]);
 
             if (!empty($validated['items'])) {
                 $receipt->items()->createMany($validated['items']);
-            } elseif ($isMock && !empty($mock['items'])) {
-                $receipt->items()->createMany($mock['items']);
-            }
-
-            if ($isMock) {
-                $receipt->load('category', 'items', 'uploader');
-
-                AuditLogService::log(
-                    actorId: $user->id,
-                    actorRole: $user->role,
-                    actionType: 'RECEIPT_CREATED',
-                    entityType: 'receipt',
-                    entityId: $receipt->id,
-                    beforeState: null,
-                    afterState: $receipt->toArray(),
-                    ipAddress: request()->ip(),
-                );
-
-                if (!$isDraft) {
-                    $amountText = $receipt->total_amount ? ' (' . NotificationService::formatPeso($receipt->total_amount) . ')' : '';
-                    NotificationService::notifyUser(
-                        userId: $user->id,
-                        type: 'receipt_processed',
-                        module: 'My Expense',
-                        title: 'Receipt Processed',
-                        message: "Your My Expense receipt #{$receipt->id}{$amountText} was uploaded and processed.",
-                        recordLink: "/my-expense?view={$receipt->id}",
-                        recordType: 'receipt',
-                        recordId: $receipt->id
-                    );
-                }
-
-                return $receipt;
             }
 
             // Dispatch to the external AI OCR + categorization service (callback-based;

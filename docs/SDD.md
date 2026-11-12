@@ -147,7 +147,7 @@ app/Modules/{ModuleName}/
 | `AuditLogs` | `App\Modules\AuditLogs` | `AuditLogService` | — | Centralized append-only audit trail logging (`AuditLogService::log()`) and compliance export action tracking. |
 | `Notifications` | `App\Modules\Notifications` | `NotificationDeliveryService` | — | Template-based in-app notification dispatching, failed attempt logging, and role-based hierarchy resolution. |
 | `Ai` | `App\Modules\Ai` | `AiServiceOcrEngine`<br>`TesseractOcrEngine` | — | OCR contract bindings (`OcrEngineInterface`, `AsyncOcrEngineInterface`), external OCR service communication, payload signing, and webhook validation. |
-| `Users` | `App\Modules\Users` | `User` Model & Providers | — | User identity mapping, department and organizational hierarchy resolution, and role policy checks. |
+| `Users` | `/api/profile`<br>`App\Modules\Users` | `ProfileController`<br>`ProfileService`<br>`User` Model & Providers | — | User identity mapping, profile management (personal/contact details Dual-Sync with `capstone-auth-module`), Supabase avatar and hybrid signature storage, client-encrypted password updates, and user-scoped audit activity logs. |
 | `Shared` | `/api/crypto`<br>`/api/auth`<br>`App\Modules\Shared` | `CryptoController`<br>`AuthController`<br>`PayloadDecryptionService`<br>`PasswordVerificationService` | — | Cryptographic public key distribution (`GET /api/crypto/key`), client payload pre-encryption decryption middleware (`DecryptPayloadMiddleware`), external auth SSO proxying (`/api/auth/me`), and password re-verification. |
 
 ### Cross-Cutting Services
@@ -173,7 +173,18 @@ erDiagram
     users {
         bigint id PK
         string name
+        string first_name
+        string middle_name
+        string last_name
         string email
+        string role
+        string grade
+        string department
+        string contact_number
+        string avatar
+        longtext signature
+        string signature_path
+        timestamp last_login_at
         boolean is_admin
         string auth_id
     }

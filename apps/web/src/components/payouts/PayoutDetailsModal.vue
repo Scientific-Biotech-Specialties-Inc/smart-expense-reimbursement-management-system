@@ -1,11 +1,15 @@
 <script setup>
 import { ref, watch } from "vue";
+import { getActivePinia } from "pinia";
+import { useAuthStore } from "@/stores/auth";
 import { formatAmount, formatDate } from "@/utils/formatters";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
 import { X, PenTool, Clock, CheckCircle2 } from "lucide-vue-next";
+
+const auth = getActivePinia() ? useAuthStore() : null;
 
 const props = defineProps({
   record: {
@@ -29,8 +33,9 @@ const employeeSignature = ref("");
 watch(
   () => props.record,
   () => {
-    employeeSignature.value = "";
+    employeeSignature.value = (!props.isAdmin && auth?.user?.signature) ? auth.user.signature : "";
   },
+  { immediate: true },
 );
 
 function handleAcknowledge() {
@@ -204,14 +209,14 @@ function handleAcknowledge() {
             <!-- Case 2: Unacknowledged & Employee (can draw and submit signature) -->
             <div
               v-else-if="!isAdmin"
-              class="space-y-3"
+              class="space-y-3 flex flex-col items-center"
             >
               <BaseSignaturePad
                 v-model="employeeSignature"
                 label="Employee's Signature *"
                 placeholder="Draw your signature here to acknowledge receipt"
               />
-              <p class="text-[11px] text-slate-400">
+              <p class="text-[11px] text-slate-400 w-full max-w-lg">
                 By signing, you confirm that you have received {{ formatAmount(record.amount || 0, record.currency || "PHP") }} in full.
               </p>
             </div>
