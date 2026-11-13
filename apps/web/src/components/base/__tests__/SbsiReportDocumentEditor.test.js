@@ -255,6 +255,16 @@ describe("SbsiReportDocumentEditor", () => {
     expect(wrapper.find('[data-testid="document-canvas"]').exists()).toBe(true);
   });
 
+  it("renders the SBSI webp logo in the letterhead without invert filter", async () => {
+    const wrapper = mountEditor({ type: "reimbursement", receipts });
+    await nextTick();
+    const logo = wrapper.find('header img[alt="SBSI logo"]');
+    expect(logo.exists()).toBe(true);
+    expect(logo.attributes("src")).toContain("sbsi-logo.webp");
+    expect(logo.classes()).not.toContain("brightness-0");
+    expect(logo.classes()).not.toContain("invert");
+  });
+
   it("renders read-only without inputs", async () => {
     const wrapper = mountEditor({ type: "reimbursement", receipts, readonly: true });
     await nextTick();

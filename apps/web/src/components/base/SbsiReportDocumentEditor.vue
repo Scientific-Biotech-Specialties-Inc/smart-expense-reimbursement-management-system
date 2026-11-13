@@ -14,7 +14,7 @@ import {
 import BaseButton from "@/components/base/BaseButton.vue";
 import SbsiReportPreviewModal from "@/components/base/SbsiReportPreviewModal.vue";
 import { useToast } from "@/composables/useToast";
-import sbsiLogo from "@/assets/sbsi_logo.png";
+import sbsiLogo from "@/assets/sbsi-logo.webp";
 import {
   SBSI_FOOTER_CONTACT,
   buildTemplateParagraphs,
@@ -359,7 +359,7 @@ const CHEVRON = "polygon(100% 0, 50% 0, 0 50%, 50% 100%, 100% 100%, 50% 50%)";
               class="absolute inset-y-0 left-0 flex w-full items-center gap-3 pl-5 text-white"
               :style="{ background: BLUE, clipPath: 'polygon(0 0, 42.3% 0, 32.3% 100%, 0 100%)' }"
             >
-              <img :src="sbsiLogo" alt="SBSI logo" class="h-9 w-auto brightness-0 invert" />
+              <img :src="sbsiLogo" alt="SBSI logo" class="h-8 w-auto rounded bg-white pr-1 object-contain" />
               <span class="max-w-[10rem] text-[10px] font-bold leading-tight">SCIENTIFIC BIOTECH SPECIALTIES, INC.</span>
             </div>
           </header>
