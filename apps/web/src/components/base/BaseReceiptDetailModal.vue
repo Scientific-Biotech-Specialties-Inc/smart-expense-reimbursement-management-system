@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { formatAmount } from "@/utils/formatters";
 import { formatDiscountTypeLabel, normalizeDiscountType } from "@/utils/receiptUtils";
 import StatusBadge from "@/components/base/StatusBadge.vue";
+import BaseModal from "@/components/base/BaseModal.vue";
 import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import ImagePreviewModal from "@/components/base/ImagePreviewModal.vue";
 import { X, ZoomIn } from "lucide-vue-next";
@@ -69,33 +70,35 @@ const subtotal = computed(() => {
 </script>
 
 <template>
-  <Transition name="modal">
-    <div
-      v-if="isOpen && receipt"
-      class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-      @click.self="emit('close')"
-    >
-      <div
-        class="relative bg-white w-full max-w-[840px] rounded-3xl shadow-[0_20px_40px_-10px_rgba(0,0,0,0.1)] flex flex-col md:flex-row p-6 gap-6 overflow-hidden min-h-[480px] max-h-[92vh]"
-        @click.stop
+  <BaseModal
+    :is-open="isOpen && !!receipt"
+    max-width-class="max-w-[840px]"
+    z-index-class="z-[60]"
+    content-class="w-full rounded-3xl shadow-[0_20px_40px_-10px_rgba(0,0,0,0.1)] flex flex-col md:flex-row p-6 gap-6 overflow-hidden min-h-[480px] max-h-[92vh]"
+    :title="receipt?.vendor ? `Receipt Details - ${receipt.vendor}` : 'Receipt Details'"
+    description="Receipt image and extracted expense details."
+    @close="emit('close')"
+  >
+    <template v-if="receipt">
+      <!-- Close Button -->
+      <button
+        type="button"
+        aria-label="Close receipt details"
+        @click="emit('close')"
+        class="absolute top-2 right-2 text-slate-400 hover:bg-slate-100 transition-colors p-1.5 rounded-full flex items-center justify-center z-10"
       >
-        <!-- Close Button -->
-        <button
-          @click="emit('close')"
-          class="absolute top-2 right-2 text-slate-400 hover:bg-slate-100 transition-colors p-1.5 rounded-full flex items-center justify-center z-10"
-        >
-          <X class="w-4 h-4" />
-        </button>
+        <X class="w-4 h-4" />
+      </button>
 
-        <!-- Left Column: Image -->
-        <div
-          :class="[
-            'w-full md:w-5/12 bg-gradient-to-b from-slate-100 to-slate-50 rounded-2xl flex items-center justify-center p-4 shrink-0 relative overflow-hidden min-h-[360px]',
-            canPreview ? 'cursor-pointer group' : '',
-          ]"
-          :title="canPreview ? 'Click to zoom and preview receipt' : ''"
-          @click="handleImageClick"
-        >
+      <!-- Left Column: Image -->
+      <div
+        :class="[
+          'w-full md:w-5/12 bg-gradient-to-b from-slate-100 to-slate-50 rounded-2xl flex items-center justify-center p-4 shrink-0 relative overflow-hidden min-h-[360px]',
+          canPreview ? 'cursor-pointer group' : '',
+        ]"
+        :title="canPreview ? 'Click to zoom and preview receipt' : ''"
+        @click="handleImageClick"
+      >
           <BaseReceiptImage
             :src="receipt.imageUrl"
             :alt="receipt.vendor || 'Receipt'"
@@ -221,13 +224,12 @@ const subtotal = computed(() => {
           </div>
 
           <!-- Action Footer (slot) -->
-          <div class="mt-auto pt-3 border-t border-slate-100">
+          <div v-if="$slots.actions" class="mt-auto pt-3 border-t border-slate-100">
             <slot name="actions" />
           </div>
         </div>
-      </div>
-    </div>
-  </Transition>
+    </template>
+  </BaseModal>
 
   <!-- Reusable Fullscreen Image Preview Lightbox -->
   <ImagePreviewModal

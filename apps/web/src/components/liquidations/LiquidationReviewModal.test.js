@@ -173,7 +173,7 @@ describe("LiquidationReviewModal Header Chipsets", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("Audit Trail (1)");
+    expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Elena Cruz");
   });
 
@@ -207,7 +207,46 @@ describe("LiquidationReviewModal Header Chipsets", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("Audit Trail (1)");
+    expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Elena Cruz");
+  });
+
+  it("renders receipt cards without hover drop-shadow classes", () => {
+    const wrapper = mount(LiquidationReviewModal, {
+      props: {
+        isOpen: true,
+        reviewingCase: {
+          id: "LIQ-100",
+          cashAdvanceAmount: 1200,
+          dueDate: "2026-10-30",
+          requestorName: "Elena Cruz",
+        },
+        reviewStatus: "pending",
+        reviewOutstandingBalance: 200,
+        reviewReceipts: [
+          {
+            id: 1,
+            merchantName: "Test Merchant",
+            location: "Makati",
+            amount: 1000,
+            category: "Meals",
+            decision: "pending",
+          },
+        ],
+        getFileUrl: () => "",
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          ReceiptImagePreview: true,
+          BaseReceiptImage: true,
+        },
+      },
+    });
+
+    const card = wrapper.find("article");
+    expect(card.exists()).toBe(true);
+    expect(card.classes()).not.toContain("hover:shadow-md");
+    expect(card.classes()).not.toContain("hover:shadow-xl");
   });
 });

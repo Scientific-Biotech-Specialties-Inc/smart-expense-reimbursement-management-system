@@ -93,7 +93,7 @@ defineEmits(["view-receipt"]);
         <article
           v-for="receipt in reviewReceipts"
           :key="receipt.id"
-          class="overflow-hidden transition-shadow bg-white border rounded-xl border-slate-200 hover:shadow-md"
+          class="overflow-hidden bg-white border rounded-xl border-slate-200"
         >
           <BaseReceiptImage
             :src="receipt.filePath ? getFileUrl(receipt.filePath) : null"

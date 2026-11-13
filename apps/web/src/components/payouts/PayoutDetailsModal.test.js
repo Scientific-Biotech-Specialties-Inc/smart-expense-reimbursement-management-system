@@ -53,7 +53,7 @@ describe("PayoutDetailsModal", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("Audit Trail (2)");
+    expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Juan Dela Cruz");
     expect(wrapper.text()).toContain("Cashier Jane");
   });

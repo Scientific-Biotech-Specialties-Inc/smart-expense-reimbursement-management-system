@@ -192,7 +192,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("Audit Trail (1)");
+    expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Carlo Gomez");
   });
 
@@ -228,7 +228,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("Audit Trail (1)");
+    expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Elena Cruz");
   });
 

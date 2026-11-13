@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import {
   DialogClose,
   DialogContent,
@@ -16,6 +17,7 @@ const props = defineProps({
   asChild: { type: Boolean, default: false },
   as: { type: String, default: undefined },
   class: { type: String, default: '' },
+  overlayClass: { type: String, default: '' },
   showClose: { type: Boolean, default: true },
 })
 const emits = defineEmits([
@@ -27,13 +29,23 @@ const emits = defineEmits([
   'closeAutoFocus',
 ])
 
-const forwarded = useForwardPropsEmits(props, emits)
+const delegatedProps = computed(() => {
+  const { class: _class, overlayClass: _overlayClass, showClose: _showClose, ...rest } = props
+  return rest
+})
+
+const forwarded = useForwardPropsEmits(delegatedProps, emits)
 </script>
 
 <template>
   <DialogPortal>
     <DialogOverlay
-      class="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+      :class="
+        cn(
+          'fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+          props.overlayClass
+        )
+      "
     />
     <DialogContent
       v-bind="forwarded"

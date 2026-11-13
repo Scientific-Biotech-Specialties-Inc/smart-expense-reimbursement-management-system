@@ -301,8 +301,9 @@ onUnmounted(() => {
     <Transition name="preview-modal">
       <div
         v-if="isVisible"
+        data-image-preview-modal
         :class="[
-          'fixed inset-0 select-none overflow-hidden flex flex-col justify-between items-center bg-black/90 backdrop-blur-md transition-opacity duration-200',
+          'fixed inset-0 pointer-events-auto select-none overflow-hidden flex flex-col justify-between items-center bg-black/90 backdrop-blur-md transition-opacity duration-200',
           zIndexClass,
         ]"
         role="dialog"

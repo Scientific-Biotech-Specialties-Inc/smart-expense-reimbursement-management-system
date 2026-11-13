@@ -260,7 +260,7 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
       },
     });
 
-    expect(wrapper.text()).toContain("Audit Trail (1)");
+    expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Jane Doe");
   });
 

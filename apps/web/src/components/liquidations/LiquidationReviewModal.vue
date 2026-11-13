@@ -244,7 +244,7 @@ function handleRoadmapNavigate(payload) {
               <article
                 v-for="(receipt, idx) in reviewReceipts"
                 :key="receipt.id"
-                class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col justify-between gap-3 shadow-sm hover:shadow-md transition-shadow"
+                class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col justify-between gap-3 shadow-sm"
               >
                 <!-- Reusable Receipt Image Preview (with zoom & clean title) -->
                 <ReceiptImagePreview
