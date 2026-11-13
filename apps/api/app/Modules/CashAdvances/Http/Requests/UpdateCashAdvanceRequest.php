@@ -2,6 +2,7 @@
 
 namespace App\Modules\CashAdvances\Http\Requests;
 
+use App\Modules\Shared\Traits\HandlesReportTemplateData;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
@@ -9,6 +10,13 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class UpdateCashAdvanceRequest extends FormRequest
 {
+    use HandlesReportTemplateData;
+
+    protected function prepareForValidation(): void
+    {
+        $this->decodeReportTemplateData($this);
+    }
+
     public function authorize(): bool
     {
         return true;
@@ -17,6 +25,7 @@ class UpdateCashAdvanceRequest extends FormRequest
     public function rules(): array
     {
         return [
+            ...self::reportTemplateDataRules(),
             'purpose' => 'sometimes|string|max:255',
             'amount' => 'sometimes|numeric|min:0.01',
             'expected_disbursement_date' => 'sometimes|date',

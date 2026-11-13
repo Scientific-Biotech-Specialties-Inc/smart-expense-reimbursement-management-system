@@ -12,6 +12,7 @@ use App\Modules\Shared\Services\PasswordVerificationService;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Jobs\DispatchReceiptToAiService;
+use App\Modules\Shared\Traits\HandlesReportTemplateData;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,7 @@ use Carbon\Carbon;
 class LiquidationController extends Controller
 {
     use ValidatesReceiptDuplicates;
+    use HandlesReportTemplateData;
 
     /**
      * CashAdvance relations needed for Unified Roadmap when accessed via liquidation
@@ -422,8 +424,11 @@ class LiquidationController extends Controller
     {
         $user = $request->user();
 
+        $this->decodeReportTemplateData($request);
+
         return DB::transaction(function () use ($user, $request) {
             $validated = $request->validate([
+                ...self::reportTemplateDataRules(),
                 'cash_advance_id' => 'required|exists:cash_advances,id',
                 'receipts' => 'required', // JSON string for multipart or array for json request
                 'report_attachment' => 'nullable|file|mimes:jpeg,png,pdf,doc,docx|max:5120',
@@ -523,6 +528,7 @@ class LiquidationController extends Controller
                 'outstanding_balance' => $currentOutstandingBalance,
                 'shortfall_explanation' => $validated['shortfall_explanation'] ?? null,
                 'report_file_path' => $reportFilePath,
+                'report_template_data' => $validated['report_template_data'] ?? null,
             ]);
 
             // Commit receipts to user's expense history
@@ -782,7 +788,10 @@ class LiquidationController extends Controller
             return response()->json(['message' => 'Only pending or revise liquidations can be edited.'], 409);
         }
 
+        $this->decodeReportTemplateData($request);
+
         $validated = $request->validate([
+            ...self::reportTemplateDataRules(),
             'receipts' => 'sometimes',
             'report_attachment' => 'nullable|file|mimes:jpeg,png,pdf,doc,docx|max:5120',
             'total_expense_amount' => 'sometimes|numeric|min:0.00',
@@ -851,6 +860,10 @@ class LiquidationController extends Controller
 
             if (array_key_exists('shortfall_explanation', $validated)) {
                 $liquidation->shortfall_explanation = $validated['shortfall_explanation'];
+            }
+
+            if (array_key_exists('report_template_data', $validated)) {
+                $liquidation->report_template_data = $validated['report_template_data'];
             }
 
             // Reset revise → pending on re-submission (rejected terminal stays rejected)

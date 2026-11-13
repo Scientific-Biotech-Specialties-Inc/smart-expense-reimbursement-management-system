@@ -12,8 +12,10 @@ import DecisionConfirmationModal from "@/components/base/DecisionConfirmationMod
 import UnifiedRoadmapStepper from "@/components/base/UnifiedRoadmapStepper.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
+import SbsiReportPreviewModal from "@/components/base/SbsiReportPreviewModal.vue";
 import { formatPeso, formatDate } from "@/utils/formatters";
 import { getFileUrl } from "@/utils/fileUtils";
+import { downloadSbsiReportPdf } from "@/utils/sbsiPdfGenerator";
 import {
   X,
   CheckCircle,
@@ -24,6 +26,7 @@ import {
   RotateCcw,
   FileText,
   Loader2,
+  Eye,
 } from "lucide-vue-next";
 
 const props = defineProps({
@@ -219,6 +222,30 @@ const adminPassword = ref("");
 
 const documentData = ref(null);
 const isLoadingDocument = ref(false);
+const isReportPreviewOpen = ref(false);
+
+const resolvedTemplateData = computed(
+  () => props.record?.report_template_data || props.record?.reportTemplateData || null,
+);
+
+const resolvedDocUrl = computed(() => {
+  const rawPath =
+    documentData.value?.file_path ||
+    props.record?.document?.file_path ||
+    documentData.value?.file_url ||
+    props.record?.documentUrl ||
+    props.record?.document_url ||
+    props.record?.document_path ||
+    props.record?.file_path;
+
+  return (
+    getFileUrl(rawPath, "cash_advances") ||
+    documentData.value?.file_url ||
+    props.record?.documentUrl ||
+    props.record?.document_url ||
+    null
+  );
+});
 
 const hasDocument = computed(() => {
   return Boolean(
@@ -231,7 +258,8 @@ const hasDocument = computed(() => {
     props.record?.documentUrl ||
     props.record?.document_url ||
     props.record?.document_path ||
-    props.record?.file_path,
+    props.record?.file_path ||
+    resolvedTemplateData.value,
   );
 });
 
@@ -382,11 +410,29 @@ async function downloadDocument() {
     props.record?.document_path ||
     props.record?.file_path;
 
-  const fileUrl =
+  const resolvedUrl =
     getFileUrl(rawPath, "cash_advances") ||
     documentData.value?.file_url ||
-    props.record?.documentUrl ||
-    "/mock_receipt.png";
+    props.record?.documentUrl;
+
+  if (!resolvedUrl && resolvedTemplateData.value) {
+    try {
+      downloadSbsiReportPdf(
+        resolvedTemplateData.value,
+        props.record?.id ? `SBSI-cash-advance-${props.record.id}.pdf` : null,
+      );
+      return;
+    } catch (error) {
+      console.error("PDF generation failed", error);
+      addToast({
+        message: "Failed to download document.",
+        type: "error",
+      });
+      return;
+    }
+  }
+
+  const fileUrl = resolvedUrl || "/mock_receipt.png";
 
   try {
     const a = document.createElement("a");
@@ -573,22 +619,35 @@ async function confirmAcknowledge() {
 
           <!-- Document Attachment -->
           <section v-if="hasDocument" class="pt-2 border-t border-slate-100">
-            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Document</p>
-            <a
-              role="button"
-              tabindex="0"
-              class="inline-flex max-w-full items-center gap-2 text-sm text-primary hover:underline cursor-pointer group"
-              :class="{ 'opacity-70 pointer-events-none': isLoadingDocument }"
-              :title="documentDisplayName"
-              @click.stop.prevent="downloadDocument"
-              @keydown.enter.stop.prevent="downloadDocument"
-              @keydown.space.stop.prevent="downloadDocument"
-            >
-              <FileText class="w-3.5 h-3.5 shrink-0" />
-              <span class="truncate max-w-[260px] sm:max-w-[420px]">{{ documentDisplayName }}</span>
-              <Loader2 v-if="isLoadingDocument" class="w-3 h-3 shrink-0 animate-spin" />
-              <Download v-else class="w-3 h-3 shrink-0" />
-            </a>
+            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-2">Document</p>
+            <div class="flex flex-wrap items-center gap-3">
+              <BaseButton
+                data-testid="preview-cash-advance-report-btn"
+                variant="outline"
+                size="sm"
+                type="button"
+                @click="isReportPreviewOpen = true"
+              >
+                <Eye class="w-3.5 h-3.5" />
+                <span>Preview Report</span>
+              </BaseButton>
+              <a
+                role="button"
+                tabindex="0"
+                data-testid="download-cash-advance-report-btn"
+                class="inline-flex max-w-full items-center gap-2 text-sm text-primary hover:underline cursor-pointer group"
+                :class="{ 'opacity-70 pointer-events-none': isLoadingDocument }"
+                :title="documentDisplayName"
+                @click.stop.prevent="downloadDocument"
+                @keydown.enter.stop.prevent="downloadDocument"
+                @keydown.space.stop.prevent="downloadDocument"
+              >
+                <FileText class="w-3.5 h-3.5 shrink-0" />
+                <span class="truncate max-w-[260px] sm:max-w-[420px]">{{ documentDisplayName || "Download PDF" }}</span>
+                <Loader2 v-if="isLoadingDocument" class="w-3 h-3 shrink-0 animate-spin" />
+                <Download v-else class="w-3 h-3 shrink-0" />
+              </a>
+            </div>
           </section>
 
           <!-- Loading Document Skeleton -->
@@ -802,22 +861,35 @@ async function confirmAcknowledge() {
 
           <!-- Document -->
           <section v-if="hasDocument" class="pt-2 border-t border-slate-100">
-            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Document</p>
-            <a
-              role="button"
-              tabindex="0"
-              class="inline-flex max-w-full items-center gap-2 text-sm text-primary hover:underline cursor-pointer group"
-              :class="{ 'opacity-70 pointer-events-none': isLoadingDocument }"
-              :title="documentDisplayName"
-              @click.stop.prevent="downloadDocument"
-              @keydown.enter.stop.prevent="downloadDocument"
-              @keydown.space.stop.prevent="downloadDocument"
-            >
-              <FileText class="w-3.5 h-3.5 shrink-0" />
-              <span class="truncate max-w-[260px] sm:max-w-[420px]">{{ documentDisplayName }}</span>
-              <Loader2 v-if="isLoadingDocument" class="w-3 h-3 shrink-0 animate-spin" />
-              <Download v-else class="w-3 h-3 shrink-0" />
-            </a>
+            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-2">Document</p>
+            <div class="flex flex-wrap items-center gap-3">
+              <BaseButton
+                data-testid="preview-cash-advance-report-btn"
+                variant="outline"
+                size="sm"
+                type="button"
+                @click="isReportPreviewOpen = true"
+              >
+                <Eye class="w-3.5 h-3.5" />
+                <span>Preview Report</span>
+              </BaseButton>
+              <a
+                role="button"
+                tabindex="0"
+                data-testid="download-cash-advance-report-btn"
+                class="inline-flex max-w-full items-center gap-2 text-sm text-primary hover:underline cursor-pointer group"
+                :class="{ 'opacity-70 pointer-events-none': isLoadingDocument }"
+                :title="documentDisplayName"
+                @click.stop.prevent="downloadDocument"
+                @keydown.enter.stop.prevent="downloadDocument"
+                @keydown.space.stop.prevent="downloadDocument"
+              >
+                <FileText class="w-3.5 h-3.5 shrink-0" />
+                <span class="truncate max-w-[260px] sm:max-w-[420px]">{{ documentDisplayName || "Download PDF" }}</span>
+                <Loader2 v-if="isLoadingDocument" class="w-3 h-3 shrink-0 animate-spin" />
+                <Download v-else class="w-3 h-3 shrink-0" />
+              </a>
+            </div>
           </section>
 
           <!-- Loading Document Skeleton -->
@@ -978,6 +1050,16 @@ async function confirmAcknowledge() {
       v-model:comment="adminReviewNotes"
       @close="cancelConfirmation"
       @confirm="confirmAdminDecision"
+    />
+
+    <!-- SBSI Report Preview Modal -->
+    <SbsiReportPreviewModal
+      :is-open="isReportPreviewOpen"
+      :template-data="resolvedTemplateData"
+      fallback-type="cash-advance"
+      :record="record"
+      :file-url="resolvedDocUrl"
+      @close="isReportPreviewOpen = false"
     />
   </div>
 </template>

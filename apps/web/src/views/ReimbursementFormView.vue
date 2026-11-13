@@ -4,7 +4,9 @@ import { useRouter } from "vue-router";
 import { usePolicyStore } from "@/stores/policy";
 import { useReceiptStore } from "@/stores/receipts";
 import { useReimbursementStore } from "@/stores/reimbursement";
+import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
+import { createDefaultTemplateData, validateTemplateData } from "@/utils/sbsiReportTemplateUtils";
 import { Save, Send } from "lucide-vue-next";
 
 // Components
@@ -49,11 +51,20 @@ const emit = defineEmits(["submitted", "close"]);
 const policyStore = usePolicyStore();
 const receiptsStore = useReceiptStore();
 const reimbursementStore = useReimbursementStore();
+let auth = null;
+try {
+  auth = useAuthStore();
+} catch {
+  auth = null;
+}
 const { addToast } = useToast();
 const router = useRouter();
 
 // State
 const reportFile = ref(null);
+const reportTemplateData = ref(
+  props.id ? null : createDefaultTemplateData("reimbursement", { user: auth?.user }),
+);
 const userComment = ref("");
 const fetching = ref(false);
 const existingStatus = ref("");
@@ -166,10 +177,17 @@ const totalVat = computed(() =>
 );
 const totalSubtotal = computed(() => totalAmount.value - totalVat.value);
 
+const hasValidReport = computed(() => {
+  if (reportTemplateData.value && reportTemplateData.value.mode !== "manual") {
+    return validateTemplateData(reportTemplateData.value).valid || Boolean(reportFile.value);
+  }
+  return Boolean(reportFile.value) || isEditMode.value;
+});
+
 const canProceed = computed(
   () =>
     receipts.value.length >= 1 &&
-    (isEditMode.value || reportFile.value) &&
+    hasValidReport.value &&
     receipts.value.every(
       (r) =>
         !r.isUploading &&
@@ -183,7 +201,8 @@ const canProceed = computed(
 );
 
 const isDirty = computed(() => {
-  return receipts.value.length > 0 || reportFile.value !== null || userComment.value !== "";
+  const hasTemplatePurpose = Boolean(reportTemplateData.value?.purpose?.trim());
+  return receipts.value.length > 0 || reportFile.value !== null || userComment.value !== "" || hasTemplatePurpose;
 });
 
 const isSubmitted = ref(false);
@@ -238,6 +257,7 @@ async function handleSubmit() {
       success = await updateReimbursement(props.id, {
         receipts: receipts.value,
         reportFile: reportFile.value,
+        reportTemplateData: reportTemplateData.value,
         totalAmount: totalAmount.value,
         userComment: userComment.value,
       });
@@ -245,6 +265,7 @@ async function handleSubmit() {
       success = await submitReimbursement({
         receipts: receipts.value,
         reportFile: reportFile.value,
+        reportTemplateData: reportTemplateData.value,
         totalAmount: totalAmount.value,
         userComment: userComment.value,
       });
@@ -298,7 +319,17 @@ onMounted(async () => {
     fetching.value = true;
     try {
       const data = await reimbursementStore.fetchOne(props.id);
-      reportFile.value = data.report_file_path;
+      if (data.report_template_data) {
+        reportTemplateData.value = {
+          ...data.report_template_data,
+          mode: data.report_template_data.mode || "template",
+        };
+        reportFile.value =
+          data.report_template_data.mode === "manual" ? data.report_file_path || null : null;
+      } else {
+        reportFile.value = data.report_file_path || null;
+        reportTemplateData.value = null;
+      }
       userComment.value = data.user_comment || "";
       existingStatus.value = data.status || "";
       adminNotes.value = data.admin_notes || data.rejection_comment || "";
@@ -552,7 +583,11 @@ function dismiss() {
         <!--  CARD 3: Meta & Attachments  -->
         <MetaAndAttachments
           v-model:report-file="reportFile"
+          v-model:report-template-data="reportTemplateData"
           v-model:user-comment="userComment"
+          :receipts="receipts"
+          :total-amount="totalAmount"
+          :record-id="props.id"
         />
 
         <ReimbursementSummaryPanel

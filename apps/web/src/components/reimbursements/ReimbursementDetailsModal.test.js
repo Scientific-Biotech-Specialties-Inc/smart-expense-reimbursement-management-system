@@ -2,6 +2,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { mount } from "@vue/test-utils";
 import ReimbursementDetailsModal from "./ReimbursementDetailsModal.vue";
+import SbsiReportPreviewModal from "@/components/base/SbsiReportPreviewModal.vue";
+import * as pdfGen from "@/utils/sbsiPdfGenerator";
 
 const authState = {
   isAdmin: true,
@@ -320,6 +322,73 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
       expect(grantBtn).toBeDefined();
       expect(grantBtn.classes()).toContain("px-5");
       expect(grantBtn.classes()).toContain("sm:w-auto");
+    });
+  });
+
+  describe("Report Preview & Template PDF Download", () => {
+    it("opens SbsiReportPreviewModal when Preview Report button is clicked", async () => {
+      const templateData = { type: "reimbursement", purpose: "Field work" };
+      const wrapper = mount(ReimbursementDetailsModal, {
+        props: {
+          viewingRecord: {
+            id: 301,
+            status: "pending",
+            amount: 1250,
+            report_url: "https://example.com/report.pdf",
+            report_template_data: templateData,
+            receipts: [],
+          },
+        },
+        global: {
+          stubs: {
+            StatusBadge: true,
+            BaseReceiptImage: true,
+            SbsiReportPreviewModal: true,
+          },
+        },
+      });
+
+      const previewBtn = wrapper.find('[data-testid="preview-report-btn"]');
+      expect(previewBtn.exists()).toBe(true);
+      expect(previewBtn.text()).toContain("Preview Report");
+
+      await previewBtn.trigger("click");
+      const previewModal = wrapper.findComponent(SbsiReportPreviewModal);
+      expect(previewModal.exists()).toBe(true);
+      expect(previewModal.props("isOpen")).toBe(true);
+      expect(previewModal.props("templateData")).toEqual(templateData);
+      expect(previewModal.props("fallbackType")).toBe("reimbursement");
+      expect(previewModal.props("fileUrl")).toBe("https://example.com/report.pdf");
+    });
+
+    it("allows downloading generated PDF directly when report_template_data exists without report_url", async () => {
+      const downloadSpy = vi.spyOn(pdfGen, "downloadSbsiReportPdf").mockImplementation(() => {});
+      const templateData = { type: "reimbursement", purpose: "Client visit" };
+      const wrapper = mount(ReimbursementDetailsModal, {
+        props: {
+          viewingRecord: {
+            id: 302,
+            status: "pending",
+            amount: 500,
+            report_url: null,
+            report_template_data: templateData,
+            receipts: [],
+          },
+        },
+        global: {
+          stubs: {
+            StatusBadge: true,
+            BaseReceiptImage: true,
+            SbsiReportPreviewModal: true,
+          },
+        },
+      });
+
+      const downloadBtn = wrapper.find('[data-testid="download-template-report-btn"]');
+      expect(downloadBtn.exists()).toBe(true);
+      await downloadBtn.trigger("click");
+      expect(downloadSpy).toHaveBeenCalledWith(templateData, "SBSI-reimbursement-302.pdf");
+      downloadSpy.mockRestore();
     });
   });
 });

@@ -4,10 +4,16 @@ namespace App\Modules\Reimbursements\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use App\Modules\Users\Models\User;
+use App\Modules\Shared\Traits\ResolvesReportUrl;
 
 class Reimbursement extends Model
 {
+    use ResolvesReportUrl;
+
+    protected $appends = ['report_url'];
+
     protected $fillable = [
+        'report_template_data',
         'user_id',
         'receipt_id',
         'description',
@@ -34,6 +40,7 @@ class Reimbursement extends Model
         'date' => 'date',
         'approved_at' => 'datetime',
         'is_request' => 'boolean',
+        'report_template_data' => 'array',
     ];
 
     public function user()

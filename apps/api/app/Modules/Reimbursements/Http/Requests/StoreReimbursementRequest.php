@@ -2,13 +2,21 @@
 
 namespace App\Modules\Reimbursements\Http\Requests;
 
+use App\Modules\Shared\Traits\HandlesReportTemplateData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreReimbursementRequest extends FormRequest
 {
+    use HandlesReportTemplateData;
+
     /**
      * Determine if the user is authorized to make this request.
      */
+    protected function prepareForValidation(): void
+    {
+        $this->decodeReportTemplateData($this);
+    }
+
     public function authorize(): bool
     {
         return true;
@@ -20,6 +28,7 @@ class StoreReimbursementRequest extends FormRequest
     public function rules(): array
     {
         return [
+            ...self::reportTemplateDataRules(),
             'description' => 'required|string|max:255',
             'user_comment' => 'nullable|string|max:1000',
             'expense_category_id' => 'required|integer|exists:expense_categories,id',

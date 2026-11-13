@@ -2,13 +2,21 @@
 
 namespace App\Modules\Reimbursements\Http\Requests;
 
+use App\Modules\Shared\Traits\HandlesReportTemplateData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateReimbursementRequest extends FormRequest
 {
+    use HandlesReportTemplateData;
+
     /**
      * Determine if the user is authorized to make this request.
      */
+    protected function prepareForValidation(): void
+    {
+        $this->decodeReportTemplateData($this);
+    }
+
     public function authorize(): bool
     {
         return true;
@@ -24,6 +32,7 @@ class UpdateReimbursementRequest extends FormRequest
     public function rules(): array
     {
         return [
+            ...self::reportTemplateDataRules(),
             // Admin fields
             'admin_notes' => 'nullable|string',
             'status' => 'nullable|string|in:pending,approved,rejected,granted',

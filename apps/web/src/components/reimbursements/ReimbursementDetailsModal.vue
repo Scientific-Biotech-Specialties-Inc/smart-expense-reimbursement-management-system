@@ -6,8 +6,11 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
+import SbsiReportPreviewModal from "@/components/base/SbsiReportPreviewModal.vue";
 import { useReportExport } from "@/composables/useReportExport";
 import { useHorizontalScroll } from "@/composables/useHorizontalScroll";
+import { useToast } from "@/composables/useToast";
+import { downloadSbsiReportPdf } from "@/utils/sbsiPdfGenerator";
 import {
   X,
   FileText,
@@ -43,6 +46,31 @@ const emit = defineEmits([
 
 const auth = useAuthStore();
 const { isExporting, exportReport } = useReportExport();
+const { addToast } = useToast();
+const previewReportOpen = ref(false);
+
+watch(
+  () => props.viewingRecord,
+  () => {
+    previewReportOpen.value = false;
+  },
+);
+
+function handleDownloadGeneratedReport() {
+  if (!props.viewingRecord?.report_template_data) return;
+  try {
+    downloadSbsiReportPdf(
+      props.viewingRecord.report_template_data,
+      props.viewingRecord.id ? `SBSI-reimbursement-${props.viewingRecord.id}.pdf` : null,
+    );
+  } catch (error) {
+    console.error("Failed to download generated reimbursement report:", error);
+    addToast({
+      message: "Failed to generate PDF report for download.",
+      type: "error",
+    });
+  }
+}
 
 const scrollContainerRef = ref(null);
 const { canScrollLeft, canScrollRight, scrollToActive } = useHorizontalScroll(
@@ -284,17 +312,45 @@ function categoryName(record) {
                   </span>
                 </p>
               </div>
-              <div v-if="viewingRecord.report_url || viewingRecord.report_file_path" class="col-span-2">
+              <div
+                v-if="viewingRecord.report_url || viewingRecord.report_file_path || viewingRecord.report_template_data"
+                class="col-span-2"
+              >
                 <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Report</p>
-                <a
-                  :href="viewingRecord.report_url"
-                  target="_blank"
-                  class="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-                >
-                  <FileText class="w-3.5 h-3.5" />
-                  <span>Download Report</span>
-                  <Download class="w-3 h-3" />
-                </a>
+                <div class="flex flex-wrap items-center gap-3">
+                  <BaseButton
+                    data-testid="preview-report-btn"
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    @click="previewReportOpen = true"
+                  >
+                    <Eye class="w-3.5 h-3.5" />
+                    <span>Preview Report</span>
+                  </BaseButton>
+                  <a
+                    v-if="viewingRecord.report_url"
+                    :href="viewingRecord.report_url"
+                    target="_blank"
+                    class="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                  >
+                    <FileText class="w-3.5 h-3.5" />
+                    <span>Download Report</span>
+                    <Download class="w-3 h-3" />
+                  </a>
+                  <BaseButton
+                    v-else-if="viewingRecord.report_template_data"
+                    data-testid="download-template-report-btn"
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    @click="handleDownloadGeneratedReport"
+                  >
+                    <FileText class="w-3.5 h-3.5" />
+                    <span>Download Report</span>
+                    <Download class="w-3 h-3" />
+                  </BaseButton>
+                </div>
               </div>
               <div class="col-span-2">
                 <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">User Comment</p>
@@ -483,4 +539,14 @@ function categoryName(record) {
       </div>
     </div>
   </Transition>
+
+  <SbsiReportPreviewModal
+    v-if="viewingRecord"
+    :is-open="previewReportOpen"
+    :template-data="viewingRecord.report_template_data || null"
+    fallback-type="reimbursement"
+    :record="viewingRecord"
+    :file-url="viewingRecord.report_url || viewingRecord.report_file_path || null"
+    @close="previewReportOpen = false"
+  />
 </template>

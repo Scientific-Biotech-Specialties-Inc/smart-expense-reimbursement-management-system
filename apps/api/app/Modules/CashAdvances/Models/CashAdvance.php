@@ -18,6 +18,7 @@ class CashAdvance extends Model
         'revision_count',
         'signature',
         'acknowledged_at',
+        'report_template_data',
     ];
 
     protected $casts = [
@@ -26,6 +27,7 @@ class CashAdvance extends Model
         'expected_disbursement_date' => 'date',
         'expected_liquidation_date'  => 'date',
         'acknowledged_at'    => 'datetime',
+        'report_template_data' => 'array',
     ];
 
     public function requester()

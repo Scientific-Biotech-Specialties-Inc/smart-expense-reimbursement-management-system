@@ -33,6 +33,7 @@ import { formatPeso, formatDate, truncateText } from "@/utils/formatters";
 import { numberOrZero } from "@/utils/numbers";
 import { getFileUrl } from "@/utils/fileUtils";
 import { firstFilePathField } from "@/utils/receiptUtils";
+import { createDefaultTemplateData } from "@/utils/sbsiReportTemplateUtils";
 import { apiFetch } from "@/utils/apiFetch";
 import {
   Activity,
@@ -69,6 +70,8 @@ const selectedAdvance = ref(null);
 const receipts = ref([]);
 const reportAttachment = ref(null);
 const reportAttachmentInput = ref(null);
+const reportTemplateData = ref(null);
+const isReportManualMode = ref(false);
 const { submitting, submitLiquidation: performSubmitLiquidation } =
   useLiquidationSubmit();
 const submitted = ref(false);
@@ -108,6 +111,8 @@ function liquidationDraftSignature() {
           reportAttachment.value.fileName ||
           "attached"
         : reportAttachment.value,
+    reportTemplateData: reportTemplateData.value,
+    isReportManualMode: isReportManualMode.value,
     shortfallExplanation: shortfallExplanation.value,
   });
 }
@@ -525,6 +530,8 @@ const sourceCases = computed(() => {
       shortfallExplanation: item.shortfall_explanation || "",
       adminNote: item.admin_note || "",
       reportFilePath: item.report_file_path || null,
+      reportUrl: item.report_url || null,
+      reportTemplateData: item.report_template_data || null,
       status: displayStatus,
       createdAt: item.created_at || item.createdAt || null,
       submittedAt:
@@ -1081,6 +1088,8 @@ async function submitLiquidation() {
     receipts: receipts.value,
     selectedAdvance: selectedAdvance.value,
     reportAttachment: reportAttachment.value,
+    reportTemplateData: reportTemplateData.value,
+    isManualMode: isReportManualMode.value,
     totalExpenses: totalExpenseAmount.value,
     variance: variance.value,
     shortfallExplanation: shortfallExplanation.value,
@@ -1198,8 +1207,6 @@ function selectAdvance(adv) {
 
     if (existingLiq) {
       shortfallExplanation.value = existingLiq.shortfall_explanation || "";
-      // If it's a string filepath from backend, reportAttachment can be set to it
-      reportAttachment.value = existingLiq.report_file_path;
 
       if (existingLiq.receipts && Array.isArray(existingLiq.receipts)) {
         receipts.value = existingLiq.receipts.map((r) => {
@@ -1264,10 +1271,75 @@ function selectAdvance(adv) {
       } else {
         receipts.value = [];
       }
+
+      if (existingLiq.report_template_data) {
+        reportAttachment.value = null;
+        isReportManualMode.value = false;
+        reportTemplateData.value = createDefaultTemplateData("liquidation", {
+          user: auth.user,
+          receipts: receipts.value,
+          allocatedAmount: Number(adv?.amount ?? adv?.balance ?? 0),
+          utilizedAmount: totalExpenseAmount.value,
+          variance: variance.value,
+          purpose: adv?.purpose || "",
+          disbursementDate: String(
+            adv?.disbursement?.disbursed_at ||
+              adv?.disbursed_at ||
+              adv?.expected_disbursement_date ||
+              adv?.acknowledgedAt ||
+              adv?.date ||
+              "",
+          ).slice(0, 10),
+          recordId: existingLiq.id,
+          existingData: existingLiq.report_template_data,
+        });
+      } else if (existingLiq.report_file_path) {
+        reportTemplateData.value = null;
+        reportAttachment.value = existingLiq.report_file_path;
+        isReportManualMode.value = true;
+      } else {
+        reportAttachment.value = null;
+        isReportManualMode.value = false;
+        reportTemplateData.value = createDefaultTemplateData("liquidation", {
+          user: auth.user,
+          receipts: receipts.value,
+          allocatedAmount: Number(adv?.amount ?? adv?.balance ?? 0),
+          utilizedAmount: totalExpenseAmount.value,
+          variance: variance.value,
+          purpose: adv?.purpose || "",
+          disbursementDate: String(
+            adv?.disbursement?.disbursed_at ||
+              adv?.disbursed_at ||
+              adv?.expected_disbursement_date ||
+              adv?.acknowledgedAt ||
+              adv?.date ||
+              "",
+          ).slice(0, 10),
+          recordId: existingLiq.id,
+        });
+      }
     } else {
       receipts.value = [];
       reportAttachment.value = null;
       shortfallExplanation.value = "";
+      isReportManualMode.value = false;
+      reportTemplateData.value = createDefaultTemplateData("liquidation", {
+        user: auth.user,
+        receipts: [],
+        allocatedAmount: Number(adv?.amount ?? adv?.balance ?? 0),
+        utilizedAmount: 0,
+        variance: Number(adv?.amount ?? adv?.balance ?? 0),
+        purpose: adv?.purpose || "",
+        disbursementDate: String(
+          adv?.disbursement?.disbursed_at ||
+            adv?.disbursed_at ||
+            adv?.expected_disbursement_date ||
+            adv?.acknowledgedAt ||
+            adv?.date ||
+            "",
+        ).slice(0, 10),
+        recordId: adv?.id || null,
+      });
     }
 
     hydrationSignature.value = liquidationDraftSignature();
@@ -1307,6 +1379,8 @@ function resetLiquidationComposer() {
   selectedAdvance.value = null;
   receipts.value = [];
   reportAttachment.value = null;
+  reportTemplateData.value = null;
+  isReportManualMode.value = false;
   shortfallExplanation.value = "";
   submitted.value = false;
   hydrationSignature.value = liquidationDraftSignature();
@@ -1978,6 +2052,11 @@ onMounted(async () => {
             @update:receipts="receipts = $event"
             :receipt-category-options="receiptCategoryOptions"
             :report-attachment="reportAttachment"
+            :report-template-data="reportTemplateData"
+            :is-manual-mode="isReportManualMode"
+            @update:report-template-data="reportTemplateData = $event"
+            @update:report-attachment="reportAttachment = $event"
+            @update:is-manual-mode="isReportManualMode = $event"
             @file-selected="selectReportAttachment"
             @file-cleared="clearReportAttachment"
             :existing-liquidation="existingLiquidation"

@@ -1,73 +1,83 @@
 <script setup>
-import { ref } from "vue";
-import { FileText, UploadCloud, X } from "lucide-vue-next";
-import { useToast } from "@/composables/useToast";
+import { ref, watch } from "vue";
+import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor.vue";
 
 const props = defineProps({
   reportFile: {
     type: [File, String, Object],
     default: null,
   },
+  reportTemplateData: {
+    type: Object,
+    default: null,
+  },
   userComment: {
     type: String,
     default: "",
+  },
+  receipts: {
+    type: Array,
+    default: () => [],
+  },
+  totalAmount: {
+    type: [Number, String],
+    default: 0,
+  },
+  purpose: {
+    type: String,
+    default: "",
+  },
+  recordId: {
+    type: [Number, String],
+    default: null,
   },
 });
 
 const emit = defineEmits([
   "update:reportFile",
+  "update:reportTemplateData",
   "update:userComment",
+  "update:purpose",
 ]);
 
-const reportDrag = ref(false);
-const reportInput = ref(null);
-const { addToast } = useToast();
+const editorMode = ref(
+  props.reportTemplateData?.mode === "manual" || (props.reportFile && !props.reportTemplateData)
+    ? "manual"
+    : "template",
+);
+const lastTemplatePayload = ref(props.reportTemplateData || null);
 
-const VALID_MIMES = [
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-];
+watch(
+  () => [props.reportFile, props.reportTemplateData],
+  ([file, tpl]) => {
+    if (tpl?.mode === "manual" || (file && !tpl)) {
+      editorMode.value = "manual";
+    } else if (tpl && tpl.mode !== "manual") {
+      editorMode.value = "template";
+    }
+  },
+);
 
-function isValidFile(file) {
-  if (!file) return false;
-  if (!VALID_MIMES.includes(file.type)) {
-    addToast({
-      message:
-        "Invalid file type. Only PDF, DOC, and DOCX are allowed for the report.",
-      type: "error",
-    });
-    return false;
+function onTemplateModelUpdate(val) {
+  lastTemplatePayload.value = val;
+  if (editorMode.value === "manual") return;
+  emit("update:reportTemplateData", { ...val, mode: "template" });
+}
+
+function handleEditorClick(e) {
+  const target = e.target;
+  if (target?.closest?.('[data-testid="mode-manual"]')) {
+    editorMode.value = "manual";
+    emit("update:reportTemplateData", { ...(props.reportTemplateData || {}), mode: "manual" });
+  } else if (target?.closest?.('[data-testid="mode-template"]')) {
+    editorMode.value = "template";
+    if (props.reportFile) emit("update:reportFile", null);
+    if (lastTemplatePayload.value) {
+      emit("update:reportTemplateData", { ...lastTemplatePayload.value, mode: "template" });
+    } else if (props.reportTemplateData) {
+      emit("update:reportTemplateData", { ...props.reportTemplateData, mode: "template" });
+    }
   }
-  return true;
-}
-
-function handleReportDrop(e) {
-  reportDrag.value = false;
-  const file = e.dataTransfer.files[0];
-  if (file && isValidFile(file)) emit("update:reportFile", file);
-}
-
-function handleReportSelect(e) {
-  const file = e.target.files[0];
-  if (file && isValidFile(file)) emit("update:reportFile", file);
-  // Reset input value so same file can be selected again if needed
-  if (e.target) e.target.value = "";
-}
-
-function reportFileName(file) {
-  if (!file) return "";
-  if (typeof file === "string") return file.split("/").pop() || "Attached Report";
-  return file.name || "Attached Report";
-}
-
-function reportFileSize(file) {
-  if (!file || typeof file === "string" || !file.size) return "";
-  return `${(file.size / 1024 / 1024).toFixed(2)} MB`;
-}
-
-function removeReportFile() {
-  emit("update:reportFile", null);
 }
 </script>
 
@@ -75,84 +85,23 @@ function removeReportFile() {
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
     <!-- Report Attachment -->
     <section class="card p-6 flex flex-col gap-4 relative z-20 md:col-span-2">
-      <h3
-        class="text-base font-bold text-primary"
-      >
+      <h3 class="text-base font-bold text-primary">
         Report Attachment
         <span class="text-danger">*</span>
       </h3>
 
-      <div v-if="reportFile" class="flex flex-col gap-3">
-        <div
-          class="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3"
-        >
-          <div class="flex min-w-0 items-center gap-3">
-            <div
-              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-400"
-            >
-              <FileText class="h-5 w-5" />
-            </div>
-            <div class="min-w-0">
-              <p class="truncate text-sm font-bold text-slate-800">
-                {{ reportFileName(reportFile) }}
-              </p>
-              <p v-if="reportFileSize(reportFile)" class="text-xs font-semibold text-slate-400">
-                {{ reportFileSize(reportFile) }}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            class="rounded-full p-2 text-danger transition-colors hover:bg-red-50"
-            aria-label="Remove report attachment"
-            @click="removeReportFile"
-          >
-            <X class="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      <div
-        class="border-2 border-dashed rounded-xl p-5 flex flex-col gap-4 transition-all cursor-pointer sm:flex-row sm:items-center sm:justify-between"
-        :class="
-          reportDrag
-            ? 'border-accent bg-accent/5'
-            : 'border-slate-200 hover:border-primary/30 bg-slate-50/40'
-        "
-        @dragover.prevent="reportDrag = true"
-        @dragleave.prevent="reportDrag = false"
-        @drop.prevent="handleReportDrop"
-      >
-        <div class="flex items-center gap-4 min-w-0 flex-1">
-          <div
-            class="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0"
-          >
-            <UploadCloud class="w-5 h-5 text-slate-400" />
-          </div>
-          <div class="min-w-0 flex-1">
-            <p
-              class="text-sm truncate font-semibold text-slate-700"
-            >
-              Select file
-            </p>
-            <p class="text-[11px] text-slate-400">
-              Upload activity report (PDF, DOC, DOCX)
-            </p>
-          </div>
-        </div>
-        <button
-          class="btn btn-secondary min-h-10 w-full !px-5 !text-xs flex-shrink-0 sm:w-fit"
-          @click="reportInput?.click()"
-          type="button"
-        >
-          Browse
-        </button>
-        <input
-          ref="reportInput"
-          type="file"
-          class="hidden"
-          accept=".pdf,.doc,.docx"
-          @change="handleReportSelect"
+      <div @click="handleEditorClick">
+        <SbsiReportDocumentEditor
+          type="reimbursement"
+          :model-value="reportTemplateData"
+          :report-file="reportFile"
+          :receipts="receipts"
+          :total-amount="totalAmount"
+          :purpose="purpose"
+          :record-id="recordId"
+          @update:model-value="onTemplateModelUpdate"
+          @update:report-file="$emit('update:reportFile', $event)"
+          @update:purpose="$emit('update:purpose', $event)"
         />
       </div>
     </section>
