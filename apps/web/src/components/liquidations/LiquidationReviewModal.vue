@@ -1,7 +1,8 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { X, XCircle, ShieldCheck, Eye, FileText, Download } from "lucide-vue-next";
 import { formatPeso, formatDate } from "@/utils/formatters";
+import { downloadSbsiReportPdf } from "@/utils/sbsiPdfGenerator";
 import BaseButton from "@/components/base/BaseButton.vue";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
@@ -9,6 +10,7 @@ import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import ReceiptImagePreview from "@/components/base/ReceiptImagePreview.vue";
 import UnifiedRoadmapStepper from "@/components/base/UnifiedRoadmapStepper.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
+import SbsiReportPreviewModal from "@/components/base/SbsiReportPreviewModal.vue";
 import { useLiquidationStore } from "@/stores/liquidation";
 import { useReportExport } from "@/composables/useReportExport";
 
@@ -55,6 +57,37 @@ const emit = defineEmits(["close", "view-receipt", "reject", "approve", "navigat
 
 const liqStore = useLiquidationStore();
 const { isExporting, exportReport } = useReportExport();
+
+const isReportPreviewOpen = ref(false);
+const resolvedTemplateData = computed(
+  () =>
+    props.reviewingCase?.reportTemplateData ||
+    props.reviewingCase?.report_template_data ||
+    null,
+);
+const resolvedReportUrl = computed(() => {
+  if (!props.reviewingCase) return null;
+  if (props.reviewingCase.reportUrl) return props.reviewingCase.reportUrl;
+  if (props.reviewingCase.reportFilePath) {
+    return props.getFileUrl(props.reviewingCase.reportFilePath) || props.reviewingCase.reportFilePath;
+  }
+  return null;
+});
+const hasReportAttachment = computed(() =>
+  Boolean(
+    props.reviewingCase?.reportFilePath ||
+    props.reviewingCase?.reportUrl ||
+    resolvedTemplateData.value,
+  ),
+);
+
+function handleFallbackPdfDownload() {
+  if (!resolvedTemplateData.value) return;
+  downloadSbsiReportPdf(
+    resolvedTemplateData.value,
+    props.reviewingCase?.id ? `SBSI-liquidation-${props.reviewingCase.id}.pdf` : null,
+  );
+}
 
 /* Bridge unified roadmap props from reviewingCase */
 const roadmapCashAdvance = computed(() => {
@@ -305,17 +338,43 @@ function handleRoadmapNavigate(payload) {
           </div>
 
           <!-- Report Attachment -->
-          <div v-if="reviewingCase.reportFilePath" class="pt-2">
-            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Report Attachment</p>
-            <a
-              :href="getFileUrl(reviewingCase.reportFilePath)"
-              target="_blank"
-              class="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-            >
-              <FileText class="w-3.5 h-3.5" />
-              <span>View / Download Report</span>
-              <Download class="w-3 h-3" />
-            </a>
+          <div v-if="hasReportAttachment" class="pt-2">
+            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-2">Report Attachment</p>
+            <div class="flex flex-wrap items-center gap-3">
+              <BaseButton
+                data-testid="preview-liquidation-report-btn"
+                variant="outline"
+                size="sm"
+                type="button"
+                @click="isReportPreviewOpen = true"
+              >
+                <Eye class="w-3.5 h-3.5" />
+                <span>Preview Report</span>
+              </BaseButton>
+              <a
+                v-if="reviewingCase.reportUrl || reviewingCase.reportFilePath"
+                :href="reviewingCase.reportUrl || getFileUrl(reviewingCase.reportFilePath)"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="download-liquidation-report-link"
+                class="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+              >
+                <FileText class="w-3.5 h-3.5" />
+                <span>View / Download Report</span>
+                <Download class="w-3 h-3" />
+              </a>
+              <BaseButton
+                v-else-if="resolvedTemplateData"
+                data-testid="download-liquidation-report-pdf-btn"
+                variant="ghost"
+                size="sm"
+                type="button"
+                @click="handleFallbackPdfDownload"
+              >
+                <Download class="w-3.5 h-3.5" />
+                <span>Download PDF</span>
+              </BaseButton>
+            </div>
           </div>
 
           <!-- Audit Trail Section -->
@@ -377,4 +436,13 @@ function handleRoadmapNavigate(payload) {
       </div>
     </div>
   </Transition>
+
+  <SbsiReportPreviewModal
+    :is-open="isReportPreviewOpen"
+    :template-data="resolvedTemplateData"
+    fallback-type="liquidation"
+    :record="reviewingCase"
+    :file-url="resolvedReportUrl"
+    @close="isReportPreviewOpen = false"
+  />
 </template>

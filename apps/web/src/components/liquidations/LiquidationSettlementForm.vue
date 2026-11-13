@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, nextTick } from "vue";
 import {
   FilePieChart,
   CheckCircle,
@@ -20,11 +20,13 @@ import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
 import ReceiptImagePreview from "@/components/base/ReceiptImagePreview.vue";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseReceiptDetailModal from "@/components/base/BaseReceiptDetailModal.vue";
+import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor.vue";
 import { useLiquidationStore } from "@/stores/liquidation";
 import { useReportExport } from "@/composables/useReportExport";
 import { formatPeso, formatDate } from "@/utils/formatters";
 import { apiFetch } from "@/utils/apiFetch";
 import { getFileUrl } from "@/utils/fileUtils";
+import { validateTemplateData } from "@/utils/sbsiReportTemplateUtils";
 
 const props = defineProps({
   auditTrail: {
@@ -50,6 +52,14 @@ const props = defineProps({
   reportAttachment: {
     type: [Object, File, String],
     default: null,
+  },
+  reportTemplateData: {
+    type: Object,
+    default: null,
+  },
+  isManualMode: {
+    type: Boolean,
+    default: false,
   },
   existingLiquidation: {
     type: Object,
@@ -100,6 +110,9 @@ const props = defineProps({
 const emit = defineEmits([
   "update:receipts",
   "update:shortfallExplanation",
+  "update:reportTemplateData",
+  "update:reportAttachment",
+  "update:isManualMode",
   "reload-console",
   "upload-error",
   "file-selected",
@@ -109,7 +122,69 @@ const emit = defineEmits([
   "submit-liquidation",
 ]);
 
-const reportAttachmentInput = ref(null);
+const reportEditorRef = ref(null);
+const localTemplateData = ref(props.reportTemplateData);
+const localManualMode = ref(props.isManualMode);
+
+watch(
+  () => props.reportTemplateData,
+  (val) => {
+    localTemplateData.value = val;
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.isManualMode,
+  (val) => {
+    localManualMode.value = val;
+  },
+  { immediate: true },
+);
+
+const effectiveTemplateData = computed(() => props.reportTemplateData ?? localTemplateData.value);
+const effectiveManualMode = computed(() => props.isManualMode || localManualMode.value);
+const isTemplateValid = computed(() => validateTemplateData(effectiveTemplateData.value).valid);
+
+const disbursementDateValue = computed(() => {
+  const adv = props.selectedAdvance;
+  if (!adv) return "";
+  const raw =
+    adv.disbursement?.disbursed_at ||
+    adv.disbursed_at ||
+    adv.expected_disbursement_date ||
+    adv.acknowledgedAt ||
+    adv.date ||
+    "";
+  return raw ? String(raw).slice(0, 10) : "";
+});
+
+function syncEditorMode() {
+  nextTick(() => {
+    const manualBtn = reportEditorRef.value?.$el?.querySelector('[data-testid="mode-manual"]');
+    if (manualBtn) {
+      const next = manualBtn.getAttribute("aria-pressed") === "true";
+      localManualMode.value = next;
+      emit("update:isManualMode", next);
+    }
+  });
+}
+
+function handleTemplateModelUpdate(val) {
+  localTemplateData.value = val;
+  emit("update:reportTemplateData", val);
+}
+
+function handleReportFileUpdate(file) {
+  emit("update:reportAttachment", file);
+  if (file) {
+    localManualMode.value = true;
+    emit("update:isManualMode", true);
+  } else {
+    emit("file-cleared");
+    syncEditorMode();
+  }
+}
 
 const { isExporting, exportReport } = useReportExport();
 
@@ -623,87 +698,79 @@ const normalizedViewReceipt = computed(() => {
     </template>
 
     <section
-      class="p-5 sm:p-6 bg-white border rounded-2xl border-slate-200/90 shadow-sm space-y-3"
+      class="p-5 sm:p-6 bg-white border rounded-2xl border-slate-200/90 shadow-sm space-y-4"
+      data-testid="liquidation-report-attachment-card"
+      @click="syncEditorMode"
     >
-      <input
-        ref="reportAttachmentInput"
-        type="file"
-        accept="image/*,.pdf,.docx"
-        class="hidden"
-        :disabled="isFormDisabled"
-        @change="(e) => $emit('file-selected', e)"
-      />
-
       <div class="flex items-center justify-between">
         <label class="input-label !mb-0">
-          Explanation
-          <span v-if="variance > 0" class="text-danger ml-0.5">*</span>
+          Report Attachment
+          <span class="text-danger ml-0.5">*</span>
         </label>
       </div>
 
-      <div
-        v-if="reportAttachment"
-        class="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-3"
-      >
-        <div class="flex min-w-0 items-center gap-3">
-          <FileText class="h-4 w-4 shrink-0 text-slate-400" />
-          <div class="min-w-0">
-            <p class="truncate text-sm text-slate-700">
-              {{ attachmentFileName(reportAttachment) }}
-            </p>
-            <p
-              v-if="attachmentFileSize(reportAttachment)"
-              class="text-xs text-slate-400"
-            >
-              {{ attachmentFileSize(reportAttachment) }}
-            </p>
-          </div>
-        </div>
-        <button
-          v-if="!isFormDisabled"
-          class="rounded-full p-1.5 text-slate-400 transition-colors hover:text-danger hover:bg-red-50"
-          type="button"
-          aria-label="Remove report attachment"
-          @click="$emit('file-cleared')"
-        >
-          <X class="h-4 w-4" />
-        </button>
-      </div>
+      <SbsiReportDocumentEditor
+        ref="reportEditorRef"
+        type="liquidation"
+        :model-value="effectiveTemplateData"
+        :report-file="reportAttachment"
+        :receipts="receipts"
+        :allocated-amount="selectedAdvance?.amount ?? selectedAdvance?.balance ?? 0"
+        :utilized-amount="totalExpenseAmount"
+        :variance="variance"
+        :purpose="selectedAdvance?.purpose || ''"
+        :disbursement-date="disbursementDateValue"
+        :record-id="existingLiquidation?.id || selectedAdvance?.id || null"
+        :disabled="isFormDisabled"
+        :readonly="isFormDisabled"
+        @update:model-value="handleTemplateModelUpdate"
+        @update:report-file="handleReportFileUpdate"
+      />
 
-      <div
-        class="relative rounded-xl border border-slate-200 bg-white transition overflow-hidden"
-        :class="
-          isFormDisabled
-            ? 'bg-slate-50 cursor-not-allowed select-none'
-            : 'focus-within:border-primary focus-within:ring-1 focus-within:ring-primary'
-        "
-      >
-        <textarea
-          :value="shortfallExplanation"
-          @input="
-            (e) =>
-              $emit('update:shortfallExplanation', e.target.value.slice(0, 255))
-          "
-          rows="4"
-          maxlength="255"
-          :tabindex="isFormDisabled ? -1 : 0"
-          :readonly="isFormDisabled"
-          :disabled="isFormDisabled"
-          class="w-full resize-none border-0 bg-transparent p-4 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 disabled:text-slate-500 min-h-[130px]"
-          :class="{
-            'pointer-events-none select-none cursor-not-allowed':
-              isFormDisabled,
-          }"
-          :placeholder="
-            variance > 0
-              ? 'Explain why the total expense is less than the advanced amount...'
-              : 'Provide an explanation for this liquidation...'
-          "
-        />
+      <div class="pt-2 border-t border-slate-100 space-y-2">
+        <div class="flex items-center justify-between">
+          <label class="input-label !mb-0">
+            Reviewer Note / Explanation
+            <span v-if="effectiveManualMode && variance > 0" class="text-danger ml-0.5">*</span>
+            <span v-else class="text-xs font-normal text-slate-400 ml-1">(Optional)</span>
+          </label>
+        </div>
+
         <div
-          class="flex items-center justify-end px-4 pb-3 pt-1 text-xs font-medium text-slate-400 select-none"
+          class="relative rounded-xl border border-slate-200 bg-white transition overflow-hidden"
+          :class="
+            isFormDisabled
+              ? 'bg-slate-50 cursor-not-allowed select-none'
+              : 'focus-within:border-primary focus-within:ring-1 focus-within:ring-primary'
+          "
         >
-          <span>{{ (shortfallExplanation || "").length }} / 255</span>
+          <textarea
+            :value="shortfallExplanation"
+            @input="
+              (e) =>
+                $emit('update:shortfallExplanation', e.target.value.slice(0, 255))
+            "
+            rows="3"
+            maxlength="255"
+            :tabindex="isFormDisabled ? -1 : 0"
+            :readonly="isFormDisabled"
+            :disabled="isFormDisabled"
+            class="w-full resize-none border-0 bg-transparent p-4 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 disabled:text-slate-500 min-h-[96px]"
+            :class="{
+              'pointer-events-none select-none cursor-not-allowed':
+                isFormDisabled,
+            }"
+            :placeholder="
+              variance > 0
+                ? 'Optional reviewer note (auto-generated from the SBSI report if left blank)...'
+                : 'Provide an optional note for this liquidation...'
+            "
+          />
+          <div
+            class="flex items-center justify-end px-4 pb-3 pt-1 text-xs font-medium text-slate-400 select-none"
+          >
+            <span>{{ (shortfallExplanation || "").length }} / 255</span>
+          </div>
         </div>
       </div>
     </section>
@@ -836,7 +903,9 @@ const normalizedViewReceipt = computed(() => {
           receipts.some((r) => r.ocrStatus === 'processing') ||
           totalExpenseAmount === 0 ||
           submitting ||
-          (variance > 0 && !shortfallExplanation.trim())
+          (effectiveManualMode
+            ? !reportAttachment || (variance > 0 && !shortfallExplanation.trim())
+            : !isTemplateValid)
         "
         @click="$emit('submit-liquidation')"
       >

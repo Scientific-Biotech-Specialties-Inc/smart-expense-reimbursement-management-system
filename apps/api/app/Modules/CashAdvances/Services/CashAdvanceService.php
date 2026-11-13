@@ -29,6 +29,7 @@ class CashAdvanceService
                 'expected_disbursement_date' => $data['expected_disbursement_date'],
                 'expected_liquidation_date' => $data['expected_liquidation_date'],
                 'status' => 'pending',
+                'report_template_data' => $data['report_template_data'] ?? null,
             ]);
 
             CashAdvanceStatusHistory::create([
@@ -364,6 +365,10 @@ class CashAdvanceService
                 'expected_disbursement_date' => $data['expected_disbursement_date'] ?? null,
                 'expected_liquidation_date' => $data['expected_liquidation_date'] ?? null,
             ], fn($v) => $v !== null);
+
+            if (array_key_exists('report_template_data', $data)) {
+                $updatePayload['report_template_data'] = $data['report_template_data'];
+            }
 
             if ($advance->status === 'rejected') {
                 throw new \Illuminate\Auth\Access\AuthorizationException('Rejected cash advances (exceeded revision limit) cannot be edited.');

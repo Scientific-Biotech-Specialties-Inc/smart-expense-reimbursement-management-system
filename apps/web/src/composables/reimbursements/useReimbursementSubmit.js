@@ -1,7 +1,9 @@
-import { ref, computed } from "vue";
+import { ref } from "vue";
 import { useToast } from "@/composables/useToast";
 import { useReimbursementStore } from "@/stores/reimbursement";
 import { cleanName } from "@/utils/receiptUtils";
+import { validateTemplateData } from "@/utils/sbsiReportTemplateUtils";
+import { createSbsiReportPdfFile } from "@/utils/sbsiPdfGenerator";
 
 export function useReimbursementSubmit(emit, router) {
   const store = useReimbursementStore();
@@ -9,9 +11,44 @@ export function useReimbursementSubmit(emit, router) {
   
   const submitting = ref(false);
 
-  async function submitReimbursement({ receipts, reportFile, totalAmount, userComment }) {
+  function resolveReportAttachment({ reportFile, reportTemplateData }) {
+    const isTemplateMode = Boolean(reportTemplateData && reportTemplateData.mode !== "manual");
+    if (!isTemplateMode) {
+      return {
+        file: reportFile instanceof File ? reportFile : null,
+        templateJson: reportTemplateData?.mode === "manual" ? JSON.stringify({ mode: "manual" }) : null,
+      };
+    }
+
+    const validation = validateTemplateData(reportTemplateData);
+    if (!validation.valid) {
+      addToast({
+        message: validation.errors[0] || "Please complete all required report template fields.",
+        type: "error",
+      });
+      return null;
+    }
+
+    try {
+      const generatedFile = createSbsiReportPdfFile(reportTemplateData);
+      return {
+        file: generatedFile,
+        templateJson: JSON.stringify(reportTemplateData),
+      };
+    } catch (error) {
+      console.error("Reimbursement report PDF generation failed:", error);
+      addToast({
+        message: "Failed to generate the report PDF. Please review the report template and try again.",
+        type: "error",
+      });
+      return null;
+    }
+  }
+
+  async function submitReimbursement({ receipts, reportFile, reportTemplateData = null, totalAmount, userComment }) {
     if (submitting.value) return false;
-    if (!receipts.length || !reportFile || receipts.some(r => r.isUploading)) {
+    const isTemplateMode = Boolean(reportTemplateData && reportTemplateData.mode !== "manual");
+    if (!receipts.length || (!isTemplateMode && !reportFile) || receipts.some(r => r.isUploading)) {
       return false;
     }
     if (receipts.some((r) => !r.categoryId)) {
@@ -72,6 +109,9 @@ export function useReimbursementSubmit(emit, router) {
       }
     }
 
+    const attachment = resolveReportAttachment({ reportFile, reportTemplateData });
+    if (!attachment) return false;
+
     submitting.value = true;
     try {
       const formData = new FormData();
@@ -94,8 +134,11 @@ export function useReimbursementSubmit(emit, router) {
         receipts[0]?.date || new Date().toISOString().slice(0, 10),
       );
 
-      if (reportFile) {
-        formData.append("report_file", reportFile);
+      if (attachment.file) {
+        formData.append("report_file", attachment.file);
+      }
+      if (attachment.templateJson) {
+        formData.append("report_template_data", attachment.templateJson);
       }
 
       receipts.forEach((r, index) => {
@@ -159,7 +202,7 @@ export function useReimbursementSubmit(emit, router) {
     }
   }
 
-  async function updateReimbursement(id, { receipts, reportFile, totalAmount, userComment }) {
+  async function updateReimbursement(id, { receipts, reportFile, reportTemplateData = null, totalAmount, userComment }) {
     if (submitting.value) return false;
     if (!receipts.length || receipts.some(r => r.isUploading)) {
       return false;
@@ -201,6 +244,9 @@ export function useReimbursementSubmit(emit, router) {
       }
     }
 
+    const attachment = resolveReportAttachment({ reportFile, reportTemplateData });
+    if (!attachment) return false;
+
     submitting.value = true;
     try {
       const formData = new FormData();
@@ -225,8 +271,11 @@ export function useReimbursementSubmit(emit, router) {
         receipts[0]?.date || new Date().toISOString().slice(0, 10),
       );
 
-      if (reportFile && reportFile instanceof File) {
-        formData.append("report_file", reportFile);
+      if (attachment.file) {
+        formData.append("report_file", attachment.file);
+      }
+      if (attachment.templateJson) {
+        formData.append("report_template_data", attachment.templateJson);
       }
 
       receipts.forEach((r, index) => {

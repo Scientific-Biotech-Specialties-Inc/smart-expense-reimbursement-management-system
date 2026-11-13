@@ -249,4 +249,52 @@ describe("LiquidationReviewModal Header Chipsets", () => {
     expect(card.classes()).not.toContain("hover:shadow-md");
     expect(card.classes()).not.toContain("hover:shadow-xl");
   });
+
+  it("renders Preview Report button and opens SbsiReportPreviewModal when report attachment or template data exists", async () => {
+    const templateData = {
+      type: "liquidation",
+      purpose: "Field Travel",
+      allocatedAmount: 2000,
+      utilizedAmount: 1800,
+    };
+
+    const wrapper = mount(LiquidationReviewModal, {
+      props: {
+        isOpen: true,
+        reviewingCase: {
+          id: "LIQ-202",
+          cashAdvanceAmount: 2000,
+          dueDate: "2026-10-30",
+          requestorName: "Elena Cruz",
+          reportFilePath: "liquidations/report-202.pdf",
+          reportTemplateData: templateData,
+        },
+        reviewStatus: "under-review",
+        reviewOutstandingBalance: 200,
+        reviewReceipts: [],
+        getFileUrl: (p) => `https://cdn.example.com/${p}`,
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          ReceiptImagePreview: true,
+          BaseReceiptImage: true,
+          SbsiReportPreviewModal: true,
+        },
+      },
+    });
+
+    const previewBtn = wrapper.find('[data-testid="preview-liquidation-report-btn"]');
+    expect(previewBtn.exists()).toBe(true);
+    expect(previewBtn.text()).toContain("Preview Report");
+    expect(wrapper.find('[data-testid="download-liquidation-report-link"]').exists()).toBe(true);
+
+    await previewBtn.trigger("click");
+    const modal = wrapper.findComponent({ name: "SbsiReportPreviewModal" });
+    expect(modal.exists()).toBe(true);
+    expect(modal.props("isOpen")).toBe(true);
+    expect(modal.props("fallbackType")).toBe("liquidation");
+    expect(modal.props("templateData")).toEqual(templateData);
+    expect(modal.props("fileUrl")).toBe("https://cdn.example.com/liquidations/report-202.pdf");
+  });
 });

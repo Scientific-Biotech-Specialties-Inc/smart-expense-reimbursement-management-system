@@ -110,6 +110,9 @@ export const useLiquidationStore = defineStore('liquidation', () => {
       if (payload.reportAttachment) {
         formData.append('report_attachment', payload.reportAttachment);
       }
+      if (payload.reportTemplateData) {
+        formData.append('report_template_data', JSON.stringify(payload.reportTemplateData));
+      }
 
       const formattedReceipts = payload.receipts.map(r => ({
         id: r.ocrData?.id || r.id, // backend DB ID
@@ -186,6 +189,9 @@ export const useLiquidationStore = defineStore('liquidation', () => {
       
       if (payload.reportAttachment) {
         formData.append('report_attachment', payload.reportAttachment);
+      }
+      if (payload.reportTemplateData) {
+        formData.append('report_template_data', JSON.stringify(payload.reportTemplateData));
       }
 
       const formattedReceipts = payload.receipts.map(r => ({

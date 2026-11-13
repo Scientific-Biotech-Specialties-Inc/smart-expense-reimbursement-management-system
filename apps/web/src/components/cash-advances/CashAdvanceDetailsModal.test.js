@@ -545,4 +545,61 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
       expect(wrapper.findComponent({ name: "BaseSignaturePad" }).exists()).toBe(false);
     });
   });
+
+  describe("SBSI Report Preview", () => {
+    it("renders Preview Report button in both Admin and Employee views and opens SbsiReportPreviewModal", async () => {
+      for (const isAdmin of [true, false]) {
+        mockAuth.isAdmin = isAdmin;
+        const wrapper = mount(CashAdvanceDetailsModal, {
+          props: {
+            isOpen: true,
+            record: {
+              id: 31,
+              userId: 10,
+              requestedBy: "Juan Dela Cruz",
+              purpose: "Field Audit",
+              amount: 4500,
+              balance: 4500,
+              date: "2026-10-10",
+              dueDate: "2026-10-20",
+              status: "pending",
+              report_template_data: {
+                type: "cash-advance",
+                purpose: "Field Audit",
+                totalAmount: 4500,
+              },
+              document: {
+                file_name: "SBSI-cash-advance-31.pdf",
+                file_path: "cash_advances/report-31.pdf",
+              },
+            },
+          },
+          global: {
+            stubs: {
+              UnifiedRoadmapStepper: true,
+              StatusBadge: true,
+              DecisionConfirmationModal: true,
+              BaseModal: true,
+              BaseAuditTrail: true,
+              SbsiReportPreviewModal: true,
+            },
+          },
+        });
+
+        const previewBtn = wrapper.find('[data-testid="preview-cash-advance-report-btn"]');
+        expect(previewBtn.exists()).toBe(true);
+        expect(previewBtn.text()).toContain("Preview Report");
+
+        await previewBtn.trigger("click");
+        const modal = wrapper.findComponent({ name: "SbsiReportPreviewModal" });
+        expect(modal.exists()).toBe(true);
+        expect(modal.props("isOpen")).toBe(true);
+        expect(modal.props("fallbackType")).toBe("cash-advance");
+        expect(modal.props("templateData")).toMatchObject({
+          type: "cash-advance",
+          purpose: "Field Audit",
+        });
+      }
+    });
+  });
 });

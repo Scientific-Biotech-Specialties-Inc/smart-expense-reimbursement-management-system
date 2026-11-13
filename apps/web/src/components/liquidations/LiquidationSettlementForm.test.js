@@ -65,6 +65,7 @@ describe("LiquidationSettlementForm — Receipt Grid vs Form List", () => {
           FileUpload: true,
           BaseReceiptDetailModal: true,
           ImagePreviewModal: true,
+          SbsiReportDocumentEditor: true,
         },
       },
     });
@@ -240,5 +241,80 @@ describe("LiquidationSettlementForm — Receipt Grid vs Form List", () => {
     }
     expect(deleteBtn.classes()).not.toContain("h-9");
     expect(submitBtn.classes()).not.toContain("h-9");
+  });
+
+  it("mounts SbsiReportDocumentEditor in Report Attachment card and allows template submit with positive variance without shortfallExplanation", async () => {
+    const validTemplate = {
+      type: "liquidation",
+      date: "2026-10-12",
+      recipientName: "Lourdes C. Roxas",
+      salutation: "Dear Ms. Roxas,",
+      subject: "LIQUIDATION REPORT FOR CASH ADVANCE",
+      purpose: "Client Conference",
+      disbursementDate: "2026-10-10",
+      allocatedAmount: 5000,
+      utilizedAmount: 1700,
+      variance: 3300,
+      breakdownItems: [{ description: "Jollibee", amount: 1700 }],
+      signatoryName: "Juan Dela Cruz",
+    };
+
+    const wrapper = mount(LiquidationSettlementForm, {
+      props: {
+        selectedAdvance: sampleAdvance,
+        disabled: false,
+        receipts: sampleReceipts,
+        totalExpenseAmount: 1700,
+        variance: 3300,
+        shortfallExplanation: "",
+        reportTemplateData: validTemplate,
+        isManualMode: false,
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          FileUpload: true,
+          ReceiptImagePreview: true,
+          StatusBadge: true,
+          BaseReceiptDetailModal: true,
+          SbsiReportPreviewModal: true,
+        },
+      },
+    });
+
+    const card = wrapper.find('[data-testid="liquidation-report-attachment-card"]');
+    expect(card.exists()).toBe(true);
+    expect(wrapper.find('[data-testid="sbsi-report-editor"]').exists()).toBe(true);
+
+    const submitBtn = wrapper.find("#submit-liquidation-btn");
+    expect(submitBtn.attributes("disabled")).toBeUndefined();
+  });
+
+  it("disables submit in manual mode when variance > 0 and shortfallExplanation is empty", () => {
+    const wrapper = mount(LiquidationSettlementForm, {
+      props: {
+        selectedAdvance: sampleAdvance,
+        disabled: false,
+        receipts: sampleReceipts,
+        totalExpenseAmount: 1700,
+        variance: 3300,
+        shortfallExplanation: "",
+        reportAttachment: new File(["pdf"], "report.pdf", { type: "application/pdf" }),
+        isManualMode: true,
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          FileUpload: true,
+          ReceiptImagePreview: true,
+          StatusBadge: true,
+          BaseReceiptDetailModal: true,
+          SbsiReportDocumentEditor: true,
+        },
+      },
+    });
+
+    const submitBtn = wrapper.find("#submit-liquidation-btn");
+    expect(submitBtn.attributes("disabled")).toBeDefined();
   });
 });

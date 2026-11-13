@@ -2,13 +2,21 @@
 
 namespace App\Modules\CashAdvances\Http\Requests;
 
+use App\Modules\Shared\Traits\HandlesReportTemplateData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreCashAdvanceRequest extends FormRequest
 {
+    use HandlesReportTemplateData;
+
     /**
      * Determine if the user is authorized to make this request.
      */
+    protected function prepareForValidation(): void
+    {
+        $this->decodeReportTemplateData($this);
+    }
+
     public function authorize(): bool
     {
         return true; // handled by Policy
@@ -22,6 +30,7 @@ class StoreCashAdvanceRequest extends FormRequest
     public function rules(): array
     {
         return [
+            ...self::reportTemplateDataRules(),
             'purpose' => 'required|string|max:255',
             'amount' => 'required|numeric|min:0.01',
             'expected_disbursement_date' => 'required|date|after_or_equal:today',

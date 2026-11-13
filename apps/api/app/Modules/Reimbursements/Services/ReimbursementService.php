@@ -119,6 +119,7 @@ class ReimbursementService
                 'amount' => $validated['amount'],
                 'date' => $validated['date'],
                 'report_file_path' => $reportPath,
+                'report_template_data' => $validated['report_template_data'] ?? null,
                 'status' => 'pending',
                 'submitted_by_name' => $user->name,
             ]);
@@ -653,6 +654,10 @@ class ReimbursementService
 
             if (array_key_exists('user_comment', $data)) {
                 $updatePayload['user_comment'] = $data['user_comment'];
+            }
+
+            if (array_key_exists('report_template_data', $data)) {
+                $updatePayload['report_template_data'] = $data['report_template_data'];
             }
 
             // Reset revise → pending on re-submission (rejected terminal cannot be reset)
