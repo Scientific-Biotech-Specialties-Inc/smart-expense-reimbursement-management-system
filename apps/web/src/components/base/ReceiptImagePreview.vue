@@ -51,6 +51,14 @@ const props = defineProps({
     type: String,
     default: "aspect-[3/4]",
   },
+  frameClass: {
+    type: String,
+    default: "rounded-xl border border-slate-200 bg-white shadow-sm",
+  },
+  imgClass: {
+    type: String,
+    default: "w-full h-full object-contain",
+  },
   alt: {
     type: String,
     default: "",
@@ -147,7 +155,16 @@ function handleRemove() {
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
+  <div
+    :class="[
+      'flex flex-col',
+      (showBadge && (index !== null || displayTitle)) ||
+      $slots.actions ||
+      (showDeleteButton && allowRemove && !disabled)
+        ? 'gap-4'
+        : '',
+    ]"
+  >
     <!-- Receipt Number Badge & Filename -->
     <div
       v-if="showBadge && (index !== null || displayTitle)"
@@ -169,7 +186,7 @@ function handleRemove() {
     </div>
 
     <!-- Multi-Receipt Stacked Deck (when merged images are considered one receipt) -->
-    <div v-if="isMultiReceipt" class="relative">
+    <div v-if="isMultiReceipt" class="relative h-full">
       <StackedReceiptDeck
         :images="resolvedImages"
         :aspect-class="aspectClass"
@@ -199,7 +216,8 @@ function handleRemove() {
     <div
       v-else
       :class="[
-        'relative rounded-xl overflow-hidden border border-slate-200 bg-white shadow-sm flex items-center justify-center',
+        'relative overflow-hidden flex items-center justify-center',
+        frameClass,
         aspectClass,
         canPreview ? 'cursor-pointer group' : '',
       ]"
@@ -210,7 +228,7 @@ function handleRemove() {
         :src="src"
         :alt="alt || displayTitle || 'Receipt Image'"
         :file-type="fileType"
-        img-class="w-full h-full object-contain"
+        :img-class="imgClass"
         icon-size-class="w-12 h-12 opacity-40"
       />
 

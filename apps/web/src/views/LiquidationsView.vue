@@ -1885,9 +1885,9 @@ onMounted(async () => {
       "
       @close="closeSettlementModal"
     >
-      <div class="flex max-h-[90vh] flex-col">
+      <div class="flex max-h-[90vh] flex-col w-full min-w-0 max-w-full overflow-x-clip">
         <div
-          class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4"
+          class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 w-full min-w-0 shrink-0"
         >
           <div class="flex min-w-0 items-start gap-2">
             <button
@@ -1917,7 +1917,10 @@ onMounted(async () => {
                         : "Settle Cash Advance"
                 }}
               </h2>
-              <p class="mt-0.5 truncate text-xs text-slate-400">
+              <p
+                v-if="settlementModalStep === 'select' || settlementModalMode !== 'view'"
+                class="mt-0.5 truncate text-xs text-slate-400"
+              >
                 {{
                   settlementModalStep === "select"
                     ? "Choose a cash advance to liquidate."
@@ -1960,7 +1963,7 @@ onMounted(async () => {
             </button>
           </div>
         </div>
-        <div class="overflow-y-auto">
+        <div class="w-full min-w-0 max-w-full flex-1 overflow-y-auto overflow-x-clip">
           <LiquidationAdvancePicker
             v-if="settlementModalStep === 'select'"
             :advances="employeeOutstandingAdvances"

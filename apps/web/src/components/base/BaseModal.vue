@@ -14,7 +14,7 @@ const props = defineProps({
   },
   zIndexClass: {
     type: String,
-    default: "z-[60]",
+    default: "z-50",
   },
   contentClass: {
     type: String,
@@ -37,13 +37,33 @@ function onOpenChange(open) {
     emit("close")
   }
 }
+
+function handleOutsideInteraction(event) {
+  if (
+    event?.target?.closest?.("[data-image-preview-modal]") ||
+    document.querySelector("[data-image-preview-modal]")
+  ) {
+    event.preventDefault()
+  }
+}
+
+function handleEscapeKeyDown(event) {
+  if (document.querySelector("[data-image-preview-modal]")) {
+    event.preventDefault()
+  }
+}
 </script>
 
 <template>
   <Dialog :open="isOpen" @update:open="onOpenChange">
     <DialogContent
       :show-close="false"
-      :class="cn('p-0 overflow-hidden rounded-2xl border-none shadow-2xl bg-white', maxWidthClass, contentClass)"
+      :overlay-class="zIndexClass"
+      :class="cn('p-0 overflow-hidden rounded-2xl border-none shadow-2xl bg-white', zIndexClass, maxWidthClass, contentClass)"
+      @pointer-down-outside="handleOutsideInteraction"
+      @interact-outside="handleOutsideInteraction"
+      @focus-outside="handleOutsideInteraction"
+      @escape-key-down="handleEscapeKeyDown"
     >
       <!-- VisuallyHidden fallback for Radix Dialog Accessibility -->
       <VisuallyHidden as-child>
