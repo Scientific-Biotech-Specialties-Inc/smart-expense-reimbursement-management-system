@@ -8,7 +8,6 @@ use App\Modules\Liquidations\Models\Liquidation;
 use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\Users\Models\User;
 use Carbon\Carbon;
-use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 
 class AuditLogService

@@ -93,10 +93,6 @@ export function useReimbursementDecisions(store, addToast, viewingRecord) {
     confirmPassword.value = "";
   }
 
-  function openReviseModal(id) {
-    return openRejectModal(id, "revise");
-  }
-
   function cancelReject() {
     rejectingId.value = null;
     rejectionComment.value = "";
@@ -212,7 +208,6 @@ export function useReimbursementDecisions(store, addToast, viewingRecord) {
     cancelApprove,
     confirmApprove,
     openRejectModal,
-    openReviseModal,
     cancelReject,
     confirmReject,
     openGrantModal,

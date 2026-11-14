@@ -20,10 +20,8 @@ import {
   X,
   CheckCircle,
   Wallet,
-  FileDown,
   Download,
   ShieldCheck,
-  RotateCcw,
   FileText,
   Loader2,
   Eye,
@@ -364,25 +362,6 @@ function normalizeStatus(status) {
     rejected: "rejected",
   };
   return statusMap[normalized] || normalized;
-}
-
-function isTimelineStepCompleted(stepIndex) {
-  const status = normalizeStatus(props.record?.status);
-  const order = ["pending", "approved", "disbursed", "liquidated"];
-  const currentIndex = order.indexOf(status);
-  if (status === "rejected") {
-    // If rejected, steps up to 1 (approved) are complete but with rejection at decision
-    return stepIndex <= 0;
-  }
-  return stepIndex < currentIndex;
-}
-
-function isTimelineStepCurrent(stepIndex) {
-  const status = normalizeStatus(props.record?.status);
-  const order = ["pending", "approved", "disbursed", "liquidated"];
-  const currentIndex = order.indexOf(status);
-  if (status === "rejected") return stepIndex === 1;
-  return stepIndex === currentIndex;
 }
 
 async function downloadDocument() {

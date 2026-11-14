@@ -37,11 +37,6 @@ const parsedStartDate = computed(() => {
   return Number.isNaN(d.getTime()) ? null : d;
 });
 
-const isSettledOrLiquidated = computed(() => {
-  const s = String(props.status || "").toLowerCase().trim();
-  return s === "liquidated" || s === "settled" || s === "rejected";
-});
-
 const diffDays = computed(() => {
   if (!parsedDueDate.value) return 0;
   const today = new Date();

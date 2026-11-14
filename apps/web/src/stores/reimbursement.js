@@ -10,18 +10,6 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
   const totalAmount = computed(() =>
     items.value.reduce((s, i) => s + parseFloat(i.amount), 0),
   );
-  const totalPending = computed(
-    () => items.value.filter((i) => i.status === "pending").length,
-  );
-  const totalApproved = computed(
-    () => items.value.filter((i) => i.status === "approved").length,
-  );
-  const totalRejected = computed(
-    () => items.value.filter((i) => i.status === "rejected").length,
-  );
-  const totalGranted = computed(
-    () => items.value.filter((i) => i.status === "granted").length,
-  );
 
   async function fetchAll() {
     isLoading.value = true;
@@ -121,31 +109,6 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
         const errMsg = errJson.errors?.password?.[0] || errJson.message || "Failed to reject";
         throw new Error(errMsg);
       }
-      const json = await response.json();
-      const index = items.value.findIndex((i) => i.id == id);
-      if (index !== -1) items.value[index] = json.data;
-      if (currentItem.value?.id == id) currentItem.value = json.data;
-      return json.data;
-    } catch (e) {
-      console.error(e);
-      throw e;
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  async function revise(id, comment, password) {
-    return reject(id, comment, password, "revise");
-  }
-
-  async function updateNotes(id, notes) {
-    isLoading.value = true;
-    try {
-      const response = await apiFetch(`/api/serms/reimbursements/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ admin_notes: notes }),
-      });
-      if (!response.ok) throw new Error("Failed to update notes");
       const json = await response.json();
       const index = items.value.findIndex((i) => i.id == id);
       if (index !== -1) items.value[index] = json.data;
@@ -279,19 +242,13 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
     currentItem,
     isLoading,
     totalAmount,
-    totalPending,
-    totalApproved,
-    totalRejected,
-    totalGranted,
     fetchAll,
     fetchOne,
     submit,
     approve,
     reject,
-    revise,
     grant,
     acknowledgePayout,
-    updateNotes,
     updateRequest,
     deleteRequest,
   };

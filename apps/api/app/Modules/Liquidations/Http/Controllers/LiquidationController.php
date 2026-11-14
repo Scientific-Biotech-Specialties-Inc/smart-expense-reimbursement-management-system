@@ -7,7 +7,7 @@ use Illuminate\Http\Request;
 use App\Modules\Liquidations\Models\Liquidation;
 use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\Reimbursements\Models\Receipt;
-use App\Modules\Ai\Contracts\AsyncOcrEngineInterface;
+use App\Modules\Shared\Services\CashAdvanceEnrichmentService;
 use App\Modules\Shared\Services\PasswordVerificationService;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
@@ -19,12 +19,15 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
-use Carbon\Carbon;
 
 class LiquidationController extends Controller
 {
     use ValidatesReceiptDuplicates;
     use HandlesReportTemplateData;
+
+    public function __construct(private readonly CashAdvanceEnrichmentService $enrichmentService)
+    {
+    }
 
     /**
      * CashAdvance relations needed for Unified Roadmap when accessed via liquidation
@@ -42,75 +45,53 @@ class LiquidationController extends Controller
 
     private function enrichCashAdvanceForRoadmap(?CashAdvance $advance): ?CashAdvance
     {
-        if (!$advance) {
-            return null;
-        }
-        // Ensure penalties_total - use withSum if available else collection sum
-        if ($advance->relationLoaded('penalties')) {
-            $penaltiesTotal = $advance->penalties->sum(fn ($p) => (float) ($p->penalty_amount ?? 0));
-            $advance->setAttribute('penalties_total', (float) $penaltiesTotal);
-            $advance->setAttribute('penalties_sum', (float) $penaltiesTotal);
-        } elseif (!isset($advance->penalties_total)) {
-            $advance->setAttribute('penalties_total', (float) \App\Modules\Liquidations\Models\PenaltyRecord::where('cash_advance_id', $advance->id)->sum('penalty_amount'));
-            $advance->setAttribute('penalties_sum', (float) $advance->penalties_total);
-        }
+        return $advance ? $this->enrichmentService->enrich($advance, false) : null;
+    }
 
-        // days_overdue
-        $due = $advance->expected_liquidation_date;
-        $daysOverdue = 0;
-        if ($due) {
-            $today = Carbon::now()->startOfDay();
-            $dueDate = Carbon::parse($due)->startOfDay();
-            $isTerminal = in_array($advance->status, ['liquidated', 'settled', 'rejected']);
-            $isAuditing = in_array($advance->status, ['pending', 'under-review', 'approved']);
-            if ($today->gt($dueDate) && !$isTerminal && !$isAuditing) {
-                $daysOverdue = $today->diffInDays($dueDate);
-            } elseif ($advance->relationLoaded('penalties') && $advance->penalties->isNotEmpty()) {
-                $maxDays = $advance->penalties->max('days_overdue');
-                if ($maxDays) {
-                    $daysOverdue = max($daysOverdue, (int) $maxDays);
+    /**
+     * Update receipt metadata and replace line items for each liquidation receipt.
+     *
+     * @return int[]
+     */
+    private function syncLiquidationReceipts(array $receiptsData): array
+    {
+        $receiptIds = [];
+        foreach ($receiptsData as $receiptData) {
+            if (!isset($receiptData['id'])) {
+                continue;
+            }
+            $receipt = Receipt::findOrFail($receiptData['id']);
+            $receipt->update([
+                'vendor_name' => $receiptData['vendor_name'] ?? $receiptData['vendor'] ?? $receipt->vendor_name,
+                'transaction_date' => $receiptData['transaction_date'] ?? $receiptData['date'] ?? $receipt->transaction_date,
+                'total_amount' => $receiptData['total_amount'] ?? $receiptData['amount'] ?? $receipt->total_amount,
+                'vat_amount' => $receiptData['vat_amount'] ?? $receiptData['vat'] ?? $receiptData['tax'] ?? $receipt->vat_amount,
+                'tin' => $receiptData['tin'] ?? $receipt->tin,
+                'invoice_number' => $receiptData['invoice_number'] ?? $receiptData['invoiceNumber'] ?? $receipt->invoice_number,
+                'expense_category_id' => $receiptData['expense_category_id'] ?? $receiptData['categoryId'] ?? $receipt->expense_category_id ?? null,
+                'location' => $receiptData['location'] ?? $receipt->location ?? null,
+                'currency' => $receiptData['currency'] ?? $receipt->currency ?? 'PHP',
+                'vat_classification' => $receiptData['vat_classification'] ?? $receiptData['vatClassification'] ?? $receipt->vat_classification ?? 'vat',
+                'status' => 'pending', // Awaiting admin audit
+            ]);
+
+            if (isset($receiptData['items']) && is_array($receiptData['items'])) {
+                $receipt->items()->delete();
+                foreach ($receiptData['items'] as $item) {
+                    if (!empty($item['name']) || isset($item['price'])) {
+                        $receipt->items()->create([
+                            'name' => $item['name'] ?? 'Item',
+                            'qty' => $item['qty'] ?? 1,
+                            'price' => $item['price'] ?? 0,
+                        ]);
+                    }
                 }
             }
-        } elseif ($advance->relationLoaded('penalties') && $advance->penalties->isNotEmpty()) {
-            $daysOverdue = (int) ($advance->penalties->max('days_overdue') ?? $advance->penalties->count());
-        }
-        $advance->setAttribute('days_overdue', (int) $daysOverdue);
 
-        // linked_liquidation aliases
-        if ($advance->relationLoaded('liquidations')) {
-            $latest = $advance->liquidations->sortByDesc('created_at')->sortByDesc('id')->first();
-            $advance->setAttribute('linked_liquidation', $latest);
-            $advance->setAttribute('latest_liquidation', $latest);
-            $advance->setAttribute('liquidation', $latest);
+            $receiptIds[] = $receipt->id;
         }
 
-        // status_history normalized for roadmap
-        if ($advance->relationLoaded('statusHistory')) {
-            $history = $advance->statusHistory->sortBy('changed_at')->sortBy('id')->map(function ($h) {
-                $actor = $h->relationLoaded('changedBy') && $h->changedBy ? $h->changedBy : ($h->relationLoaded('user') ? $h->user : null);
-                return [
-                    'id' => $h->id,
-                    'cash_advance_id' => $h->cash_advance_id,
-                    'from_status' => $h->from_status,
-                    'to_status' => $h->to_status,
-                    'status' => $h->to_status,
-                    'changed_by' => $actor ? ['id' => $actor->id, 'name' => $actor->name, 'email' => $actor->email] : null,
-                    'changed_by_id' => $h->changed_by,
-                    'actor' => $actor?->name,
-                    'user' => $actor ? ['id' => $actor->id, 'name' => $actor->name, 'email' => $actor->email] : null,
-                    'changed_at' => $h->changed_at ?? $h->created_at,
-                    'created_at' => $h->created_at,
-                ];
-            })->values();
-            $advance->setAttribute('status_history', $history);
-        }
-
-        // Ensure outstanding_balance / expected_liquidation_date present
-        $advance->setAttribute('balance', $advance->outstanding_balance !== null ? (float) $advance->outstanding_balance : (float) ($advance->amount ?? 0));
-        $advance->setAttribute('outstanding_balance', $advance->outstanding_balance);
-        $advance->setAttribute('expected_liquidation_date', $advance->expected_liquidation_date);
-
-        return $advance;
+        return $receiptIds;
     }
 
     private function hydrateLiquidation(Liquidation $liq): Liquidation
@@ -462,39 +443,7 @@ class LiquidationController extends Controller
             }
 
             // Update each receipt in database with user-edited fields
-            $receiptIds = [];
-            foreach ($receiptsData as $receiptData) {
-                if (!isset($receiptData['id'])) continue;
-                $receipt = Receipt::findOrFail($receiptData['id']);
-                $receipt->update([
-                    'vendor_name' => $receiptData['vendor_name'] ?? $receiptData['vendor'] ?? $receipt->vendor_name,
-                    'transaction_date' => $receiptData['transaction_date'] ?? $receiptData['date'] ?? $receipt->transaction_date,
-                    'total_amount' => $receiptData['total_amount'] ?? $receiptData['amount'] ?? $receipt->total_amount,
-                    'vat_amount' => $receiptData['vat_amount'] ?? $receiptData['vat'] ?? $receiptData['tax'] ?? $receipt->vat_amount,
-                    'tin' => $receiptData['tin'] ?? $receipt->tin,
-                    'invoice_number' => $receiptData['invoice_number'] ?? $receiptData['invoiceNumber'] ?? $receipt->invoice_number,
-                    'expense_category_id' => $receiptData['expense_category_id'] ?? $receiptData['categoryId'] ?? $receipt->expense_category_id ?? null,
-                    'location' => $receiptData['location'] ?? $receipt->location ?? null,
-                    'currency' => $receiptData['currency'] ?? $receipt->currency ?? 'PHP',
-                    'vat_classification' => $receiptData['vat_classification'] ?? $receiptData['vatClassification'] ?? $receipt->vat_classification ?? 'vat',
-                    'status' => 'pending', // Awaiting admin audit
-                ]);
-
-                if (isset($receiptData['items']) && is_array($receiptData['items'])) {
-                    $receipt->items()->delete();
-                    foreach ($receiptData['items'] as $item) {
-                        if (!empty($item['name']) || isset($item['price'])) {
-                            $receipt->items()->create([
-                                'name' => $item['name'] ?? 'Item',
-                                'qty' => $item['qty'] ?? 1,
-                                'price' => $item['price'] ?? 0,
-                            ]);
-                        }
-                    }
-                }
-
-                $receiptIds[] = $receipt->id;
-            }
+            $receiptIds = $this->syncLiquidationReceipts($receiptsData);
 
             // Snapshot the cash advance's current outstanding balance
             $currentOutstandingBalance = $advance->outstanding_balance ?? $advance->amount;
@@ -688,7 +637,6 @@ class LiquidationController extends Controller
                 // 2 revises allowed (<=2 revise, >=3 rejected) — 1st/2nd = revise, 3rd = terminal rejected, 3 total
                 $currentCount = (int) ($liquidation->revision_count ?? 0);
                 $newCount = $currentCount + 1;
-                $requestedStatus = $validated['status']; // 'revise' or 'rejected'
                 $finalStatus = $newCount <= 2 ? 'revise' : 'rejected';
                 $isTerminal = $finalStatus === 'rejected';
 
@@ -809,40 +757,7 @@ class LiquidationController extends Controller
                     : $validated['receipts'];
 
                 if (is_array($receiptsData)) {
-                    $receiptIds = [];
-                    foreach ($receiptsData as $receiptData) {
-                        if (!isset($receiptData['id'])) continue;
-                        $receipt = Receipt::findOrFail($receiptData['id']);
-                        $receipt->update([
-                            'vendor_name' => $receiptData['vendor_name'] ?? $receiptData['vendor'] ?? $receipt->vendor_name,
-                            'transaction_date' => $receiptData['transaction_date'] ?? $receiptData['date'] ?? $receipt->transaction_date,
-                            'total_amount' => $receiptData['total_amount'] ?? $receiptData['amount'] ?? $receipt->total_amount,
-                            'vat_amount' => $receiptData['vat_amount'] ?? $receiptData['vat'] ?? $receiptData['tax'] ?? $receipt->vat_amount,
-                            'tin' => $receiptData['tin'] ?? $receipt->tin,
-                            'invoice_number' => $receiptData['invoice_number'] ?? $receiptData['invoiceNumber'] ?? $receipt->invoice_number,
-                            'expense_category_id' => $receiptData['expense_category_id'] ?? $receiptData['categoryId'] ?? $receipt->expense_category_id ?? null,
-                            'location' => $receiptData['location'] ?? $receipt->location ?? null,
-                            'currency' => $receiptData['currency'] ?? $receipt->currency ?? 'PHP',
-                            'vat_classification' => $receiptData['vat_classification'] ?? $receiptData['vatClassification'] ?? $receipt->vat_classification ?? 'vat',
-                            'status' => 'pending',
-                        ]);
-
-                        if (isset($receiptData['items']) && is_array($receiptData['items'])) {
-                            $receipt->items()->delete();
-                            foreach ($receiptData['items'] as $item) {
-                                if (!empty($item['name']) || isset($item['price'])) {
-                                    $receipt->items()->create([
-                                        'name' => $item['name'] ?? 'Item',
-                                        'qty' => $item['qty'] ?? 1,
-                                        'price' => $item['price'] ?? 0,
-                                    ]);
-                                }
-                            }
-                        }
-
-                        $receiptIds[] = $receipt->id;
-                    }
-                    $liquidation->reimbursement_ids = $receiptIds;
+                    $liquidation->reimbursement_ids = $this->syncLiquidationReceipts($receiptsData);
                 }
             }
 

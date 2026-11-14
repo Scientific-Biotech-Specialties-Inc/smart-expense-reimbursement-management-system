@@ -109,6 +109,30 @@ export function tinFor(receipt) {
   return `${seed.slice(0, 3)}-${seed.slice(3, 6)}-${seed.slice(6, 9)}-000`;
 }
 
+/**
+ * Formats a BIR TIN string into `XXX-XXX-XXX` or `XXX-XXX-XXX-XXX` segments.
+ *
+ * @param {string|number|null|undefined} value
+ * @param {object} [options]
+ * @param {boolean} [options.padLastBlock=false] Pad a 9-digit TIN with `-000`
+ * @returns {string}
+ */
+export function formatTinValue(value, { padLastBlock = false } = {}) {
+  let digits = String(value || "")
+    .replace(/\D/g, "")
+    .slice(0, 12);
+  if (padLastBlock && digits.length === 9) {
+    digits = `${digits}000`;
+  }
+
+  const parts = [];
+  if (digits.length > 0) parts.push(digits.slice(0, 3));
+  if (digits.length > 3) parts.push(digits.slice(3, 6));
+  if (digits.length > 6) parts.push(digits.slice(6, 9));
+  if (digits.length > 9) parts.push(digits.slice(9, 12));
+  return parts.join("-");
+}
+
 const MOCK_ITEMS = {
   "Food & Dining": ["Chickenjoy 2pc Meal", "Yumburger w/ Cheese", "Iced Tea"],
   Lodging: [
@@ -128,17 +152,6 @@ const MOCK_ITEMS = {
 
 export function getItems(cat) {
   return MOCK_ITEMS[cat] || MOCK_ITEMS.Uncategorized;
-}
-
-function buildDefaultItems(categoryLabel, amount) {
-  const itemNames = getItems(categoryLabel || "Expense");
-  const splitPrice = itemNames.length > 0 ? Number(amount || 0) / itemNames.length : 0;
-
-  return itemNames.map((name) => ({
-    name,
-    qty: 1,
-    price: Number(splitPrice.toFixed(2)),
-  }));
 }
 
 export function formatDateForInput(dateStr) {
@@ -331,8 +344,7 @@ export const REQUIRED_RECEIPT_FIELDS = [
   { key: "subtotal", label: "Subtotal" },
 ];
 
-export function isReceiptFieldMissing(receipt, fieldKey) {
-  if (!receipt || (!receipt.hasOcrReturned && !receipt.validated)) return false;
+function isMissingFieldValue(receipt, fieldKey) {
   switch (fieldKey) {
     case "invoiceNumber":
       return !receipt.invoiceNumber || !String(receipt.invoiceNumber).trim();
@@ -367,44 +379,14 @@ export function isReceiptFieldMissing(receipt, fieldKey) {
   }
 }
 
+export function isReceiptFieldMissing(receipt, fieldKey) {
+  if (!receipt || (!receipt.hasOcrReturned && !receipt.validated)) return false;
+  return isMissingFieldValue(receipt, fieldKey);
+}
+
 export function getMissingReceiptFields(receipt) {
   if (!receipt) return [];
-  const missing = [];
-
-  if (!receipt.invoiceNumber || !String(receipt.invoiceNumber).trim()) {
-    missing.push({ key: "invoiceNumber", label: "Invoice Number" });
-  }
-  if (!receipt.date || !String(receipt.date).trim()) {
-    missing.push({ key: "date", label: "Date" });
-  }
-  if (!receipt.tin || !String(receipt.tin).trim()) {
-    missing.push({ key: "tin", label: "TIN Number" });
-  }
-  if (!receipt.merchantName || !String(receipt.merchantName).trim()) {
-    missing.push({ key: "merchantName", label: "Merchant Name" });
-  }
-  if (!receipt.location || !String(receipt.location).trim()) {
-    missing.push({ key: "location", label: "Location" });
-  }
-  if (!receipt.categoryId) {
-    missing.push({ key: "categoryId", label: "Category" });
-  }
-  if (
-    receipt.amount === "" ||
-    receipt.amount === null ||
-    receipt.amount === undefined ||
-    Number(receipt.amount) <= 0
-  ) {
-    missing.push({ key: "amount", label: "Total Amount" });
-  }
-  if (
-    receipt.subtotal === "" ||
-    receipt.subtotal === null ||
-    receipt.subtotal === undefined ||
-    Number(receipt.subtotal) <= 0
-  ) {
-    missing.push({ key: "subtotal", label: "Subtotal" });
-  }
-
-  return missing;
+  return REQUIRED_RECEIPT_FIELDS.filter(({ key }) =>
+    isMissingFieldValue(receipt, key),
+  );
 }

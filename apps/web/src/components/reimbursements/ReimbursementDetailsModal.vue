@@ -24,10 +24,6 @@ const props = defineProps({
     type: Object,
     default: null,
   },
-  receiptDetailsOpen: {
-    type: Boolean,
-    default: false,
-  },
   modalLoading: {
     type: Boolean,
     default: false,
@@ -41,7 +37,6 @@ const emit = defineEmits([
   "approve",
   "grant",
   "edit",
-  "forward-receipts",
 ]);
 
 const auth = useAuthStore();

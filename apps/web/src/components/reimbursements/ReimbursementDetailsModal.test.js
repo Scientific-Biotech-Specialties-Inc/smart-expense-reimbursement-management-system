@@ -27,7 +27,6 @@ describe("ReimbursementDetailsModal — Custom User Comment Display", () => {
           amount: 1500,
           receipts: [],
         },
-        receiptDetailsOpen: false,
         modalLoading: false,
       },
       global: {
@@ -54,7 +53,6 @@ describe("ReimbursementDetailsModal — Custom User Comment Display", () => {
           amount: 500,
           receipts: [],
         },
-        receiptDetailsOpen: false,
         modalLoading: false,
       },
       global: {
@@ -81,7 +79,6 @@ describe("ReimbursementDetailsModal — Custom User Comment Display", () => {
           amount: 2400,
           receipts: [],
         },
-        receiptDetailsOpen: false,
         modalLoading: false,
       },
       global: {
@@ -116,7 +113,6 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
     const wrapper = mount(ReimbursementDetailsModal, {
       props: {
         viewingRecord: record,
-        receiptDetailsOpen: false,
         modalLoading: false,
       },
       global: {
@@ -152,7 +148,6 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
           amount: 500,
           receipts: [],
         },
-        receiptDetailsOpen: false,
         modalLoading: false,
       },
       global: {
@@ -181,7 +176,6 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
           admin_notes: "Fix receipt",
           receipts: [],
         },
-        receiptDetailsOpen: false,
         modalLoading: false,
       },
       global: {
@@ -213,7 +207,6 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
     const wrapper = mount(ReimbursementDetailsModal, {
       props: {
         viewingRecord: record,
-        receiptDetailsOpen: false,
         modalLoading: false,
       },
       global: {

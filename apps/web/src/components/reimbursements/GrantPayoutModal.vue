@@ -2,11 +2,10 @@
 import { ref, computed, watch } from "vue";
 import { getActivePinia } from "pinia";
 import { useAuthStore } from "@/stores/auth";
-import BaseModal from "@/components/base/BaseModal.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import { formatAmount, formatDate } from "@/utils/formatters";
-import { Wallet, AlertTriangle, Eye, EyeOff, X, CheckCircle2 } from "lucide-vue-next";
+import { Wallet, AlertTriangle, Eye, EyeOff, X } from "lucide-vue-next";
 
 const auth = getActivePinia() ? useAuthStore() : null;
 

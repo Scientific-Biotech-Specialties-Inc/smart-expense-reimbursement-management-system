@@ -3,12 +3,10 @@ import { computed, ref, watch, nextTick } from "vue";
 import {
   FilePieChart,
   CheckCircle,
-  FileText,
   X,
   Upload,
   AlertTriangle,
   AlertCircle,
-  ArrowRight,
   Download,
   Eye,
 } from "lucide-vue-next";
@@ -65,10 +63,6 @@ const props = defineProps({
     type: Object,
     default: null,
   },
-  needsReportAttachmentReminder: {
-    type: Boolean,
-    default: false,
-  },
   variance: {
     type: Number,
     default: 0,
@@ -115,7 +109,6 @@ const emit = defineEmits([
   "update:isManualMode",
   "reload-console",
   "upload-error",
-  "file-selected",
   "file-cleared",
   "forward-overpayment",
   "delete-liquidation",
@@ -368,39 +361,6 @@ async function handleRemoveReceipt(receiptToRemove) {
   }
 }
 
-function formatTinValue(value, { padLastBlock = false } = {}) {
-  let digits = String(value || "")
-    .replace(/\D/g, "")
-    .slice(0, 12);
-  if (padLastBlock && digits.length === 9) {
-    digits = `${digits}000`;
-  }
-
-  const parts = [];
-  if (digits.length > 0) parts.push(digits.slice(0, 3));
-  if (digits.length > 3) parts.push(digits.slice(3, 6));
-  if (digits.length > 6) parts.push(digits.slice(6, 9));
-  if (digits.length > 9) parts.push(digits.slice(9, 12));
-  return parts.join("-");
-}
-
-function attachmentFileName(file) {
-  if (!file) return "";
-  if (typeof file === "string")
-    return file.split("/").pop() || "Attached Report";
-  if (Array.isArray(file)) {
-    const first = file[0];
-    if (typeof first === "string")
-      return first.split("/").pop() || "Attached Report";
-  }
-  return file.name || "Attached Report";
-}
-
-function attachmentFileSize(file) {
-  if (!file || typeof file === "string" || !file.size) return "";
-  return `${(file.size / 1024 / 1024).toFixed(2)} MB`;
-}
-
 const selectedViewReceipt = ref(null);
 const isReceiptDetailOpen = ref(false);
 
@@ -594,8 +554,6 @@ const normalizedViewReceipt = computed(() => {
           :model-value="receipts"
           @update:model-value="$emit('update:receipts', $event)"
           :max-size-mb="2"
-          empty-action-label="Upload Receipt"
-          add-action-label="Upload Receipt"
           @upload-error="$emit('upload-error', $event)"
         />
       </template>

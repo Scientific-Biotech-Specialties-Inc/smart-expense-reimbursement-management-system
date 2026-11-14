@@ -22,7 +22,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-  "close", "close-all", "update:reviewerNotes",
+  "close", "update:reviewerNotes",
   "request-decision", "cancel-decision", "confirm-decision",
 ]);
 

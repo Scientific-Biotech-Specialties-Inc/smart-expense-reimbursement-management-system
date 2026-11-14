@@ -1,12 +1,11 @@
 <script setup>
 import { computed, ref } from "vue";
-import { X, XCircle, ShieldCheck, Eye, FileText, Download } from "lucide-vue-next";
+import { X, ShieldCheck, Eye, FileText, Download } from "lucide-vue-next";
 import { formatPeso, formatDate } from "@/utils/formatters";
 import { downloadSbsiReportPdf } from "@/utils/sbsiPdfGenerator";
 import BaseButton from "@/components/base/BaseButton.vue";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
-import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import ReceiptImagePreview from "@/components/base/ReceiptImagePreview.vue";
 import UnifiedRoadmapStepper from "@/components/base/UnifiedRoadmapStepper.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";

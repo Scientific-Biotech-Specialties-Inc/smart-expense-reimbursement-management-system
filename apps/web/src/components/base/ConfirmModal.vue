@@ -2,7 +2,7 @@
 import { ref, watch } from "vue";
 import BaseModal from "./BaseModal.vue";
 import BaseButton from "./BaseButton.vue";
-import { AlertTriangle, CheckCircle, Info } from "lucide-vue-next";
+import { AlertTriangle, CheckCircle } from "lucide-vue-next";
 
 const props = defineProps({
   isOpen: {

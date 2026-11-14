@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { Button } from './button'
 import { Badge } from './badge'
-import { Card, CardTitle } from './card'
+import { Card } from './card'
 import { Skeleton } from './skeleton'
 
 describe('Tier 1 UI Primitives', () => {

@@ -480,17 +480,6 @@ function goBack() {
             <ul
               class="list-inside list-disc space-y-2 text-sm leading-relaxed text-accent-800"
             >
-              <!-- <li>
-                Cash advance requests are subject to approval by the accounting
-                department
-              </li>
-              <li>
-                Approved amounts will be disbursed within 3-5 business days
-              </li>
-              <li>
-                You must submit reimbursement with receipts after using the cash
-                advance
-              </li> -->
               <li>Unused amounts must be returned to the company</li>
             </ul>
           </div>

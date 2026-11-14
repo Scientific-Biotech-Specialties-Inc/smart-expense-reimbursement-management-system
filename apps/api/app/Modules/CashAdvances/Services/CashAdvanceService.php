@@ -245,11 +245,6 @@ class CashAdvanceService
         });
     }
 
-    public function reviseAdvance(CashAdvance $advance, User $user, string $comment, string $password, Request $requestContext)
-    {
-        return $this->rejectAdvance($advance, $user, $comment, 'revise', $password, $requestContext);
-    }
-
     public function disburseAdvance(CashAdvance $advance, User $user, array $data, string $password, Request $requestContext)
     {
         return DB::transaction(function () use ($advance, $user, $data, $password, $requestContext) {

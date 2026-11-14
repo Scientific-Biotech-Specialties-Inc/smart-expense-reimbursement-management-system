@@ -6,7 +6,6 @@ use Tests\TestCase;
 use App\Modules\Users\Models\User;
 use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\Liquidations\Models\Liquidation;
-use App\Modules\Liquidations\Models\PenaltyRecord;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Carbon\Carbon;
 

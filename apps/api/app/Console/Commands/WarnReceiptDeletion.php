@@ -6,7 +6,6 @@ use Illuminate\Console\Command;
 use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Notifications\Services\NotificationDeliveryService;
 use App\Modules\AuditLogs\Services\AuditLogService;
-use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class WarnReceiptDeletion extends Command

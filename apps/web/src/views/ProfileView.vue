@@ -9,10 +9,7 @@ import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import {
   ArrowLeft,
   User,
-  Mail,
-  Phone,
   Building2,
-  Calendar,
   Shield,
   Key,
   History,
@@ -28,10 +25,7 @@ import {
   EyeOff,
   PenTool,
   Check,
-  Info,
   Clock,
-  Sparkles,
-  Globe,
 } from "lucide-vue-next";
 
 const auth = useAuthStore();

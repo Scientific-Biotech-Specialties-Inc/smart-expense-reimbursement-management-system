@@ -4,7 +4,6 @@ import { useRouter } from "vue-router";
 import { useReimbursementStore } from "@/stores/reimbursement";
 import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
-import BaseButton from "@/components/base/BaseButton.vue";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import BaseUtilityToolbar from "@/components/base/BaseUtilityToolbar.vue";
 import ReimbursementDetailsModal from "@/components/reimbursements/ReimbursementDetailsModal.vue";
@@ -183,10 +182,6 @@ function triggerNewRequestUpload(mode) {
     newRequestFileInput.value.value = "";
     newRequestFileInput.value.click();
   }
-}
-
-function handleNewRequest() {
-  triggerNewRequestUpload("single");
 }
 
 function handleNewRequestFiles(e) {
@@ -381,7 +376,6 @@ onBeforeUnmount(() => {
     <!-- ── Record Detail Panel (Modal) ── -->
     <ReimbursementDetailsModal
       :viewing-record="viewingRecord"
-      :receipt-details-open="receiptDetailsOpen"
       :modal-loading="modalLoading"
       @close="closeDetails"
       @view-receipt-details="viewReceiptDetails"
@@ -403,7 +397,6 @@ onBeforeUnmount(() => {
       "
       :is-submitting="isReceiptReviewSubmitting"
       @close="receiptDetailsOpen = false"
-      @close-all="closeDetails"
       @request-decision="
         (action) => requestReceiptDecision(selectedReceipt, action)
       "

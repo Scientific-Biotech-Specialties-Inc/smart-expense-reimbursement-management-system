@@ -14,11 +14,6 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory()->create([
-        //     'name' => 'Test User',
-        //     'email' => 'test@example.com',
-        // ]);
-
         $this->call([
             \App\Modules\Reimbursements\Database\Seeders\ExpenseCategorySeeder::class,
             \App\Modules\CashAdvances\Database\Seeders\OverdueCashAdvanceSeeder::class,

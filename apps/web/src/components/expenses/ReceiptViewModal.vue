@@ -1,6 +1,6 @@
 <script setup>
-import { computed, ref } from "vue";
-import { formatAmount, formatDate } from "@/utils/formatters";
+import { computed } from "vue";
+import { formatDate } from "@/utils/formatters";
 import { canEditReceipt, canDeleteReceipt } from "@/utils/receiptUtils";
 import BaseReceiptDetailModal from "@/components/base/BaseReceiptDetailModal.vue";
 import { Pencil, Trash2 } from "lucide-vue-next";

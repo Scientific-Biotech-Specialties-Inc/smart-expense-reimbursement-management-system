@@ -1,8 +1,5 @@
 <script setup>
 import {
-  FileText,
-  Image as ImageIcon,
-  Trash2,
   MapPin,
   ChevronDown,
   X,
@@ -11,13 +8,13 @@ import {
 import {
   DISCOUNT_TYPE_OPTIONS,
   itemsGrossAmount,
-  receiptFinancials,
   isReceiptFieldMissing,
+  cleanName,
+  formatTinValue,
 } from "@/utils/receiptUtils";
 import { truncateDecimal } from "@/utils/formatters";
 import { REIMBURSEMENT_EVENT_TYPES } from "@/utils/constants";
 import CurrencySelect from "@/components/base/CurrencySelect.vue";
-import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import ReceiptImagePreview from "@/components/base/ReceiptImagePreview.vue";
 
 const props = defineProps({
@@ -39,7 +36,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["remove-receipt", "update:receipts"]);
+const emit = defineEmits(["remove-receipt"]);
 
 function getCategoryOptions() {
   return props.categories;
@@ -53,26 +50,6 @@ function syncCategoryName(receipt) {
   if (receipt.ocrData) {
     receipt.ocrData.expense_category_id = receipt.categoryId;
   }
-}
-
-function cleanName(fileName) {
-  return (fileName || "").replace(/\.[^.]+$/, "").replace(/[_-]/g, " ");
-}
-
-function formatTinValue(value, { padLastBlock = false } = {}) {
-  let digits = String(value || "")
-    .replace(/\D/g, "")
-    .slice(0, 12);
-  if (padLastBlock && digits.length === 9) {
-    digits = `${digits}000`;
-  }
-
-  const parts = [];
-  if (digits.length > 0) parts.push(digits.slice(0, 3));
-  if (digits.length > 3) parts.push(digits.slice(3, 6));
-  if (digits.length > 6) parts.push(digits.slice(6, 9));
-  if (digits.length > 9) parts.push(digits.slice(9, 12));
-  return parts.join("-");
 }
 
 function handleTinInput(receipt) {

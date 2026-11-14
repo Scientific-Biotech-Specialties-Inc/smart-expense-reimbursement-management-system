@@ -11,6 +11,58 @@ export function useReimbursementSubmit(emit, router) {
   
   const submitting = ref(false);
 
+  /**
+   * Serializes receipt metadata and line items into a multipart FormData payload.
+   *
+   * @param {FormData} formData
+   * @param {Array<object>} receipts
+   */
+  function appendReceiptsToFormData(formData, receipts) {
+    receipts.forEach((r, index) => {
+      formData.append(`receipt_ids[${index}]`, r.id);
+      formData.append(`receipts[${index}][id]`, r.id);
+      if (r.categoryId) {
+        formData.append(`receipts[${index}][expense_category_id]`, r.categoryId);
+      }
+      if (r.eventType) {
+        formData.append(`receipts[${index}][event_type]`, r.eventType);
+      }
+      formData.append(`receipts[${index}][vendor_name]`, r.merchantName || "");
+      formData.append(`receipts[${index}][transaction_date]`, r.date || "");
+      formData.append(`receipts[${index}][total_amount]`, r.amount || 0);
+      formData.append(`receipts[${index}][vat_amount]`, r.tax || 0);
+      formData.append(
+        `receipts[${index}][vat_classification]`,
+        r.vatClassification || "vat",
+      );
+      if (r.currency) {
+        formData.append(`receipts[${index}][currency]`, r.currency);
+      }
+      formData.append(`receipts[${index}][tin]`, r.tin || "");
+      formData.append(
+        `receipts[${index}][invoice_number]`,
+        r.invoiceNumber || "",
+      );
+
+      if (r.items && Array.isArray(r.items)) {
+        r.items.forEach((item, itemIdx) => {
+          formData.append(
+            `receipts[${index}][items][${itemIdx}][name]`,
+            item.name || "",
+          );
+          formData.append(
+            `receipts[${index}][items][${itemIdx}][quantity]`,
+            item.qty || 1,
+          );
+          formData.append(
+            `receipts[${index}][items][${itemIdx}][price]`,
+            item.price || 0,
+          );
+        });
+      }
+    });
+  }
+
   function resolveReportAttachment({ reportFile, reportTemplateData }) {
     const isTemplateMode = Boolean(reportTemplateData && reportTemplateData.mode !== "manual");
     if (!isTemplateMode) {
@@ -141,49 +193,7 @@ export function useReimbursementSubmit(emit, router) {
         formData.append("report_template_data", attachment.templateJson);
       }
 
-      receipts.forEach((r, index) => {
-        formData.append(`receipt_ids[${index}]`, r.id);
-        formData.append(`receipts[${index}][id]`, r.id);
-        if (r.categoryId) {
-          formData.append(`receipts[${index}][expense_category_id]`, r.categoryId);
-        }
-        if (r.eventType) {
-          formData.append(`receipts[${index}][event_type]`, r.eventType);
-        }
-        formData.append(`receipts[${index}][vendor_name]`, r.merchantName || "");
-        formData.append(`receipts[${index}][transaction_date]`, r.date || "");
-        formData.append(`receipts[${index}][total_amount]`, r.amount || 0);
-        formData.append(`receipts[${index}][vat_amount]`, r.tax || 0);
-        formData.append(
-          `receipts[${index}][vat_classification]`,
-          r.vatClassification || "vat",
-        );
-        if (r.currency) {
-          formData.append(`receipts[${index}][currency]`, r.currency);
-        }
-        formData.append(`receipts[${index}][tin]`, r.tin || "");
-        formData.append(
-          `receipts[${index}][invoice_number]`,
-          r.invoiceNumber || "",
-        );
-
-        if (r.items && Array.isArray(r.items)) {
-          r.items.forEach((item, itemIdx) => {
-            formData.append(
-              `receipts[${index}][items][${itemIdx}][name]`,
-              item.name || "",
-            );
-            formData.append(
-              `receipts[${index}][items][${itemIdx}][quantity]`,
-              item.qty || 1,
-            );
-            formData.append(
-              `receipts[${index}][items][${itemIdx}][price]`,
-              item.price || 0,
-            );
-          });
-        }
-      });
+      appendReceiptsToFormData(formData, receipts);
 
       await store.submit(formData);
 
@@ -278,49 +288,7 @@ export function useReimbursementSubmit(emit, router) {
         formData.append("report_template_data", attachment.templateJson);
       }
 
-      receipts.forEach((r, index) => {
-        formData.append(`receipt_ids[${index}]`, r.id);
-        formData.append(`receipts[${index}][id]`, r.id);
-        if (r.categoryId) {
-          formData.append(`receipts[${index}][expense_category_id]`, r.categoryId);
-        }
-        if (r.eventType) {
-          formData.append(`receipts[${index}][event_type]`, r.eventType);
-        }
-        formData.append(`receipts[${index}][vendor_name]`, r.merchantName || "");
-        formData.append(`receipts[${index}][transaction_date]`, r.date || "");
-        formData.append(`receipts[${index}][total_amount]`, r.amount || 0);
-        formData.append(`receipts[${index}][vat_amount]`, r.tax || 0);
-        formData.append(
-          `receipts[${index}][vat_classification]`,
-          r.vatClassification || "vat",
-        );
-        if (r.currency) {
-          formData.append(`receipts[${index}][currency]`, r.currency);
-        }
-        formData.append(`receipts[${index}][tin]`, r.tin || "");
-        formData.append(
-          `receipts[${index}][invoice_number]`,
-          r.invoiceNumber || "",
-        );
-
-        if (r.items && Array.isArray(r.items)) {
-          r.items.forEach((item, itemIdx) => {
-            formData.append(
-              `receipts[${index}][items][${itemIdx}][name]`,
-              item.name || "",
-            );
-            formData.append(
-              `receipts[${index}][items][${itemIdx}][quantity]`,
-              item.qty || 1,
-            );
-            formData.append(
-              `receipts[${index}][items][${itemIdx}][price]`,
-              item.price || 0,
-            );
-          });
-        }
-      });
+      appendReceiptsToFormData(formData, receipts);
 
       await store.updateRequest(id, formData);
 

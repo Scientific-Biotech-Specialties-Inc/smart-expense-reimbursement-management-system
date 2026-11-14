@@ -7,7 +7,6 @@ use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Reimbursements\Models\ExpenseCategory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Validation\ValidationException;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
 
 class ExpenseService
