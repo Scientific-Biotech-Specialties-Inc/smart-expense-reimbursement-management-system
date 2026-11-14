@@ -27,6 +27,8 @@ class UpdateCashAdvanceRequest extends FormRequest
         return [
             ...self::reportTemplateDataRules(),
             'purpose' => 'sometimes|string|max:255',
+            'contract_id' => 'nullable|integer|min:1',
+            'client_name' => 'nullable|string|max:255',
             'amount' => 'sometimes|numeric|min:0.01',
             'expected_disbursement_date' => 'sometimes|date',
             'expected_liquidation_date' => 'sometimes|date|after:expected_disbursement_date',

@@ -208,6 +208,13 @@ export const useReceiptStore = defineStore("receipts", () => {
       rejectionCode: r.rejection_code || null,
       rejectionReason: r.rejection_reason || null,
       duplicateSimilarity: r.duplicate_similarity ?? null,
+      vendorMatched: Boolean(r.vendor_matched),
+      vendorAccredited: Boolean(r.vendor_accredited),
+      vendorAuditRequired: Boolean(r.vendor_audit_required),
+      vendorFlagged: Boolean(r.vendor_flagged),
+      vendorCmsSupplierId: r.vendor_cms_supplier_id ?? null,
+      vendorStatusTag: r.vendor_status_tag || null,
+      vendorSuggestedAt: r.vendor_suggested_at || null,
       createdAt: r.created_at,
       items: r.items || [],
     };
@@ -574,6 +581,9 @@ export const useReceiptStore = defineStore("receipts", () => {
       formData.append("location", payload.location);
     if (shouldAppend(payload.status))
       formData.append("status", payload.status);
+    if (payload.is_draft !== undefined && payload.is_draft !== null) {
+      formData.append("is_draft", payload.is_draft ? "1" : "0");
+    }
     if (payload.items && Array.isArray(payload.items)) {
       formData.append("items", JSON.stringify(payload.items));
     }

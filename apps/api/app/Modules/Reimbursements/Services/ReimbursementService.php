@@ -43,7 +43,12 @@ class ReimbursementService
             $query->where('user_id', $user->id);
         }
 
-        $reimbursements = $query->get();
+        $reimbursements = $query->get()
+            ->sortByDesc(function (Reimbursement $reimbursement) {
+                $isPending = in_array(strtolower((string) $reimbursement->status), ['pending', 'submitted'], true);
+                return ($isPending && $reimbursement->fast_track_eligible) ? 1 : 0;
+            })
+            ->values();
         AuditLogService::enrichReimbursements($reimbursements, $canManage);
         return $reimbursements;
     }
@@ -115,6 +120,8 @@ class ReimbursementService
                 'description' => $validated['description'],
                 'user_comment' => $validated['user_comment'] ?? null,
                 'expense_category_id' => $expenseCategoryId,
+                'contract_id' => $validated['contract_id'] ?? null,
+                'client_name' => $validated['client_name'] ?? null,
                 'event_type' => $validated['event_type'] ?? null,
                 'amount' => $validated['amount'],
                 'date' => $validated['date'],
@@ -198,9 +205,17 @@ class ReimbursementService
     /**
      * Approve claim.
      */
-    public function approveReimbursement(User $user, int $id, ?string $password, string $ipAddress, Request $requestContext)
+    public function approveReimbursement(
+        User $user,
+        int $id,
+        ?string $password,
+        string $ipAddress,
+        Request $requestContext,
+        bool $secondaryAuditConfirmed = false,
+        ?string $secondaryAuditNote = null
+    )
     {
-        return DB::transaction(function () use ($user, $id, $password, $ipAddress, $requestContext) {
+        return DB::transaction(function () use ($user, $id, $password, $ipAddress, $requestContext, $secondaryAuditConfirmed, $secondaryAuditNote) {
             // Verify password against external auth service if provided
             if (!empty($password) && !PasswordVerificationService::verify($requestContext, $password)) {
                 throw ValidationException::withMessages([
@@ -208,7 +223,7 @@ class ReimbursementService
                 ]);
             }
 
-            $reimbursement = Reimbursement::findOrFail($id);
+            $reimbursement = Reimbursement::with('receipts')->findOrFail($id);
 
             // Self-approval check
             if ($reimbursement->user_id === $user->id) {
@@ -219,12 +234,25 @@ class ReimbursementService
                 throw new \Illuminate\Auth\Access\AuthorizationException('Only pending reimbursements can be approved.');
             }
 
+            if ($reimbursement->vendor_audit_required && !$secondaryAuditConfirmed) {
+                throw ValidationException::withMessages([
+                    'secondary_audit_confirmed' => ['Secondary Accounting Audit confirmation is required before approving a claim with unverified or flagged vendors.'],
+                ]);
+            }
+
             $beforeState = $reimbursement->toArray();
-            $reimbursement->update([
+            $updateFields = [
                 'status' => 'approved',
                 'approved_by' => $user->name,
                 'approved_at' => now(),
-            ]);
+            ];
+            if ($reimbursement->vendor_audit_required) {
+                $cleanNote = trim((string) $secondaryAuditNote);
+                $updateFields['secondary_audit_confirmed_at'] = now();
+                $updateFields['secondary_audit_by'] = $user->name;
+                $updateFields['secondary_audit_note'] = $cleanNote !== '' ? $cleanNote : null;
+            }
+            $reimbursement->update($updateFields);
             $this->updateReceiptStatuses($reimbursement->receipts()->pluck('receipts.id')->all(), 'approved');
             $afterState = $reimbursement->toArray();
 
@@ -650,6 +678,14 @@ class ReimbursementService
 
             if (array_key_exists('report_template_data', $data)) {
                 $updatePayload['report_template_data'] = $data['report_template_data'];
+            }
+
+            if (array_key_exists('contract_id', $data)) {
+                $updatePayload['contract_id'] = $data['contract_id'];
+            }
+
+            if (array_key_exists('client_name', $data)) {
+                $updatePayload['client_name'] = $data['client_name'];
             }
 
             // Reset revise → pending on re-submission (rejected terminal cannot be reset)

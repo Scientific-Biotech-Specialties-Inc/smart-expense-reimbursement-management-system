@@ -48,6 +48,7 @@ export function useReimbursementFilters(store) {
   const searchQuery = ref("");
   const activeStatus = ref("All");
   const activeCategory = ref("All");
+  const activeVendorFilter = ref("All");
   const sortKey = ref("dateSubmitted");
   const sortDirection = ref("desc");
   const pageSize = 10;
@@ -74,6 +75,11 @@ export function useReimbursementFilters(store) {
       submittedBy: item.user?.name || item.submitted_by_name || "Employee",
       displayStatus: normalizeStatus(item.status),
       displayStatusLabel: statusLabel(item.status),
+      fastTrackEligible: Boolean(item.fast_track_eligible),
+      vendorAuditRequired: Boolean(item.vendor_audit_required),
+      unverifiedVendors: Array.isArray(item.unverified_vendors)
+        ? item.unverified_vendors
+        : [],
     })),
   );
 
@@ -81,6 +87,8 @@ export function useReimbursementFilters(store) {
     "All",
     ...new Set(tableRows.value.map((row) => row.category).filter(Boolean)),
   ]);
+
+  const vendorFilters = ["All", "Fast-Track Eligible", "Needs Secondary Audit"];
 
   const filteredTableRows = computed(() => {
     let rows = tableRows.value;
@@ -91,6 +99,11 @@ export function useReimbursementFilters(store) {
     }
     if (activeCategory.value !== "All") {
       rows = rows.filter((row) => row.category === activeCategory.value);
+    }
+    if (activeVendorFilter.value === "Fast-Track Eligible") {
+      rows = rows.filter((row) => row.fastTrackEligible);
+    } else if (activeVendorFilter.value === "Needs Secondary Audit") {
+      rows = rows.filter((row) => row.vendorAuditRequired);
     }
     if (searchQuery.value.trim()) {
       const q = searchQuery.value.trim().toLowerCase();
@@ -116,8 +129,14 @@ export function useReimbursementFilters(store) {
 
   const sortedTableRows = computed(() => {
     const rows = [...filteredTableRows.value];
+    const isDefaultPrioritySort =
+      sortKey.value === "dateSubmitted" && sortDirection.value === "desc";
+
     if (!sortKey.value) {
       return rows.sort((a, b) => {
+        const aFast = a.displayStatus === "pending" && a.fastTrackEligible ? 1 : 0;
+        const bFast = b.displayStatus === "pending" && b.fastTrackEligible ? 1 : 0;
+        if (aFast !== bFast) return bFast - aFast;
         const aTime = new Date(a.created_at || a.submitted_at || a.dateSubmitted || a.date || 0).getTime();
         const bTime = new Date(b.created_at || b.submitted_at || b.dateSubmitted || b.date || 0).getTime();
         if (aTime !== bTime) return bTime - aTime;
@@ -126,6 +145,11 @@ export function useReimbursementFilters(store) {
     }
 
     return rows.sort((a, b) => {
+      if (isDefaultPrioritySort) {
+        const aFast = a.displayStatus === "pending" && a.fastTrackEligible ? 1 : 0;
+        const bFast = b.displayStatus === "pending" && b.fastTrackEligible ? 1 : 0;
+        if (aFast !== bFast) return bFast - aFast;
+      }
       const aValue = getSortValue(a, sortKey.value);
       const bValue = getSortValue(b, sortKey.value);
       if (aValue === bValue) {
@@ -148,7 +172,7 @@ export function useReimbursementFilters(store) {
     return sortedTableRows.value.slice(start, start + pageSize);
   });
 
-  watch([searchQuery, activeStatus, activeCategory], () => {
+  watch([searchQuery, activeStatus, activeCategory, activeVendorFilter], () => {
     currentPage.value = 1;
   });
 
@@ -172,11 +196,13 @@ export function useReimbursementFilters(store) {
     searchQuery,
     activeStatus,
     activeCategory,
+    activeVendorFilter,
     sortKey,
     sortDirection,
     pageSize,
     currentPage,
     categoryFilters,
+    vendorFilters,
     filteredTableRows,
     sortedTableRows,
     paginatedTableRows,

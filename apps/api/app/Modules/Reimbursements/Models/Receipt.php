@@ -36,6 +36,13 @@ class Receipt extends Model
         'event_type',
         'deletion_warning_sent',
         'admin_notes',
+        'vendor_matched',
+        'vendor_accredited',
+        'vendor_audit_required',
+        'vendor_flagged',
+        'vendor_cms_supplier_id',
+        'vendor_status_tag',
+        'vendor_suggested_at',
         'status',
         'is_draft',
         'rejection_code',
@@ -88,6 +95,12 @@ class Receipt extends Model
         'is_draft' => 'boolean',
         'transaction_date' => 'date',
         'deletion_warning_sent' => 'boolean',
+        'vendor_matched' => 'boolean',
+        'vendor_accredited' => 'boolean',
+        'vendor_audit_required' => 'boolean',
+        'vendor_flagged' => 'boolean',
+        'vendor_cms_supplier_id' => 'integer',
+        'vendor_suggested_at' => 'datetime',
     ];
 
     public function uploader()

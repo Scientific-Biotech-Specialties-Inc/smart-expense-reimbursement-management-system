@@ -4,10 +4,10 @@
 **Client / Partner:** Science Biotech Specialties Inc. (SBSI) — [https://sbsi.com.ph/about-us/](https://sbsi.com.ph/about-us/)  
 **Academic Context:** 3rd & 4th Year Capstone Project (Capstone 1: Ended July 2026 · Capstone 2: September–December 2026)  
 **Date:** Nov 14, 2026  
-**Version:** 2.0.1  
+**Version:** 2.1.0  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** Nov 14, 2026 (Codebase Cleanup & Unified OCR Callback Alignment)  
+**Last reconciled:** Nov 14, 2026 (Bi-Directional CMS ↔ SERMS Integration)  
 **Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
 
 ---
@@ -21,6 +21,21 @@ All notable changes, architectural decisions, and documentation updates for the 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
+
+## [2.1.0] - Nov 14, 2026
+
+### Added
+- **Reimbursement Fast-Track Priority & Secondary Accounting Audit Gate (`apps/api`, `apps/web`, `docs/SERMS.md`):**
+  - Added migration `2026_11_14_000004_add_secondary_audit_fields_to_reimbursements_table.php` (`secondary_audit_confirmed_at`, `secondary_audit_by`, `secondary_audit_note`) and computed accessors (`fast_track_eligible`, `vendor_audit_required`, `unverified_vendors`) on `Reimbursement`.
+  - Updated `ReimbursementService::listReimbursements()` to sort pending `fast_track_eligible` claims first and `ReimbursementService::approveReimbursement()` / `ApproveReimbursementRequest` to require `secondary_audit_confirmed` (recorded in `CLAIM_APPROVED` audit logs) when any attached receipt requires vendor audit.
+  - Updated `ReimbursementsView.vue`, `ReimbursementsTable.vue`, `ReimbursementDetailsModal.vue`, `DecisionConfirmationModal.vue`, `useReimbursementFilters.js`, `useReimbursementDecisions.js`, and `useReimbursementStore` with priority sorting, vendor-review toolbar filters, status pills, and the Secondary Accounting Audit confirmation gate.
+- **CMS ↔ SERMS Bi-Directional Integration (`apps/api`, `apps/web`, `docker-compose.yml`, `docs/SERMS.md`):**
+  - Added CMS configuration (`CMS_CONTRACT_URL`, `CMS_VENDOR_URL`, `INTERNAL_SERVICE_SECRET`, `CMS_SERVICE_TIMEOUT`) across `apps/api/config/services.php`, `.env.example`, `.env`, and `docker-compose.yml`.
+  - Added `AuthenticateInternalService` (`auth.internal` middleware) enforcing constant-time `hash_equals()` validation of `X-Internal-Secret` on `/api/internal/*`.
+  - Implemented `InternalCmsController` and `CmsContractExpenseService` exposing `GET /api/internal/expenses/by-contract` (SQL-aggregated `approved` + `granted` spend breakdown) and `GET /api/internal/reimbursements/by-vendor` (normalized TIN match with case-insensitive `vendor_name` fallback).
+  - Implemented `CmsClientService`, `CmsVendorVerificationService`, `CmsRecurringExpenseService`, and `CmsController` (`/api/cms/contracts/active`, `/api/cms/vendors/suggest`, `/api/cms/recurring-expenses`, `/api/cms/contract-requests`) wired into `OcrCallbackService`, `ReceiptService`, `ReimbursementService`, `CashAdvanceService`, and `AuditLogService` (`CMS_VENDOR_SUGGESTED`, `CMS_CONTRACT_REQUEST_FORWARDED`).
+  - Added database migrations for `reimbursements` & `cash_advances` (`contract_id`, `client_name`), `receipts` (7 `vendor_*` fields), and `cms_contract_requests`.
+  - Added Vue store `useCmsStore`, `<CmsContractSelect>`, `<CmsSuggestVendorAction>`, and `<CmsRecurringExpensesPanel>` integrated into Reimbursements, Cash Advances, and Receipt inspection modals, plus PHPUnit and Vitest test suites.
 
 ## [2.0.1] - Nov 14, 2026
 

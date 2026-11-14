@@ -6,6 +6,7 @@ use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Models\ExpenseCategory;
 use App\Modules\Reimbursements\Models\Receipt;
+use App\Modules\Shared\Services\CmsVendorVerificationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -95,6 +96,10 @@ class OcrCallbackService
             $receipt->items()->delete();
             if (!empty($data['items'])) {
                 $receipt->items()->createMany($data['items']);
+            }
+
+            if (!$isRejected && ($receipt->vendor_name || $receipt->tin)) {
+                app(CmsVendorVerificationService::class)->verifyAndTagReceipt($receipt);
             }
 
             AuditLogService::log(

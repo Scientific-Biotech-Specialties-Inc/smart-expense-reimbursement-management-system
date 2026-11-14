@@ -47,6 +47,8 @@ class AuditLogService
         'PASSWORD_CHANGED' => ['label' => 'Password Changed', 'tone' => 'success', 'domain' => 'profile', 'domain_label' => 'Account Security'],
         'SIGNATURE_UPDATED' => ['label' => 'Digital Signature Saved', 'tone' => 'info', 'domain' => 'profile', 'domain_label' => 'Profile'],
         'SIGNATURE_REMOVED' => ['label' => 'Digital Signature Removed', 'tone' => 'warning', 'domain' => 'profile', 'domain_label' => 'Profile'],
+        'CMS_VENDOR_SUGGESTED' => ['label' => 'Vendor Suggested to CMS', 'tone' => 'info', 'domain' => 'cms', 'domain_label' => 'CMS Integration'],
+        'CMS_CONTRACT_REQUEST_FORWARDED' => ['label' => 'Contract Request Forwarded to CMS', 'tone' => 'info', 'domain' => 'cms', 'domain_label' => 'CMS Integration'],
     ];
 
     private const DIFF_FIELDS = [
@@ -69,6 +71,12 @@ class AuditLogService
         'middle_name' => 'Middle Name',
         'last_name' => 'Last Name',
         'contact_number' => 'Contact Number',
+        'contract_id' => 'CMS Contract ID',
+        'client_name' => 'Client Name',
+        'vendor_status_tag' => 'Vendor Verification Tag',
+        'secondary_audit_confirmed_at' => 'Secondary Audit Confirmed At',
+        'secondary_audit_by' => 'Secondary Audit By',
+        'secondary_audit_note' => 'Secondary Audit Note',
     ];
 
     /**

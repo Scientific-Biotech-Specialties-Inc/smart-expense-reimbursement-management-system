@@ -97,7 +97,7 @@ export function useReimbursementSubmit(emit, router) {
     }
   }
 
-  async function submitReimbursement({ receipts, reportFile, reportTemplateData = null, totalAmount, userComment }) {
+  async function submitReimbursement({ receipts, reportFile, reportTemplateData = null, totalAmount, userComment, contractId = null, clientName = "" }) {
     if (submitting.value) return false;
     const isTemplateMode = Boolean(reportTemplateData && reportTemplateData.mode !== "manual");
     if (!receipts.length || (!isTemplateMode && !reportFile) || receipts.some(r => r.isUploading)) {
@@ -177,6 +177,12 @@ export function useReimbursementSubmit(emit, router) {
         formData.append("user_comment", userComment);
       }
       formData.append("expense_category_id", receipts[0].categoryId);
+      if (contractId) {
+        formData.append("contract_id", contractId);
+        if (clientName) {
+          formData.append("client_name", clientName);
+        }
+      }
       if (receipts[0]?.eventType) {
         formData.append("event_type", receipts[0].eventType);
       }
@@ -212,7 +218,7 @@ export function useReimbursementSubmit(emit, router) {
     }
   }
 
-  async function updateReimbursement(id, { receipts, reportFile, reportTemplateData = null, totalAmount, userComment }) {
+  async function updateReimbursement(id, { receipts, reportFile, reportTemplateData = null, totalAmount, userComment, contractId = null, clientName = "" }) {
     if (submitting.value) return false;
     if (!receipts.length || receipts.some(r => r.isUploading)) {
       return false;
@@ -271,6 +277,10 @@ export function useReimbursementSubmit(emit, router) {
       }
       if (receipts[0].categoryId) {
         formData.append("expense_category_id", receipts[0].categoryId);
+      }
+      if (contractId !== undefined) {
+        formData.append("contract_id", contractId ?? "");
+        formData.append("client_name", clientName ?? "");
       }
       if (receipts[0]?.eventType) {
         formData.append("event_type", receipts[0].eventType);

@@ -66,19 +66,30 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
     }
   }
 
-  async function approve(id, password) {
+  async function approve(id, password, auditOptions = {}) {
     isLoading.value = true;
     try {
+      const payload = { password };
+      if (auditOptions.secondaryAuditConfirmed) {
+        payload.secondary_audit_confirmed = true;
+      }
+      if (auditOptions.secondaryAuditNote?.trim()) {
+        payload.secondary_audit_note = auditOptions.secondaryAuditNote.trim();
+      }
       const response = await apiFetch(
         `/api/serms/reimbursements/${id}/approve`,
         {
           method: "POST",
-          body: JSON.stringify({ password }),
+          body: JSON.stringify(payload),
         },
       );
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
-        const errMsg = errJson.errors?.password?.[0] || errJson.message || "Failed to approve";
+        const errMsg =
+          errJson.errors?.password?.[0] ||
+          errJson.errors?.secondary_audit_confirmed?.[0] ||
+          errJson.message ||
+          "Failed to approve";
         throw new Error(errMsg);
       }
       const json = await response.json();

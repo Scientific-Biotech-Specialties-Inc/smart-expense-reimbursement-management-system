@@ -384,4 +384,79 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
       downloadSpy.mockRestore();
     });
   });
+
+  describe("Fast-Track & Secondary Accounting Audit Badges", () => {
+    it("displays [Fast-Track Eligible] badge when fast_track_eligible is true", () => {
+      const wrapper = mount(ReimbursementDetailsModal, {
+        props: {
+          viewingRecord: {
+            id: 401,
+            status: "pending",
+            amount: 1500,
+            fast_track_eligible: true,
+            vendor_audit_required: false,
+            receipts: [],
+          },
+        },
+        global: {
+          stubs: {
+            StatusBadge: true,
+            BaseReceiptImage: true,
+          },
+        },
+      });
+
+      expect(wrapper.text()).toContain("[Fast-Track Eligible]");
+    });
+
+    it("displays Secondary Accounting Audit Required warning before audit confirmation and Completed card after", () => {
+      const pendingAudit = mount(ReimbursementDetailsModal, {
+        props: {
+          viewingRecord: {
+            id: 402,
+            status: "pending",
+            amount: 2500,
+            fast_track_eligible: false,
+            vendor_audit_required: true,
+            unverified_vendors: ["New Corner Hardware (TIN: 999-888-777-000)"],
+            receipts: [],
+          },
+        },
+        global: {
+          stubs: {
+            StatusBadge: true,
+            BaseReceiptImage: true,
+          },
+        },
+      });
+
+      expect(pendingAudit.text()).toContain("[Unverified Vendor — Secondary Accounting Audit Required]");
+      expect(pendingAudit.text()).toContain("New Corner Hardware (TIN: 999-888-777-000)");
+
+      const confirmedAudit = mount(ReimbursementDetailsModal, {
+        props: {
+          viewingRecord: {
+            id: 403,
+            status: "approved",
+            amount: 2500,
+            vendor_audit_required: true,
+            secondary_audit_confirmed_at: "2026-11-14T10:00:00Z",
+            secondary_audit_by: "Maria Santos",
+            secondary_audit_note: "Verified physical BIR receipt.",
+            receipts: [],
+          },
+        },
+        global: {
+          stubs: {
+            StatusBadge: true,
+            BaseReceiptImage: true,
+          },
+        },
+      });
+
+      expect(confirmedAudit.text()).toContain("Secondary Accounting Audit Completed");
+      expect(confirmedAudit.text()).toContain("Maria Santos");
+      expect(confirmedAudit.text()).toContain("Verified physical BIR receipt.");
+    });
+  });
 });

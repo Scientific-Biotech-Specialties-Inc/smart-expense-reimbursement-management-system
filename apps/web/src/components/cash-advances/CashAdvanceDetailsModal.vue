@@ -586,6 +586,12 @@ async function confirmAcknowledge() {
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Purpose</p>
               <p class="text-sm text-slate-700">{{ record.purpose }}</p>
             </div>
+            <div v-if="record.contract_id" class="col-span-2">
+              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Linked CMS Contract</p>
+              <p class="text-sm text-slate-700">
+                {{ record.client_name ? `${record.client_name} (Contract #${record.contract_id})` : `Contract #${record.contract_id}` }}
+              </p>
+            </div>
             <div>
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Due Date</p>
               <p class="text-sm text-slate-700">{{ formatDateOnly(record.dueDate) }}</p>
@@ -827,6 +833,12 @@ async function confirmAcknowledge() {
             <div class="col-span-2">
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Purpose</p>
               <p class="text-sm text-slate-700">{{ record.purpose }}</p>
+            </div>
+            <div v-if="record.contract_id" class="col-span-2">
+              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Linked CMS Contract</p>
+              <p class="text-sm text-slate-700">
+                {{ record.client_name ? `${record.client_name} (Contract #${record.contract_id})` : `Contract #${record.contract_id}` }}
+              </p>
             </div>
             <div>
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Outstanding Balance</p>

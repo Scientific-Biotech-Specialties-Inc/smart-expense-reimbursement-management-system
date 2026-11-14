@@ -11,6 +11,7 @@ import {
   receiptFinancials,
 } from "@/utils/receiptUtils";
 import BaseReceiptDetailModal from "@/components/base/BaseReceiptDetailModal.vue";
+import CmsSuggestVendorAction from "@/components/base/CmsSuggestVendorAction.vue";
 import { CheckCircle, XCircle } from "lucide-vue-next";
 
 const props = defineProps({
@@ -125,6 +126,10 @@ const normalizedReceipt = computed(() => {
     discountAmount: effectiveDiscountAmount.value,
     discountType: selectedDiscountType.value,
     status: props.receipt.status || "pending",
+    vendorStatusTag: props.receipt.vendor_status_tag || null,
+    vendorAccredited: Boolean(props.receipt.vendor_accredited),
+    vendorAuditRequired: Boolean(props.receipt.vendor_audit_required),
+    vendorFlagged: Boolean(props.receipt.vendor_flagged),
   };
 });
 </script>
@@ -226,6 +231,8 @@ const normalizedReceipt = computed(() => {
         <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Reviewer Notes</p>
         <p class="text-sm text-slate-700">{{ receipt.admin_notes }}</p>
       </div>
+
+      <CmsSuggestVendorAction v-if="auth.isAdmin && receipt" :receipt="receipt" />
     </template>
   </BaseReceiptDetailModal>
 </template>

@@ -5,6 +5,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useCashAdvanceStore } from "@/stores/cashAdvance";
 import { useToast } from "@/composables/useToast";
 import ConfirmModal from "@/components/base/ConfirmModal.vue";
+import CmsContractSelect from "@/components/base/CmsContractSelect.vue";
 import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor.vue";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import {
@@ -36,6 +37,8 @@ const loadingRequest = ref(isEditMode.value);
 
 const form = reactive({
   purpose: "",
+  contract_id: null,
+  client_name: "",
   amount: "",
   expected_disbursement_date: "",
   expected_liquidation_date: "",
@@ -171,6 +174,8 @@ onMounted(async () => {
       const data = await store.fetchRequest(props.id);
       if (data) {
         form.purpose = data.purpose || "";
+        form.contract_id = data.contract_id ?? null;
+        form.client_name = data.client_name || "";
         form.amount = data.amount ?? "";
         if (data.expected_disbursement_date) {
           form.expected_disbursement_date = new Date(data.expected_disbursement_date).toISOString().split("T")[0];
@@ -276,6 +281,15 @@ async function handleRequest() {
 
   const formData = new FormData();
   formData.append("purpose", form.purpose);
+  if (isEditMode.value) {
+    formData.append("contract_id", form.contract_id ?? "");
+    formData.append("client_name", form.client_name ?? "");
+  } else if (form.contract_id) {
+    formData.append("contract_id", form.contract_id);
+    if (form.client_name) {
+      formData.append("client_name", form.client_name);
+    }
+  }
   formData.append("amount", form.amount);
   formData.append(
     "expected_disbursement_date",
@@ -418,6 +432,14 @@ function goBack() {
                   />
                 </div>
               </div>
+            </div>
+
+            <div class="input-wrapper">
+              <CmsContractSelect
+                v-model:contract-id="form.contract_id"
+                v-model:client-name="form.client_name"
+                :disabled="submitting"
+              />
             </div>
 
             <div class="input-wrapper">
