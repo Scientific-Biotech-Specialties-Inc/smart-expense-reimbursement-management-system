@@ -2,13 +2,9 @@
 import { computed, ref, watch } from "vue";
 import {
   AlertTriangle,
-  X,
   RefreshCw,
   Layers,
-  ArrowRight,
-  Sun,
   Camera,
-  Maximize2,
   AlertCircle,
 } from "lucide-vue-next";
 
@@ -36,7 +32,6 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-  "close",
   "retake",
   "upload-segmented",
   "continue-anyway",

@@ -13,7 +13,6 @@ import {
 } from "@/utils/reimbursementForwarding";
 import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
 
-import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import BaseUtilityToolbar from "@/components/base/BaseUtilityToolbar.vue";
@@ -30,7 +29,6 @@ import {
   Receipt,
   Wallet,
   CheckSquare,
-  ShieldCheck,
   ChevronDown,
   Layers,
 } from "lucide-vue-next";

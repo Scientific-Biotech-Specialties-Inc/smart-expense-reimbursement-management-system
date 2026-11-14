@@ -8,7 +8,6 @@ use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\Liquidations\Models\Liquidation;
 use App\Modules\Reimbursements\Models\Receipt;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Http;
 use Carbon\Carbon;

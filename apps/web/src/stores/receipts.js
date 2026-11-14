@@ -33,15 +33,6 @@ export const useReceiptStore = defineStore("receipts", () => {
     amountRange: { min: null, max: null },
   });
 
-  // Hash Map for Duplicate Checks
-  const existingHashes = computed(() => {
-    const map = new Set();
-    receipts.value.forEach((r) => {
-      if (!r.isDeleted) map.add(r.hash);
-    });
-    return map;
-  });
-
   // Getters
   const visibleReceipts = computed(() => {
     let filtered = receipts.value.filter((r) => !r.isDeleted);
@@ -642,57 +633,6 @@ export const useReceiptStore = defineStore("receipts", () => {
     return rx;
   }
 
-  // Legacy: keep simulateUpload for backward compatibility
-  async function simulateUpload(fileMeta, mockHash) {
-    return new Promise((resolve, reject) => {
-      // Duplicate check (Client-side)
-      if (existingHashes.value.has(mockHash)) {
-        reject(
-          new Error(
-            "This file has already been uploaded (Duplicate detected).",
-          ),
-        );
-        return;
-      }
-
-      if (fileMeta.size > 2 * 1024 * 1024) {
-        reject(new Error("File size exceeds 2MB."));
-        return;
-      }
-
-      // Optimistic Upload creation
-      const newReceipt = {
-        id: `RCPT-2026-00${receipts.value.length + 1}`,
-        uploader: auth.user?.name || "Unknown",
-        fileName: fileMeta.name,
-        fileType: fileMeta.type,
-        fileSize: fileMeta.size,
-        date: new Date().toLocaleDateString("en-US", {
-          month: "2-digit",
-          day: "2-digit",
-          year: "numeric",
-        }),
-        amount: 0, // Requires manual entry after processing
-        category: "Uncategorized",
-        status: "Processing",
-        hash: mockHash,
-        thumbnail: null,
-        isDeleted: false,
-      };
-
-      receipts.value.unshift(newReceipt);
-
-      // Simulate Hash verification and Server Processing (optimistic UI)
-      setTimeout(() => {
-        const index = receipts.value.findIndex((r) => r.id === newReceipt.id);
-        if (index !== -1) {
-          receipts.value[index].status = "Pending"; // Finish processing
-        }
-        resolve(newReceipt);
-      }, 2500);
-    });
-  }
-
   async function softDelete(id) {
     const rx = receipts.value.find(
       (r) => r.id === id || r.dbId === id || String(r.dbId) === String(id),
@@ -734,21 +674,6 @@ export const useReceiptStore = defineStore("receipts", () => {
     }
   }
 
-  function hardDelete(id) {
-    receipts.value = receipts.value.filter((r) => r.id !== id);
-  }
-
-  function clearFilters() {
-    filters.value = {
-      dateRange: { start: "", end: "" },
-      uploader: "",
-      category: "",
-      status: "",
-      sort: "newest",
-      amountRange: { min: null, max: null },
-    };
-  }
-
   return {
     receipts,
     reReviewReceipts,
@@ -756,7 +681,6 @@ export const useReceiptStore = defineStore("receipts", () => {
     isLoading,
     isSaving,
     filters,
-    existingHashes,
     pagination,
     visibleReceipts,
     fetchAll,
@@ -768,9 +692,6 @@ export const useReceiptStore = defineStore("receipts", () => {
     refreshReceipt,
     updateReceipt,
     finalizeReReview,
-    simulateUpload,
     softDelete,
-    hardDelete,
-    clearFilters,
   };
 });

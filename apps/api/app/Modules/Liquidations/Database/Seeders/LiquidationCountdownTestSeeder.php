@@ -5,7 +5,6 @@ namespace App\Modules\Liquidations\Database\Seeders;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\CashAdvances\Models\CashAdvanceDisbursement;
-use App\Modules\CashAdvances\Models\CashAdvanceStatusHistory;
 use App\Modules\Liquidations\Models\Liquidation;
 use App\Modules\Reimbursements\Models\ExpenseCategory;
 use App\Modules\Reimbursements\Models\Receipt;

@@ -11,19 +11,6 @@ function escapeCsv(val) {
 }
 
 /**
- * Escapes special XML characters for Excel XML.
- */
-function escapeXml(val) {
-  if (val === null || val === undefined) return "";
-  return String(val)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-/**
  * Format field changes into a readable summary string.
  */
 function formatChanges(changes) {
@@ -116,84 +103,6 @@ export function generateXlsx(trail = [], options = {}) {
 
   const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
   return new Uint8Array(arrayBuffer);
-}
-
-/**
- * Generate Excel Spreadsheet XML 2003 compatible format.
- */
-export function generateExcelXml(trail = [], options = {}) {
-  const sheetTitle = escapeXml(options.title || "Audit Log");
-
-  let rowsXml = "";
-  for (const entry of trail) {
-    const time = escapeXml(entry.created_at ? formatDateTime(entry.created_at) : "—");
-    const user = escapeXml(entry.actor_name || "System");
-    const role = escapeXml(entry.actor_role || "");
-    const ip = escapeXml(entry.ip_address || "");
-    const domain = escapeXml(entry.domain_label || entry.domain || "");
-    const action = escapeXml(entry.label || entry.action_type || "");
-    const comment = escapeXml(entry.comment || "");
-    const changes = escapeXml(formatChanges(entry.changes));
-
-    rowsXml += `
-      <Row>
-        <Cell><Data ss:Type="String">${time}</Data></Cell>
-        <Cell><Data ss:Type="String">${user}</Data></Cell>
-        <Cell><Data ss:Type="String">${role}</Data></Cell>
-        <Cell><Data ss:Type="String">${ip}</Data></Cell>
-        <Cell><Data ss:Type="String">${domain}</Data></Cell>
-        <Cell><Data ss:Type="String">${action}</Data></Cell>
-        <Cell><Data ss:Type="String">${comment}</Data></Cell>
-        <Cell><Data ss:Type="String">${changes}</Data></Cell>
-      </Row>`;
-  }
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:html="http://www.w3.org/TR/REC-html40">
- <Styles>
-  <Style ss:ID="Default" ss:Name="Normal">
-   <Alignment ss:Vertical="Center"/>
-   <Borders/>
-   <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Color="#000000"/>
-  </Style>
-  <Style ss:ID="Header">
-   <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
-   <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-   </Borders>
-   <Font ss:FontName="Calibri" x:Family="Swiss" ss:Size="11" ss:Bold="1" ss:Color="#FFFFFF"/>
-   <Interior ss:Color="#1E293B" ss:Pattern="Solid"/>
-  </Style>
- </Styles>
- <Worksheet ss:Name="${sheetTitle}">
-  <Table>
-   <Column ss:Width="130"/>
-   <Column ss:Width="120"/>
-   <Column ss:Width="80"/>
-   <Column ss:Width="90"/>
-   <Column ss:Width="100"/>
-   <Column ss:Width="120"/>
-   <Column ss:Width="220"/>
-   <Column ss:Width="220"/>
-   <Row ss:StyleID="Header">
-    <Cell><Data ss:Type="String">Time</Data></Cell>
-    <Cell><Data ss:Type="String">User</Data></Cell>
-    <Cell><Data ss:Type="String">Role</Data></Cell>
-    <Cell><Data ss:Type="String">IP Address</Data></Cell>
-    <Cell><Data ss:Type="String">Domain</Data></Cell>
-    <Cell><Data ss:Type="String">Action</Data></Cell>
-    <Cell><Data ss:Type="String">Comment</Data></Cell>
-    <Cell><Data ss:Type="String">Changes</Data></Cell>
-   </Row>
-   ${rowsXml}
-  </Table>
- </Worksheet>
-</Workbook>`;
 }
 
 /**

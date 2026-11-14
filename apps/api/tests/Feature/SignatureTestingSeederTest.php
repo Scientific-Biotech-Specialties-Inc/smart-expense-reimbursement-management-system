@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Modules\CashAdvances\Database\Seeders\SignatureTestingSeeder;
 use App\Modules\CashAdvances\Models\CashAdvance;
-use App\Modules\Reimbursements\Models\Payout;
 use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\Users\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;

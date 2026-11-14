@@ -12,7 +12,7 @@ import {
   RefreshCw
 } from 'lucide-vue-next'
 import { apiFetch } from '../../utils/apiFetch'
-import { cleanName, tinFor, formatDateForInput } from '../../utils/receiptUtils'
+import { formatDateForInput } from '../../utils/receiptUtils'
 import ReceiptQualityRejectionModal from '../reimbursements/ReceiptQualityRejectionModal.vue'
 
 
@@ -20,8 +20,6 @@ const props = defineProps({
   modelValue: { type: Array, default: () => [] },
   accept: { type: String, default: 'image/*,.pdf' },
   maxSizeMb: { type: Number, default: 2 },
-  emptyActionLabel: { type: String, default: 'Select Files' },
-  addActionLabel: { type: String, default: 'Add More Receipts' },
 })
 
 const emit = defineEmits(['update:modelValue', 'ocr-result', 'upload-error'])
@@ -90,10 +88,6 @@ function openQualityModalForEntry(entry) {
   }
 }
 
-const isProcessingAnyReceipt = computed(() =>
-  files.value.some((entry) => entry.ocrStatus === 'processing'),
-)
-
 watch(
   () => props.modelValue,
   (newValue) => {
@@ -101,20 +95,6 @@ watch(
   },
   { deep: true },
 )
-
-function formatTinValue(value, { padLastBlock = false } = {}) {
-  let digits = String(value || '').replace(/\D/g, '').slice(0, 12)
-  if (padLastBlock && digits.length === 9) {
-    digits = `${digits}000`
-  }
-
-  const parts = []
-  if (digits.length > 0) parts.push(digits.slice(0, 3))
-  if (digits.length > 3) parts.push(digits.slice(3, 6))
-  if (digits.length > 6) parts.push(digits.slice(6, 9))
-  if (digits.length > 9) parts.push(digits.slice(9, 12))
-  return parts.join('-')
-}
 
 function buildPrefilledOcrData(file) {
   return {
@@ -812,7 +792,6 @@ function onFileInput(event) {
       :show-segmented-option="false"
       @retake="handleRetake"
       @continue-anyway="handleContinueAnyway"
-      @close="clearQualityRejection"
     />
   </div>
 </template>

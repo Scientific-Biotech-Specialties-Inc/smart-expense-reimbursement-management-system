@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { defineComponent, ref } from "vue";
 import { mount } from "@vue/test-utils";
 import { useHorizontalScroll } from "./useHorizontalScroll";

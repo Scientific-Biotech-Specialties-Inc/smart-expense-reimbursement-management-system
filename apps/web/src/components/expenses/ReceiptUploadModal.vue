@@ -19,7 +19,6 @@ import {
 import {
   X,
   UploadCloud,
-  FileText,
   ChevronDown,
   Save,
   Plus,
@@ -1228,6 +1227,5 @@ function formatCurrency(amount) {
       clearQualityRejection();
     "
     @continue-anyway="continueAnyway()"
-    @close="clearQualityRejection"
   />
 </template>

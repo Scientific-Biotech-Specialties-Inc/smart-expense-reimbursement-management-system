@@ -3,11 +3,11 @@
 **Project:** Smart Expense & Reimbursement Management System (SERMS)  
 **Client / Partner:** Science Biotech Specialties Inc. (SBSI) — [https://sbsi.com.ph/about-us/](https://sbsi.com.ph/about-us/)  
 **Academic Context:** 3rd & 4th Year Capstone Project (Capstone 1: Ended July 2026 · Capstone 2: September–December 2026)  
-**Date:** Nov 11, 2026  
-**Version:** 1.9.9  
+**Date:** Nov 14, 2026  
+**Version:** 2.0.1  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** Nov 11, 2026 (Cash Advance Modal Document Name & Download Fix)  
+**Last reconciled:** Nov 14, 2026 (Codebase Cleanup & Unified OCR Callback Alignment)  
 **Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
 
 ---
@@ -21,6 +21,23 @@ All notable changes, architectural decisions, and documentation updates for the 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
+
+## [2.0.1] - Nov 14, 2026
+
+### Removed
+- **Obsolete Liquidation OCR Callback Endpoint (`apps/api` & `docs/SDD.md`):**
+  - Removed unused `LiquidationOcrCallbackController` and `POST /api/liquidations/receipts/{id}/ocr-callback` from `apps/api/app/Modules/Liquidations/routes/api.php`. All receipt OCR callbacks (reimbursement and liquidation) route through the unified `OcrCallbackController` (`POST /api/reimbursements/receipts/{id}/ocr-callback`) as dispatched by `DispatchReceiptToAiService`.
+  - Updated `docs/SDD.md` Module Roster for `Liquidations` to reflect the removal of `LiquidationOcrCallbackController`.
+- **Backend Dead Code, Stray Artifacts & Unused Dependencies (`apps/api` & Root):**
+  - Deleted stray root/backend artifacts (`nginx-proxy.conf`, `.superpowers/sdd/2026-10-22-report-epic/progress.md`, stray mangled-path folder in `apps/api/public/`, `apps/api/database/database.sqlite`, `apps/api/.phpunit.result.cache`), unused `ReceiptDuplicateDetected` event, and default Laravel `ExampleTest` stubs.
+  - Removed unused `postmark`, `resend`, `ses`, and `slack` keys from `apps/api/config/services.php` and removed `laravel/pao` from `apps/api/composer.json` `require-dev`.
+  - Removed unused methods (`reviseAdvance`, `reviseReimbursement`), dead locals, unreachable branch in `ReceiptService::resubmitReceipt`, and unused `use` imports across `apps/api` app/migration/seeder and feature test files.
+
+### Changed
+- **Backend A-09 Deduplication (`apps/api`):**
+  - Extracted `PrsReimbursementImportService` (`Reimbursements`) to share validation rules and atomic receipt/reimbursement creation between `PrsReimbursementRequestController` and `PrsWebhookController`.
+  - Extracted `BaseBearerTokenMiddleware` (`Shared`) for constant-time bearer token validation across `AuthenticateAiServiceApi` and `AuthenticatePrsReimbursementApi`.
+  - Extracted `CashAdvanceEnrichmentService` (`Shared`) to unify Unified Roadmap `CashAdvance` enrichment between `CashAdvanceController` and `LiquidationController`, and extracted `LiquidationController::syncLiquidationReceipts()`.
 
 ## [2.0.0] - Nov 12, 2026
 

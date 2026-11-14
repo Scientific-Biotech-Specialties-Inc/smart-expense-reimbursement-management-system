@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { usePolicyStore } from "@/stores/policy";
 import { useReceiptStore } from "@/stores/receipts";
@@ -175,7 +175,6 @@ const totalAmount = computed(() => {
 const totalVat = computed(() =>
   receipts.value.reduce((sum, r) => sum + (Number(r.tax) || 0), 0),
 );
-const totalSubtotal = computed(() => totalAmount.value - totalVat.value);
 
 const hasValidReport = computed(() => {
   if (reportTemplateData.value && reportTemplateData.value.mode !== "manual") {
@@ -653,7 +652,6 @@ function dismiss() {
       @continue-anyway="
         continueAnyway(qualityRejection?.file);
       "
-      @close="clearQualityRejection"
     />
   </div>
 </template>

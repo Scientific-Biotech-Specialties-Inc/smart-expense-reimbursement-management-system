@@ -2,8 +2,6 @@
 import { ref, computed } from "vue";
 import {
   AlertTriangle,
-  FileText,
-  Image as ImageIcon,
   Eye,
   Pencil,
   Send,

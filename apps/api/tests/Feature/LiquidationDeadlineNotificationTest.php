@@ -8,7 +8,6 @@ use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\Liquidations\Models\Liquidation;
 use App\Modules\Notifications\Models\EmailLog;
 use App\Modules\Notifications\Models\Notification;
-use App\Modules\Notifications\Mail\NotificationMail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Mail;

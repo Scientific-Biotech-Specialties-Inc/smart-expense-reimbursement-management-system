@@ -1,14 +1,10 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { useAuthStore } from "./auth";
 import { apiFetch } from "../utils/apiFetch";
 export const useCashAdvanceStore = defineStore("cashAdvance", () => {
   const items = ref([]);
   const isLoading = ref(false);
 
-  const pendingCount = computed(
-    () => items.value.filter((i) => i.status === "pending").length,
-  );
   const totalOutstanding = computed(() =>
     items.value.reduce((s, i) => {
       if (["rejected", "liquidated", "settled"].includes(i.status)) return s;
@@ -167,10 +163,6 @@ export const useCashAdvanceStore = defineStore("cashAdvance", () => {
     }
   }
 
-  async function reviseRequest(id, comment, password) {
-    return rejectRequest(id, comment, "revise", password);
-  }
-
   async function disburseRequest(id, payload, password) {
     // Support both signatures:
     // - disburseRequest(id, { channel, reference }, password)
@@ -231,14 +223,6 @@ export const useCashAdvanceStore = defineStore("cashAdvance", () => {
       console.error("Failed to acknowledge cash advance", err);
       throw err;
     }
-  }
-
-  async function approveSettlement(id) {
-    // Placeholder for liquidation approval
-  }
-
-  async function rejectSettlement(id) {
-    // Placeholder for liquidation rejection
   }
 
   async function fetchRequest(id) {
@@ -324,7 +308,6 @@ export const useCashAdvanceStore = defineStore("cashAdvance", () => {
   return {
     items,
     isLoading,
-    pendingCount,
     totalOutstanding,
     fetchAll,
     request,
@@ -332,11 +315,8 @@ export const useCashAdvanceStore = defineStore("cashAdvance", () => {
     fetchDocument,
     approveRequest,
     rejectRequest,
-    reviseRequest,
     disburseRequest,
     acknowledgeRequest,
-    approveSettlement,
-    rejectSettlement,
     updateRequest,
     deleteRequest,
   };

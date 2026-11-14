@@ -142,16 +142,6 @@ const kpis = computed(() => {
     accent: "bg-red-500",
   });
 
-  // cards.push({
-  //   label: admin ? "Total Outstanding Balance" : "Outstanding Balance",
-  //   value: formatPeso(m.outstanding || 0),
-  //   sub: admin ? "Total" : "To be settled",
-  //   icon: Wallet,
-  //   iconBg: "bg-blue-900/10",
-  //   iconColor: "text-blue-900",
-  //   accent: "bg-blue-900",
-  // });
-
   return cards;
 });
 

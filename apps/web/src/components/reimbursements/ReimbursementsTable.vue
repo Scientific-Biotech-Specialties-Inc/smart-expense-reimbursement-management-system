@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
-import { formatPeso, formatAmount, formatDate } from "@/utils/formatters";
+import { formatAmount, formatDate } from "@/utils/formatters";
+import { normalizeStatus } from "@/composables/reimbursements/useReimbursementFilters";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import {
@@ -43,27 +44,9 @@ function handleToggleSort(column) {
   emit("toggle-sort", column);
 }
 
-function handleViewDetails(row) {
-  emit("view-details", row);
-}
-
-function normalizeStatus(status) {
-  const normalized = String(status || "").toLowerCase();
-  const statusMap = {
-    submitted: "pending",
-    review: "pending",
-    draft: "pending",
-    reject: "rejected",
-    rejected: "rejected",
-    paid: "granted",
-  };
-  return statusMap[normalized] || normalized;
-}
-
 function getActions(row) {
   const status = normalizeStatus(row.displayStatus);
   const isRevise = status === "revise";
-  const isRejected = status === "rejected";
   return [
     {
       label: "Edit",

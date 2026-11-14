@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Modules\AuditLogs\Models\AuditLog;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\Users\Models\User;

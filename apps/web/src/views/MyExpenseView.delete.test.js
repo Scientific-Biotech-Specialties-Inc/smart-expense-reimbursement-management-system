@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
-import { ref, reactive } from "vue";
 import MyExpenseView from "@/views/MyExpenseView.vue";
 
 const mockAddToast = vi.fn();

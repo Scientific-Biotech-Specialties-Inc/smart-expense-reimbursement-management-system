@@ -6,7 +6,6 @@ use Tests\TestCase;
 use App\Modules\Users\Models\User;
 use App\Modules\Reimbursements\Models\Receipt;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 
 class ReceiptStorageRetrievalTest extends TestCase
 {

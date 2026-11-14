@@ -338,4 +338,48 @@ describe("discount handling in receiptUtils", () => {
   });
 });
 
+describe("formatTinValue", () => {
+  it("formats digits into BIR TIN hyphenated blocks", async () => {
+    const { formatTinValue } = await import("./receiptUtils");
+    expect(formatTinValue("")).toBe("");
+    expect(formatTinValue(null)).toBe("");
+    expect(formatTinValue("123456789")).toBe("123-456-789");
+    expect(formatTinValue("123456789000")).toBe("123-456-789-000");
+    expect(formatTinValue("123-456-789-012345")).toBe("123-456-789-012");
+  });
+
+  it("pads a 9-digit TIN with -000 when padLastBlock is true", async () => {
+    const { formatTinValue } = await import("./receiptUtils");
+    expect(formatTinValue("123456789", { padLastBlock: true })).toBe(
+      "123-456-789-000",
+    );
+    expect(formatTinValue("12345678", { padLastBlock: true })).toBe(
+      "123-456-78",
+    );
+  });
+});
+
+describe("getMissingReceiptFields edge cases", () => {
+  it("returns empty array for null/undefined receipt and flags missing subtotal or null/negative amounts", async () => {
+    const { getMissingReceiptFields } = await import("./receiptUtils");
+    expect(getMissingReceiptFields(null)).toEqual([]);
+    expect(getMissingReceiptFields(undefined)).toEqual([]);
+
+    const missing = getMissingReceiptFields({
+      invoiceNumber: "INV-1",
+      date: "2026-10-01",
+      tin: "123-456-789-000",
+      merchantName: "Store",
+      location: "Manila",
+      categoryId: 1,
+      amount: -5,
+      subtotal: null,
+    });
+    expect(missing).toEqual([
+      { key: "amount", label: "Total Amount" },
+      { key: "subtotal", label: "Subtotal" },
+    ]);
+  });
+});
+
 

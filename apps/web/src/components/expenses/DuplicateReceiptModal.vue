@@ -1,11 +1,9 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
-import { useAuthStore } from '@/stores/auth';
 import { useToast } from '@/composables/useToast';
 import { AlertTriangle, RefreshCw } from 'lucide-vue-next';
 
-const authStore = useAuthStore();
 const { addToast } = useToast();
 const router = useRouter();
 
@@ -13,8 +11,6 @@ const showModal = ref(false);
 const similarityScore = ref(0);
 const duplicateReceiptId = ref(null);
 const customMessage = ref('');
-
-const currentUser = computed(() => authStore.user);
 
 onMounted(() => {
   window.addEventListener('receipt-duplicate-detected', handleDuplicateEvent);

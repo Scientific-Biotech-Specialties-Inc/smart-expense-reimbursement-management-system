@@ -3,7 +3,6 @@
 namespace App\Modules\Shared\Services;
 
 use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\Log;
 
 /**
  * PayloadDecryptionService
@@ -173,7 +172,6 @@ class PayloadDecryptionService
      */
     private static function mgf1(string $seed, int $length, string $hashAlg): string
     {
-        $hLen = strlen(hash($hashAlg, '', true));
         $t = '';
         $counter = 0;
 

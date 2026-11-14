@@ -32,10 +32,6 @@ const props = defineProps({
     type: Number,
     default: 0,
   },
-  overdueDays: {
-    type: Number,
-    default: 0,
-  },
   overpaymentAmount: {
     type: Number,
     default: 0,

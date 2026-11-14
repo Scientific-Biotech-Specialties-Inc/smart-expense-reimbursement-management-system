@@ -2,15 +2,12 @@
 import { computed, ref, watch } from "vue";
 import {
   Check,
-  Clock,
   X,
-  AlertTriangle,
   Banknote,
   FileText,
   ShieldCheck,
   Wallet,
   ArrowRight,
-  CircleDot,
 } from "lucide-vue-next";
 import { formatPeso, formatDate } from "@/utils/formatters";
 import { useHorizontalScroll } from "@/composables/useHorizontalScroll";
@@ -52,23 +49,11 @@ const props = defineProps({
 
 const emit = defineEmits(["navigate", "view-cash-advance", "view-liquidation"]);
 
-const effectiveLayout = computed(() => {
-  if (props.layout === "serpentine") return "serpentine";
-  if (allSteps.value.length > 6) return "serpentine";
-  return props.layout;
-});
-
 function normalize(val) {
   return String(val || "")
     .toLowerCase()
     .trim()
     .replace(/[\s/_-]+/g, "-");
-}
-
-function formatDateOnly(value) {
-  if (!value) return null;
-  const formatted = formatDate(value);
-  return formatted === "—" ? null : formatted;
 }
 
 function formatActorName(actor) {
@@ -538,20 +523,6 @@ const totalPenalty = computed(() => {
   return 0;
 });
 
-const overdueDays = computed(() => {
-  if (props.penalties && props.penalties.length > 0)
-    return props.penalties.length;
-  if (props.aging?.penalty) return Math.ceil(Number(props.aging.penalty) / 50);
-  const due =
-    props.cashAdvance?.expected_liquidation_date || props.cashAdvance?.dueDate;
-  if (!due || !isOverdue.value) return 0;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(due);
-  d.setHours(0, 0, 0, 0);
-  return Math.max(0, Math.floor((today - d) / (1000 * 60 * 60 * 24)));
-});
-
 /**
  * 6-step unified definition (1-6 + optional 7)
  */
@@ -906,7 +877,6 @@ function handleStepClick(step, state) {
               :revision-count="revisionCountForStep(step.key)"
               :is-overdue="isOverdue"
               :total-penalty="totalPenalty"
-              :overdue-days="overdueDays"
               :overpayment-amount="overpaymentAmount"
               @click="handleStepClick"
             />

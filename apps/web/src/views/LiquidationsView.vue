@@ -8,13 +8,11 @@ import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
-import FileUpload from "@/components/base/FileUpload.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseModal from "@/components/base/BaseModal.vue";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import BaseUtilityToolbar from "@/components/base/BaseUtilityToolbar.vue";
-import SkeletonLoader from "@/components/base/SkeletonLoader.vue";
 import DecisionConfirmationModal from "@/components/base/DecisionConfirmationModal.vue";
 import ConfirmModal from "@/components/base/ConfirmModal.vue";
 import DeleteConfirmModal from "@/components/base/DeleteConfirmModal.vue";
@@ -69,7 +67,6 @@ async function refreshAll() {
 const selectedAdvance = ref(null);
 const receipts = ref([]);
 const reportAttachment = ref(null);
-const reportAttachmentInput = ref(null);
 const reportTemplateData = ref(null);
 const isReportManualMode = ref(false);
 const { submitting, submitLiquidation: performSubmitLiquidation } =
@@ -157,7 +154,6 @@ const {
 );
 
 const reviewDrafts = ref({});
-const confirmFinalizeOpen = ref(false);
 const receiptDetailsOpen = ref(false);
 const selectedReceipt = ref(null);
 const pendingReceiptDecision = ref("");
@@ -169,11 +165,6 @@ const employeeSearchQuery = ref("");
 const employeeActiveStatus = ref("All");
 const employeeSortKey = ref("date");
 const employeeSortDirection = ref("desc");
-const VALID_REPORT_ATTACHMENT_MIME_TYPES = [
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-];
-const VALID_REPORT_ATTACHMENT_EXTENSIONS = [".pdf", ".docx"];
 
 const statusFilters = [
   "All",
@@ -255,11 +246,6 @@ const hasIncompleteReceiptFields = computed(() => {
   });
 });
 
-const agingInfo = computed(() => {
-  if (!selectedAdvance.value) return null;
-  return liqStore.calculateAging(selectedAdvance.value);
-});
-
 const variance = computed(() => {
   if (!selectedAdvance.value) return 0;
   const currentBalance = numberOrZero(
@@ -277,10 +263,6 @@ const liquidationStatus = computed(() => {
   if (variance.value > 0) return "Incomplete";
   return "Liquidated";
 });
-const calculatedOutstandingBalance = computed(() => {
-  const currentBalance = numberOrZero(selectedAdvance.value?.balance);
-  return Math.max(totalExpenseAmount.value - currentBalance, 0);
-});
 const overpaymentAmount = computed(() =>
   Math.max(
     totalExpenseAmount.value - numberOrZero(selectedAdvance.value?.balance),
@@ -293,13 +275,6 @@ const { forwardOverpaymentToReimbursement } = useLiquidationForwarding(
   overpaymentAmount,
   receipts,
   defaultReceiptCategoryId,
-);
-
-const needsReportAttachmentReminder = computed(
-  () =>
-    selectedAdvance.value &&
-    (liquidationStatus.value === "Incomplete" ||
-      (overpaymentAmount.value > 0 && !reportAttachment.value)),
 );
 
 const currentUserId = computed(() =>
@@ -1150,7 +1125,6 @@ async function confirmDeleteLiquidation(password) {
 function getActions(row) {
   const status = String(row.status || "").toLowerCase();
   const isRevise = status === "revise";
-  const isRejected = status === "rejected";
   return [
     {
       label: "Edit",
@@ -1422,36 +1396,6 @@ function backToAdvanceSelection() {
   });
 }
 
-function isValidReportAttachment(file) {
-  if (!file) return false;
-
-  const normalizedName = String(file.name || "").toLowerCase();
-  const isValidImage = String(file.type || "").startsWith("image/");
-  const hasValidMimeType = VALID_REPORT_ATTACHMENT_MIME_TYPES.includes(
-    file.type,
-  );
-  const hasValidExtension = VALID_REPORT_ATTACHMENT_EXTENSIONS.some((ext) =>
-    normalizedName.endsWith(ext),
-  );
-
-  if (isValidImage || hasValidMimeType || hasValidExtension) {
-    return true;
-  }
-
-  addToast({
-    message:
-      "Invalid file type. Only image files, PDF, and DOCX are allowed for the report attachment.",
-    type: "error",
-  });
-  return false;
-}
-
-function selectReportAttachment(event) {
-  const file = event.target.files?.[0];
-  if (file && isValidReportAttachment(file)) reportAttachment.value = file;
-  event.target.value = "";
-}
-
 function clearReportAttachment() {
   reportAttachment.value = null;
 }
@@ -1536,7 +1480,6 @@ function openReview(row) {
   }
 
   reviewingCase.value = row;
-  confirmFinalizeOpen.value = false;
   receiptDetailsOpen.value = false;
   selectedReceipt.value = null;
   pendingReceiptDecision.value = "";
@@ -1544,7 +1487,6 @@ function openReview(row) {
 
 function closeReview() {
   reviewingCase.value = null;
-  confirmFinalizeOpen.value = false;
   receiptDetailsOpen.value = false;
   selectedReceipt.value = null;
   pendingReceiptDecision.value = "";
@@ -1610,13 +1552,6 @@ function handleReceiptUploadError(payload) {
       payload?.message || "One or more receipt files could not be uploaded.",
     type: "danger",
   });
-}
-
-function finalizeLiquidation() {
-  if (!reviewingCase.value || !activeDraft.value) return;
-  activeDraft.value.finalizedStatus = reviewStatus.value;
-  confirmFinalizeOpen.value = false;
-  closeReview();
 }
 
 const { checkDeepLink: checkLiquidationDeepLink } = useNotificationDeepLink({
@@ -1805,7 +1740,6 @@ onMounted(async () => {
       :is-reviewing-own-liquidation="isReviewingOwnLiquidation"
       :get-file-url="getFileUrl"
       @close="closeReceiptDetails"
-      @close-review="closeReview"
       @request-decision="requestReceiptDecision"
       @cancel-decision="cancelReceiptDecision"
       @confirm-decision="confirmReceiptDecision"
@@ -2057,10 +1991,8 @@ onMounted(async () => {
             @update:report-template-data="reportTemplateData = $event"
             @update:report-attachment="reportAttachment = $event"
             @update:is-manual-mode="isReportManualMode = $event"
-            @file-selected="selectReportAttachment"
             @file-cleared="clearReportAttachment"
             :existing-liquidation="existingLiquidation"
-            :needs-report-attachment-reminder="needsReportAttachmentReminder"
             :variance="variance"
             :shortfall-explanation="shortfallExplanation"
             @update:shortfall-explanation="shortfallExplanation = $event"

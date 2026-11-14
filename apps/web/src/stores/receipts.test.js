@@ -109,7 +109,6 @@ describe("useReceiptStore", () => {
     expect(receipt.thumbnail).toBe(
       "https://storage.example.com/receipts/receipt-sample.pdf",
     );
-    expect(store.existingHashes.has("array-hash-abc123")).toBe(true);
   });
 
   it("maps legacy scalar file fields from fetchAll", async () => {

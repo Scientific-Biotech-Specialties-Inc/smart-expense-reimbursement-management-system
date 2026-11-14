@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { formatPeso, formatDate } from "@/utils/formatters";
+import { formatDate } from "@/utils/formatters";
 import BaseReceiptDetailModal from "@/components/base/BaseReceiptDetailModal.vue";
 import { CheckCircle, XCircle } from "lucide-vue-next";
 
@@ -12,7 +12,7 @@ const props = defineProps({
   getFileUrl: { type: Function, required: true },
 });
 
-const emit = defineEmits(["close", "close-review", "request-decision", "cancel-decision", "confirm-decision"]);
+const emit = defineEmits(["close", "request-decision", "cancel-decision", "confirm-decision"]);
 
 /** Normalize to shared shape */
 const normalizedReceipt = computed(() => {

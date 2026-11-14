@@ -344,14 +344,6 @@ class ReimbursementService
     }
 
     /**
-     * Backwards-compatible alias for revise flow.
-     */
-    public function reviseReimbursement(User $user, int $id, string $comment, ?string $password, string $ipAddress, Request $requestContext)
-    {
-        return $this->rejectReimbursement($user, $id, $comment, $password, $ipAddress, $requestContext, 'revise');
-    }
-
-    /**
      * Grant (disburse) a previously approved claim.
      */
     public function grantReimbursement(User $user, int $id, ?string $password, string $ipAddress, Request $requestContext, array $payoutData = [])

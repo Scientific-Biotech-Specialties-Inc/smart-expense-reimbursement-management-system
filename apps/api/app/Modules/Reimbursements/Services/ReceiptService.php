@@ -173,7 +173,6 @@ class ReceiptService
             );
 
             if (!$isDraft) {
-                $amountText = $receipt->total_amount ? ' (' . NotificationService::formatPeso($receipt->total_amount) . ')' : '';
                 NotificationService::notifyUser(
                     userId: $user->id,
                     type: 'receipt_uploaded',
@@ -341,98 +340,11 @@ class ReceiptService
                 $updateData['vat_classification'] = strtolower((string)$updateData['vat_classification']);
             }
 
-            // Metadata-only edit (no replacement file): preserve legacy behavior.
-            if (!$file) {
-                $updateData['status'] = 'processed';
-                $updateData['ocr_flagged'] = false;
-
-                $beforeState = $receipt->toArray();
-
-                $receipt->update($updateData);
-
-                if (array_key_exists('items', $data)) {
-                    $receipt->items()->delete();
-
-                    if (!empty($data['items'])) {
-                        $receipt->items()->createMany($data['items']);
-                    }
-                }
-
-                AuditLogService::log(
-                    actorId: $user->id,
-                    actorRole: $user->role,
-                    actionType: 'RECEIPT_UPDATED',
-                    entityType: 'receipt',
-                    entityId: $receipt->id,
-                    beforeState: $beforeState,
-                    afterState: $receipt->fresh()->toArray(),
-                    ipAddress: request()->ip(),
-                );
-
-                return $receipt->fresh(['category', 'items', 'uploader'])
-                    ->loadCount('reimbursements');
-            }
-
-            // New file supplied → decide duplicate vs. OCR re-run.
-            //
-            // We compute the file hash FIRST and short-circuit duplicates
-            // before persisting the uploaded file to storage. This avoids
-            // leaving orphan files on the storage disk for receipts that are
-            // rejected as duplicates (the previous code stored the file and
-            // only then detected the collision).
-            $beforeState = $receipt->toArray();
-
-            $fileHash = hash_file('sha256', $file->getRealPath());
-
-            // Collision with a DIFFERENT, non-deleted receipt → flag as duplicate.
-            if ($this->duplicateReceiptExists($fileHash, $receipt->id)) {
-                $updateData['status'] = 'rejected';
-                $updateData['rejection_code'] = 'duplicate';
-                $updateData['rejection_reason'] = 'Duplicate receipt detected based on file hash.';
-                $updateData['ocr_flagged'] = true;
-
-                $receipt->update($updateData);
-
-                if (array_key_exists('items', $data)) {
-                    $receipt->items()->delete();
-
-                    if (!empty($data['items'])) {
-                        $receipt->items()->createMany($data['items']);
-                    }
-                }
-
-                AuditLogService::log(
-                    actorId: $user->id,
-                    actorRole: $user->role,
-                    actionType: 'RECEIPT_OCR_REJECTED',
-                    entityType: 'receipt',
-                    entityId: $receipt->id,
-                    beforeState: $beforeState,
-                    afterState: $receipt->fresh()->toArray(),
-                    ipAddress: request()->ip(),
-                );
-
-                return $receipt->fresh(['category', 'items', 'uploader'])
-                    ->loadCount('reimbursements');
-            }
-
-            // Not a duplicate → persist the file, then re-run OCR.
-            try {
-                $newFile = $this->storeReceiptFiles([$file]);
-            } catch (\Throwable $e) {
-                Log::error('resubmitReceipt: failed to persist uploaded file to storage.', [
-                    'receipt_id' => $receipt->id,
-                    'error' => $e->getMessage(),
-                ]);
-                throw $e;
-            }
-
-            $updateData = array_merge($updateData, $newFile);
-
-            // Same image re-uploaded for this receipt, or a brand-new image →
-            // silently re-run OCR.
-            $updateData['status'] = 'processing';
+            // Metadata-only edit (no replacement file).
+            $updateData['status'] = 'processed';
             $updateData['ocr_flagged'] = false;
+
+            $beforeState = $receipt->toArray();
 
             $receipt->update($updateData);
 
@@ -444,13 +356,10 @@ class ReceiptService
                 }
             }
 
-            // Dispatch OCR (runs inline by default — no dedicated worker required).
-            $this->dispatchOcrJob($receipt);
-
             AuditLogService::log(
                 actorId: $user->id,
                 actorRole: $user->role,
-                actionType: 'RECEIPT_OCR_RETRY',
+                actionType: 'RECEIPT_UPDATED',
                 entityType: 'receipt',
                 entityId: $receipt->id,
                 beforeState: $beforeState,

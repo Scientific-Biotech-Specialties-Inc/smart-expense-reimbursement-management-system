@@ -5,7 +5,6 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCw,
-  RotateCcw,
   Maximize2,
   ChevronLeft,
   ChevronRight,
