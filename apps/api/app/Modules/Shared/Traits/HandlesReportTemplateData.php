@@ -23,6 +23,7 @@ trait HandlesReportTemplateData
             'report_template_data.breakdownItems' => 'nullable|array',
             'report_template_data.breakdownItems.*.description' => 'nullable|string|max:500',
             'report_template_data.breakdownItems.*.amount' => 'nullable|numeric|min:0',
+            'report_template_data.signatorySignature' => 'nullable|string',
         ];
     }
 
