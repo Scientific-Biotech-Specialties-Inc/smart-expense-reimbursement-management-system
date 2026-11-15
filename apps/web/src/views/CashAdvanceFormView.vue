@@ -135,6 +135,7 @@ const isDirty = computed(() => {
 });
 
 const isSubmitted = ref(false);
+const showSubmitConfirmModal = ref(false);
 
 const {
   showConfirmModal,
@@ -227,23 +228,23 @@ onMounted(async () => {
   }
 });
 
-async function handleRequest() {
-  if (submitting.value) return;
+function validateRequestForm() {
   if (
     !form.purpose ||
     !form.amount ||
     !form.expected_disbursement_date ||
     !form.expected_liquidation_date ||
     !hasValidAttachment.value
-  )
-    return;
+  ) {
+    return false;
+  }
 
   if (form.purpose.length > 255) {
     addToast({
       message: "Purpose must not exceed 255 characters.",
       type: "error",
     });
-    return;
+    return false;
   }
 
   const today = todayDate.value;
@@ -252,7 +253,7 @@ async function handleRequest() {
       message: "Disbursement date must be today or a future date.",
       type: "error",
     });
-    return;
+    return false;
   }
 
   if (form.expected_liquidation_date < today) {
@@ -260,7 +261,7 @@ async function handleRequest() {
       message: "Liquidation Deadline must be today or a future date.",
       type: "error",
     });
-    return;
+    return false;
   }
 
   if (form.expected_disbursement_date >= form.expected_liquidation_date) {
@@ -269,8 +270,28 @@ async function handleRequest() {
         "Disbursement date cannot be greater than or equal to the liquidation date.",
       type: "error",
     });
-    return;
+    return false;
   }
+
+  return true;
+}
+
+function promptSubmit() {
+  if (submitting.value || !validateRequestForm()) return;
+  showSubmitConfirmModal.value = true;
+}
+
+function handleConfirmSubmit() {
+  showSubmitConfirmModal.value = false;
+  handleRequest();
+}
+
+function handleCancelSubmit() {
+  showSubmitConfirmModal.value = false;
+}
+
+async function handleRequest() {
+  if (submitting.value || !validateRequestForm()) return;
 
   submitting.value = true;
 
@@ -365,7 +386,7 @@ function goBack() {
           <form
             id="cashAdvanceForm"
             class="space-y-6"
-            @submit.prevent="handleRequest"
+            @submit.prevent="promptSubmit"
           >
             <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
               <div class="input-wrapper">
@@ -513,6 +534,18 @@ function goBack() {
         </footer>
       </div>
     </main>
+
+    <ConfirmModal
+      :is-open="showSubmitConfirmModal"
+      title="Submit Request"
+      message="Are you sure do you want to submit this request?"
+      confirm-text="Done"
+      cancel-text="Cancel"
+      :danger="false"
+      :loading="submitting"
+      @confirm="handleConfirmSubmit"
+      @close="handleCancelSubmit"
+    />
 
     <ConfirmModal
       :is-open="showConfirmModal"
