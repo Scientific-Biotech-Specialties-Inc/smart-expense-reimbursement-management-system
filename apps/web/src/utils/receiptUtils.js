@@ -390,3 +390,18 @@ export function getMissingReceiptFields(receipt) {
     isMissingFieldValue(receipt, key),
   );
 }
+
+/**
+ * Marks a receipt as having received OCR output and returns a warning message
+ * listing any missing required fields, or null when all required fields exist.
+ *
+ * @param {object|null|undefined} receipt
+ * @returns {string|null}
+ */
+export function markOcrReturnedAndGetMissingWarning(receipt) {
+  if (!receipt) return null;
+  receipt.hasOcrReturned = true;
+  const missing = getMissingReceiptFields(receipt);
+  if (missing.length === 0) return null;
+  return `Missing required field(s): ${missing.map((f) => f.label).join(", ")}`;
+}

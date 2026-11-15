@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, nextTick, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import {
   AlertTriangle,
   FileText,
@@ -12,7 +12,13 @@ import {
   RefreshCw
 } from 'lucide-vue-next'
 import { apiFetch } from '../../utils/apiFetch'
-import { formatDateForInput } from '../../utils/receiptUtils'
+import {
+  formatDateForInput,
+  markOcrReturnedAndGetMissingWarning,
+  normalizeDiscountType,
+  normalizeVatClassification,
+} from '../../utils/receiptUtils'
+import { useToast } from '../../composables/useToast'
 import ReceiptQualityRejectionModal from '../reimbursements/ReceiptQualityRejectionModal.vue'
 
 
@@ -23,6 +29,16 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue', 'ocr-result', 'upload-error'])
+const { addToast } = useToast()
+
+function notifyMissingFieldsAfterTick(entry) {
+  nextTick(() => {
+    const warning = markOcrReturnedAndGetMissingWarning(entry)
+    if (warning) {
+      addToast({ message: warning, type: 'warning' })
+    }
+  })
+}
 
 const isDragging = ref(false)
 const files = ref([...props.modelValue])
@@ -46,8 +62,37 @@ function handleWindowClick(event) {
   }
 }
 
+function handleRemoveDuplicateEvent(event) {
+  const targetId = event?.detail?.receiptId
+  if (!targetId) return
+  const index = files.value.findIndex(
+    (entry) => String(entry?.id ?? '') === String(targetId) || String(entry?.localId ?? '') === String(targetId),
+  )
+  if (index !== -1) {
+    removeFile(index)
+  }
+}
+
+function handleOpenReceiptUpload() {
+  triggerFileInput(uploadMode.value || 'single')
+}
+
+function dispatchDuplicateDetected(entry) {
+  window.dispatchEvent(
+    new CustomEvent('receipt-duplicate-detected', {
+      detail: {
+        receiptId: entry.id || entry.localId,
+        source: 'liquidation',
+        message: entry.rejectionReason,
+      },
+    }),
+  )
+}
+
 onMounted(() => {
   window.addEventListener('click', handleWindowClick)
+  window.addEventListener('remove-duplicate-receipt', handleRemoveDuplicateEvent)
+  window.addEventListener('open-receipt-upload', handleOpenReceiptUpload)
 })
 
 function clearQualityRejection() {
@@ -73,6 +118,7 @@ function handleContinueAnyway() {
     rejectedEntry.isQualityOverridden = true
     rejectedEntry.hasOcrReturned = true
     emit('update:modelValue', files.value)
+    notifyMissingFieldsAfterTick(rejectedEntry)
   }
   clearQualityRejection()
 }
@@ -116,6 +162,37 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function createUploadEntry(pages, displayName, size) {
+  return {
+    localId: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    pages,
+    name: displayName,
+    fileName: displayName,
+    size,
+    previews: pages.map(f => (f.type.startsWith('image/') ? URL.createObjectURL(f) : null)),
+    thumbnail: pages[0]?.type.startsWith('image/') ? URL.createObjectURL(pages[0]) : null,
+    ocrStatus: 'idle',
+    hasOcrReturned: false,
+    merchantName: '',
+    date: '',
+    tin: '',
+    invoiceNumber: '',
+    location: '',
+    category: '',
+    categoryId: null,
+    eventType: '',
+    currency: 'PHP',
+    vatClassification: 'vat',
+    discountType: 'none',
+    discountAmount: '0.00',
+    subtotal: '0.00',
+    tax: '0.00',
+    amount: 0,
+    items: [],
+    ocrData: buildPrefilledOcrData(pages[0]),
+  }
+}
+
 function processFiles(fileList, mode) {
   localError.value = null
 
@@ -138,58 +215,16 @@ function processFiles(fileList, mode) {
   if (mode === 'single') {
     // When Single Receipt is chosen, strictly send only the first selected file to OCR
     const file = validFiles[0]
-    const entry = {
-      pages: [file],
-      name: file.name,
-      fileName: file.name,
-      size: file.size,
-      previews: [file.type.startsWith('image/') ? URL.createObjectURL(file) : null],
-      thumbnail: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
-      ocrStatus: 'idle',
-      merchantName: '',
-      date: '',
-      tin: '',
-      invoiceNumber: '',
-      location: '',
-      currency: 'PHP',
-      vatClassification: 'vat',
-      subtotal: '0.00',
-      tax: '0.00',
-      amount: 0,
-      items: [],
-      ocrData: buildPrefilledOcrData(file),
-    }
-    files.value.push(entry)
+    files.value.push(createUploadEntry([file], file.name, file.size))
     simulateOCR(files.value[files.value.length - 1])
   } else {
     // Multi Receipt: all selected files (up to 6 segments) sent together to OCR
     const segmentFiles = validFiles.slice(0, 6)
-    const entry = {
-      pages: segmentFiles,
-      name: segmentFiles.length > 1
-        ? `Multi-page Receipt (${segmentFiles.length} pages)`
-        : segmentFiles[0].name,
-      fileName: segmentFiles.length > 1
-        ? `Multi-page Receipt (${segmentFiles.length} pages)`
-        : segmentFiles[0].name,
-      size: segmentFiles.reduce((acc, f) => acc + f.size, 0),
-      previews: segmentFiles.map(f => f.type.startsWith('image/') ? URL.createObjectURL(f) : null),
-      thumbnail: segmentFiles[0]?.type.startsWith('image/') ? URL.createObjectURL(segmentFiles[0]) : null,
-      ocrStatus: 'idle',
-      merchantName: '',
-      date: '',
-      tin: '',
-      invoiceNumber: '',
-      location: '',
-      currency: 'PHP',
-      vatClassification: 'vat',
-      subtotal: '0.00',
-      tax: '0.00',
-      amount: 0,
-      items: [],
-      ocrData: buildPrefilledOcrData(segmentFiles[0]),
-    }
-    files.value.push(entry)
+    const displayName = segmentFiles.length > 1
+      ? `Multi-page Receipt (${segmentFiles.length} pages)`
+      : segmentFiles[0].name
+    const totalSize = segmentFiles.reduce((acc, f) => acc + f.size, 0)
+    files.value.push(createUploadEntry(segmentFiles, displayName, totalSize))
     simulateOCR(files.value[files.value.length - 1])
   }
 
@@ -215,20 +250,31 @@ function triggerFileInput(mode) {
 
 function hydrateEntry(entry, ocrData) {
   entry.ocrStatus = 'done'
+  entry.hasOcrReturned = true
   entry.id = ocrData.id
   // confidence from pipeline is 0-1; legacy fallback was 0-100
   let rawConf = ocrData.ocr_confidence_score ?? ocrData.confidence ?? 85
   if (rawConf > 0 && rawConf <= 1) rawConf = rawConf * 100
   const confidence = Math.round(rawConf)
+  const rawDiscount = Number(ocrData.discount_amount ?? ocrData.discountAmount ?? entry.discountAmount ?? 0) || 0
+  const discountType = normalizeDiscountType(ocrData.discount_type ?? ocrData.discountType ?? entry.discountType, rawDiscount)
+  const vatClassification = normalizeVatClassification(ocrData.vat_classification ?? entry.vatClassification)
+  const categoryId = ocrData.expense_category_id ? Number(ocrData.expense_category_id) : (entry.categoryId ?? null)
+  const eventType = ocrData.event_type ?? entry.eventType ?? ''
+
   entry.ocrData = {
     id: ocrData.id,
-    amount: ocrData.total_amount ?? ocrData.amount ?? entry.ocrData.amount ?? '',
-    vat: ocrData.vat_amount ?? ocrData.vat ?? entry.ocrData.vat ?? '',
-    tin: ocrData.tin ?? entry.ocrData.tin ?? '',
-    vendor: ocrData.vendor_name ?? ocrData.vendor ?? entry.ocrData.vendor ?? '',
-    invoiceNumber: ocrData.invoice_number ?? ocrData.invoiceNumber ?? entry.ocrData.invoiceNumber ?? '',
-    date: formatDateForInput(ocrData.transaction_date ?? ocrData.date ?? entry.ocrData.date),
+    amount: ocrData.total_amount ?? ocrData.amount ?? entry.ocrData?.amount ?? '',
+    vat: ocrData.vat_amount ?? ocrData.vat ?? entry.ocrData?.vat ?? '',
+    tin: ocrData.tin ?? entry.ocrData?.tin ?? '',
+    vendor: ocrData.vendor_name ?? ocrData.vendor ?? entry.ocrData?.vendor ?? '',
+    invoiceNumber: ocrData.invoice_number ?? ocrData.invoiceNumber ?? entry.ocrData?.invoiceNumber ?? '',
+    date: formatDateForInput(ocrData.transaction_date ?? ocrData.date ?? entry.ocrData?.date),
     location: ocrData.location ?? entry.location ?? '',
+    expense_category_id: categoryId,
+    event_type: eventType,
+    discount_amount: rawDiscount > 0 ? rawDiscount.toFixed(2) : '0.00',
+    discount_type: discountType,
     confidence,
     file_path: ocrData.file_path,
     file_hash: ocrData.file_hash,
@@ -242,9 +288,21 @@ function hydrateEntry(entry, ocrData) {
   entry.tin = entry.ocrData.tin
   entry.invoiceNumber = entry.ocrData.invoiceNumber
   entry.location = entry.ocrData.location
+  entry.categoryId = categoryId
+  entry.category = ocrData.category?.name ?? entry.category ?? ''
+  entry.eventType = eventType
+  entry.vatClassification = vatClassification
+  entry.currency = ocrData.currency || entry.currency || 'PHP'
+  entry.discountType = discountType
+  entry.discountAmount = entry.ocrData.discount_amount
   entry.amount = Number(entry.ocrData.amount) || 0
-  entry.tax = entry.ocrData.vat ? String(entry.ocrData.vat) : '0.00'
-  entry.subtotal = (Math.max(Number(entry.amount || 0) - Number(entry.tax || 0), 0)).toFixed(2)
+  entry.tax = vatClassification === 'non-vat'
+    ? '0.00'
+    : (entry.ocrData.vat !== '' && entry.ocrData.vat != null ? String(entry.ocrData.vat) : '0.00')
+  entry.subtotal = ocrData.subtotal != null && ocrData.subtotal !== ''
+    ? Number(ocrData.subtotal).toFixed(2)
+    : (Math.max(Number(entry.amount || 0) - Number(entry.tax || 0), 0)).toFixed(2)
+  entry.ocrData.subtotal = entry.subtotal
   if (Array.isArray(ocrData.items) && ocrData.items.length > 0) {
     entry.items = ocrData.items.map((item) => ({
       name: item.name || '',
@@ -255,6 +313,7 @@ function hydrateEntry(entry, ocrData) {
   entry.thumbnail = entry.previews?.[0] || null
   emit('ocr-result', entry.ocrData)
   emit('update:modelValue', files.value)
+  notifyMissingFieldsAfterTick(entry)
 }
 
 function startPolling(entry) {
@@ -303,7 +362,7 @@ function startPolling(entry) {
           entry.rejectionCode = data.rejection_code || (isDup ? 'duplicate' : 'quality_failed')
           entry.rejectionReason = data.rejection_reason || data.error || 'Receipt rejected.'
           if (isDup) {
-            window.dispatchEvent(new CustomEvent('receipt-duplicate-detected', { detail: { receiptId: data.id, message: entry.rejectionReason } }))
+            dispatchDuplicateDetected(entry)
           } else {
             qualityRejection.value = {
               entry,
@@ -330,6 +389,7 @@ function startPolling(entry) {
 async function retryOcr(entry) {
   if (!entry?.id) return
   entry.ocrStatus = 'processing'
+  entry.hasOcrReturned = false
   entry.rejectionCode = null
   entry.rejectionReason = null
   emit('update:modelValue', files.value)
@@ -375,7 +435,7 @@ async function simulateOCR(entry) {
           entry.ocrStatus = 'rejected'
           entry.rejectionCode = 'duplicate'
           entry.rejectionReason = errorBody.message || errorBody?.errors?.file_hash?.[0] || 'Duplicate receipt detected.'
-          window.dispatchEvent(new CustomEvent('receipt-duplicate-detected', { detail: { receiptId: entry.id, message: entry.rejectionReason } }))
+          dispatchDuplicateDetected(entry)
           emit('update:modelValue', files.value)
           emit('upload-error', { type: 'duplicate', message: entry.rejectionReason, code: 'duplicate', entry })
           return
@@ -422,7 +482,7 @@ async function simulateOCR(entry) {
           entry.rejectionCode === 'duplicate' ||
           String(entry.rejectionReason || '').toLowerCase().includes('duplicate')
         if (isDup) {
-          window.dispatchEvent(new CustomEvent('receipt-duplicate-detected', { detail: { receiptId: entry.id, message: entry.rejectionReason } }))
+          dispatchDuplicateDetected(entry)
         } else {
           qualityRejection.value = {
             entry,
@@ -453,6 +513,8 @@ async function simulateOCR(entry) {
 
 onBeforeUnmount(() => {
   window.removeEventListener('click', handleWindowClick)
+  window.removeEventListener('remove-duplicate-receipt', handleRemoveDuplicateEvent)
+  window.removeEventListener('open-receipt-upload', handleOpenReceiptUpload)
   pollTimers.forEach(clearInterval)
   pollTimers.clear()
 })

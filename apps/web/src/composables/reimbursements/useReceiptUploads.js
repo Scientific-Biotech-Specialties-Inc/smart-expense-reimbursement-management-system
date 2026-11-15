@@ -3,7 +3,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
 import {
   buildPrefilledReceiptDraft,
-  getMissingReceiptFields,
+  markOcrReturnedAndGetMissingWarning,
 } from "@/utils/receiptUtils";
 import { isOcrOfflineFailure } from "@/utils/ocrErrors";
 
@@ -54,13 +54,10 @@ export function useReceiptUploads(options = {}) {
   const { addToast } = useToast();
 
   function checkAndNotifyMissingFields(receipt) {
-    if (!receipt) return;
-    receipt.hasOcrReturned = true;
-    const missing = getMissingReceiptFields(receipt);
-    if (missing.length > 0) {
-      const fieldNames = missing.map((f) => f.label).join(", ");
+    const warning = markOcrReturnedAndGetMissingWarning(receipt);
+    if (warning) {
       addToast({
-        message: `Missing required field(s): ${fieldNames}`,
+        message: warning,
         type: "warning",
       });
     }
