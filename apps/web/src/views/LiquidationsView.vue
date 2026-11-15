@@ -1249,8 +1249,14 @@ function selectAdvance(adv) {
       if (existingLiq.report_template_data) {
         reportAttachment.value = null;
         isReportManualMode.value = false;
+        const isEditableStatus =
+          String(existingLiq.status || "").toLowerCase() === "revise";
         reportTemplateData.value = createDefaultTemplateData("liquidation", {
-          user: auth.user,
+          user: isEditableStatus
+            ? auth.user
+            : auth.user
+              ? { ...auth.user, signature: "" }
+              : null,
           receipts: receipts.value,
           allocatedAmount: Number(adv?.amount ?? adv?.balance ?? 0),
           utilizedAmount: totalExpenseAmount.value,

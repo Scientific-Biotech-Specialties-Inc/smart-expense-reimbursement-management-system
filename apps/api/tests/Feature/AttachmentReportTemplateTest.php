@@ -366,4 +366,25 @@ class AttachmentReportTemplateTest extends TestCase
         $this->assertNull($log->before_state['report_template_data']);
         $this->assertEquals($this->template, $log->after_state['report_template_data']);
     }
+
+    public function test_report_template_persists_signatory_signature_and_rejects_non_string(): void
+    {
+        $receipt = $this->makeReceipt('f');
+        $sig = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        $tplWithSig = array_merge($this->template, ['signatorySignature' => $sig]);
+
+        $response = $this->withHeaders($this->auth())->post('/api/reimbursements', $this->reimbursementPayload($receipt, [
+            'report_template_data' => json_encode($tplWithSig),
+        ]));
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.report_template_data.signatorySignature', $sig);
+
+        $bad = $this->withHeaders($this->auth())->post('/api/reimbursements', $this->reimbursementPayload($receipt, [
+            'report_template_data' => json_encode(array_merge($this->template, ['signatorySignature' => ['invalid']])),
+        ]));
+
+        $bad->assertStatus(422);
+        $bad->assertJsonValidationErrors('report_template_data.signatorySignature');
+    }
 }

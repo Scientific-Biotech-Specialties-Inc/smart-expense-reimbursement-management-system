@@ -12,6 +12,7 @@ import {
   CalendarDays,
 } from "lucide-vue-next";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import SbsiReportPreviewModal from "@/components/base/SbsiReportPreviewModal.vue";
 import { useToast } from "@/composables/useToast";
 import sbsiLogo from "@/assets/sbsi-logo.webp";
@@ -95,6 +96,12 @@ const templateData = ref(
 let lastEmitted = "";
 
 const doc = computed(() => buildTemplateParagraphs(templateData.value));
+const safeSignatureUrl = computed(() => {
+  const val = templateData.value?.signatorySignature;
+  if (typeof val !== "string") return "";
+  const trimmed = val.trim();
+  return /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=\s]+$/i.test(trimmed) ? trimmed : "";
+});
 const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
 // Single deep watcher: normalise the CA total, publish the model, and mirror shared fields upward.
@@ -507,7 +514,28 @@ const CHEVRON = "polygon(100% 0, 50% 0, 0 50%, 50% 100%, 100% 100%, 50% 50%)";
             <!-- Signatory -->
             <div class="mt-4 flex flex-col items-start gap-0.5" data-testid="signatory-block">
               <span>Respectfully yours,</span>
-              <span class="mt-8 tracking-widest" aria-hidden="true">_______________________</span>
+              <div v-if="editable" class="mt-3 w-full max-w-sm" data-testid="signatory-signature-pad">
+                <BaseSignaturePad
+                  v-model="templateData.signatorySignature"
+                  label="Signature"
+                  placeholder="Draw your signature here"
+                  height-class="h-24"
+                  max-width-class="max-w-sm"
+                  :center="false"
+                />
+              </div>
+              <img
+                v-else-if="safeSignatureUrl"
+                :src="safeSignatureUrl"
+                alt="Signatory signature"
+                data-testid="signatory-signature-image"
+                class="mt-2 h-16 max-w-[220px] object-contain"
+              />
+              <span
+                class="tracking-widest"
+                :class="editable || safeSignatureUrl ? 'mt-1' : 'mt-8'"
+                aria-hidden="true"
+              >_______________________</span>
               <template v-for="[key, bold] in [['signatoryName', true], ['signatoryRole', false], ['signatoryDepartment', false]]" :key="key">
                 <input
                   v-if="editable"

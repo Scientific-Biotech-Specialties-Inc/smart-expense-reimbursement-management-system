@@ -91,6 +91,7 @@ function userFields(user) {
     signatoryName: name || "",
     signatoryRole: user.position || user.job_title || user.title || user.role || "",
     signatoryDepartment: dept || "",
+    signatorySignature: user.signature || "",
   };
 }
 
@@ -135,6 +136,7 @@ function baseTemplate(type) {
     signatoryName: "",
     signatoryRole: "",
     signatoryDepartment: "",
+    signatorySignature: "",
   };
 }
 
