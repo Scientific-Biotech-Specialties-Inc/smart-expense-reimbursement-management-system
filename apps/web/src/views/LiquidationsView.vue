@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useCashAdvanceStore } from "@/stores/cashAdvance";
 import { useLiquidationStore } from "@/stores/liquidation";
@@ -26,6 +26,14 @@ import { useLiquidationDecisions } from "@/composables/liquidations/useLiquidati
 import { useLiquidationForwarding } from "@/composables/liquidations/useLiquidationForwarding";
 import { useLiquidationSubmit } from "@/composables/liquidations/useLiquidationSubmit";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
+import {
+  canonicalizeSnapshot,
+  isManualReportTemplate,
+  isRevisionStatus,
+  serializeFileAttachment,
+  serializeReceiptList,
+  serializeTemplateData,
+} from "@/composables/useRevisionGuard";
 import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
 import { formatPeso, formatDate, truncateText } from "@/utils/formatters";
 import { numberOrZero } from "@/utils/numbers";
@@ -78,48 +86,28 @@ const settlementModalStep = ref("form"); // "select" | "form"
 const canReturnToAdvanceList = ref(false);
 
 function liquidationDraftSignature() {
-  return JSON.stringify({
-    receipts: receipts.value.map((r) => ({
-      id: r.id ?? null,
-      name: r.name ?? "",
-      fileName: r.fileName ?? "",
-      merchantName: r.merchantName ?? "",
-      date: r.date ?? "",
-      tin: r.tin ?? "",
-      invoiceNumber: r.invoiceNumber ?? "",
-      location: r.location ?? "",
-      currency: r.currency ?? "",
-      vatClassification: r.vatClassification ?? "",
-      category: r.category ?? "",
-      categoryId: r.categoryId ?? null,
-      subtotal: r.subtotal ?? "",
-      tax: r.tax ?? "",
-      amount: r.amount ?? null,
-      filePath: r.filePath ?? null,
-      items: (r.items || []).map((item) => ({
-        name: item.name ?? "",
-        qty: item.qty ?? null,
-        price: item.price ?? null,
-      })),
-    })),
-    reportAttachment:
-      reportAttachment.value && typeof reportAttachment.value === "object"
-        ? reportAttachment.value.name ||
-          reportAttachment.value.fileName ||
-          "attached"
-        : reportAttachment.value,
-    reportTemplateData: reportTemplateData.value,
-    isReportManualMode: isReportManualMode.value,
-    shortfallExplanation: shortfallExplanation.value,
-  });
+  return JSON.stringify(
+    canonicalizeSnapshot({
+      receipts: serializeReceiptList(receipts.value),
+      reportAttachment: serializeFileAttachment(reportAttachment.value),
+      reportTemplateData: serializeTemplateData(reportTemplateData.value),
+      isReportManualMode: isReportManualMode.value,
+      shortfallExplanation: shortfallExplanation.value,
+    }),
+  );
 }
 const hydrationSignature = ref(liquidationDraftSignature());
+let baselineSyncToken = 0;
 
 const isDirty = computed(() => {
   // Do not blanket-force view mode clean: a hydrated baseline already keeps
   // untouched records clean while still catching real field edits.
   return liquidationDraftSignature() !== hydrationSignature.value;
 });
+
+const isLiquidationUnchangedRevision = computed(
+  () => isRevisionStatus(existingLiquidation.value?.status) && !isDirty.value,
+);
 
 const {
   showConfirmModal,
@@ -1025,6 +1013,7 @@ const showSubmitConfirmModal = ref(false);
 
 function promptSubmitLiquidation() {
   if (settlementModalMode.value === "view") return;
+  if (isLiquidationUnchangedRevision.value) return;
   // Preview-only until acknowledged / Phase 2 — block submit with feedback
   if (!selectedAdvanceCanLiquidate.value) {
     addToast({
@@ -1048,6 +1037,7 @@ function handleCancelSubmit() {
 }
 
 async function submitLiquidation() {
+  if (isLiquidationUnchangedRevision.value) return;
   // Preview-only until acknowledged / Phase 2 — block submit with feedback
   if (!selectedAdvanceCanLiquidate.value) {
     addToast({
@@ -1246,7 +1236,10 @@ function selectAdvance(adv) {
         receipts.value = [];
       }
 
-      if (existingLiq.report_template_data) {
+      if (
+        existingLiq.report_template_data &&
+        !isManualReportTemplate(existingLiq.report_template_data)
+      ) {
         reportAttachment.value = null;
         isReportManualMode.value = false;
         const isEditableStatus =
@@ -1276,6 +1269,10 @@ function selectAdvance(adv) {
       } else if (existingLiq.report_file_path) {
         reportTemplateData.value = null;
         reportAttachment.value = existingLiq.report_file_path;
+        isReportManualMode.value = true;
+      } else if (isManualReportTemplate(existingLiq.report_template_data)) {
+        reportTemplateData.value = { mode: "manual" };
+        reportAttachment.value = null;
         isReportManualMode.value = true;
       } else {
         reportAttachment.value = null;
@@ -1322,7 +1319,31 @@ function selectAdvance(adv) {
       });
     }
 
+    const token = ++baselineSyncToken;
+    const preMountCore = JSON.stringify(
+      canonicalizeSnapshot({
+        receipts: serializeReceiptList(receipts.value),
+        reportAttachment: serializeFileAttachment(reportAttachment.value),
+        shortfallExplanation: shortfallExplanation.value,
+      }),
+    );
     hydrationSignature.value = liquidationDraftSignature();
+
+    nextTick()
+      .then(() => nextTick())
+      .then(() => {
+        if (token !== baselineSyncToken) return;
+        const postMountCore = JSON.stringify(
+          canonicalizeSnapshot({
+            receipts: serializeReceiptList(receipts.value),
+            reportAttachment: serializeFileAttachment(reportAttachment.value),
+            shortfallExplanation: shortfallExplanation.value,
+          }),
+        );
+        if (postMountCore === preMountCore) {
+          hydrationSignature.value = liquidationDraftSignature();
+        }
+      });
   });
 }
 
@@ -2010,6 +2031,7 @@ onMounted(async () => {
             :disabled="
               settlementModalMode === 'view' || !selectedAdvanceCanLiquidate
             "
+            :has-changes="isDirty"
             :has-incomplete-receipt-fields="hasIncompleteReceiptFields"
             @reload-console="handleReloadConsole"
             @upload-error="handleReceiptUploadError"

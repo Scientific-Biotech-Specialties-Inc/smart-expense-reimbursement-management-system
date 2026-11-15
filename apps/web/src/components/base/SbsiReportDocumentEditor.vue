@@ -53,6 +53,7 @@ const emit = defineEmits([
   "update:totalAmount",
   "update:disbursementDate",
   "update:liquidationDeadline",
+  "update:mode",
 ]);
 
 const { addToast } = useToast();
@@ -70,8 +71,24 @@ const BLUE = "#004AAD";
 const editable = computed(() => !props.disabled && !props.readonly);
 const isCashAdvance = computed(() => props.type === "cash-advance");
 
-// Mode: template by default; manual only when a pre-existing file arrives without template data.
-const mode = ref(props.reportFile && !props.modelValue ? "manual" : "template");
+const isManualModelMarker = (val) =>
+  Boolean(val) &&
+  typeof val === "object" &&
+  String(val.mode || "").trim().toLowerCase() === "manual";
+
+// Mode: template by default; manual when explicitly marked or a pre-existing file arrives without template data.
+const mode = ref(
+  isManualModelMarker(props.modelValue) || (props.reportFile && !props.modelValue)
+    ? "manual"
+    : "template",
+);
+watch(
+  mode,
+  (nextMode) => {
+    emit("update:mode", nextMode);
+  },
+  { immediate: true },
+);
 const manualFile = ref(null);
 const dragging = ref(false);
 const fileInput = ref(null);
@@ -91,7 +108,10 @@ const context = () => ({
 });
 
 const templateData = ref(
-  createDefaultTemplateData(props.type, { ...context(), existingData: props.modelValue }),
+  createDefaultTemplateData(props.type, {
+    ...context(),
+    existingData: isManualModelMarker(props.modelValue) ? null : props.modelValue,
+  }),
 );
 let lastEmitted = "";
 
@@ -104,30 +124,35 @@ const safeSignatureUrl = computed(() => {
 });
 const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
+function publishTemplateModel(data) {
+  if (isCashAdvance.value) {
+    const sum = round2(data.breakdownItems.reduce((s, i) => s + (Number(i.amount) || 0), 0));
+    if (sum !== data.totalAmount) {
+      data.totalAmount = sum;
+      return; // re-triggers once with the normalised value
+    }
+    if (sum !== round2(props.totalAmount)) emit("update:totalAmount", sum);
+  }
+  const json = JSON.stringify(data);
+  if (json !== lastEmitted) {
+    lastEmitted = json;
+    emit("update:modelValue", JSON.parse(json));
+  }
+  if (data.purpose !== props.purpose) emit("update:purpose", data.purpose);
+  if (props.type !== "reimbursement" && data.disbursementDate !== props.disbursementDate) {
+    emit("update:disbursementDate", data.disbursementDate);
+  }
+  if (isCashAdvance.value && data.liquidationDeadline !== props.liquidationDeadline) {
+    emit("update:liquidationDeadline", data.liquidationDeadline);
+  }
+}
+
 // Single deep watcher: normalise the CA total, publish the model, and mirror shared fields upward.
 watch(
   templateData,
   (data) => {
-    if (isCashAdvance.value) {
-      const sum = round2(data.breakdownItems.reduce((s, i) => s + (Number(i.amount) || 0), 0));
-      if (sum !== data.totalAmount) {
-        data.totalAmount = sum;
-        return; // re-triggers once with the normalised value
-      }
-      if (sum !== round2(props.totalAmount)) emit("update:totalAmount", sum);
-    }
-    const json = JSON.stringify(data);
-    if (json !== lastEmitted) {
-      lastEmitted = json;
-      emit("update:modelValue", JSON.parse(json));
-    }
-    if (data.purpose !== props.purpose) emit("update:purpose", data.purpose);
-    if (props.type !== "reimbursement" && data.disbursementDate !== props.disbursementDate) {
-      emit("update:disbursementDate", data.disbursementDate);
-    }
-    if (isCashAdvance.value && data.liquidationDeadline !== props.liquidationDeadline) {
-      emit("update:liquidationDeadline", data.liquidationDeadline);
-    }
+    if (mode.value === "manual") return;
+    publishTemplateModel(data);
   },
   { deep: true, immediate: true },
 );
@@ -144,19 +169,61 @@ watch(
     props.liquidationDeadline,
     props.recordId,
   ],
-  () => {
-    templateData.value = syncTemplateWithContext(templateData.value, context());
+  (
+    [, , , , , nextPurpose, nextDisbursement, nextLiquidation],
+    [, , , , , prevPurpose, prevDisbursement, prevLiquidation],
+  ) => {
+    const synced = syncTemplateWithContext(templateData.value, context());
+    // syncTemplateWithContext skips empty strings so omitted defaults don't clobber saved templates;
+    // when the parent actively changes a bound prop to "", propagate the clear so user edits aren't reverted.
+    if (nextPurpose !== prevPurpose) {
+      synced.purpose = typeof nextPurpose === "string" ? nextPurpose : "";
+    }
+    if (nextDisbursement !== prevDisbursement) {
+      synced.disbursementDate = nextDisbursement ? String(nextDisbursement).slice(0, 10) : "";
+    }
+    if (nextLiquidation !== prevLiquidation) {
+      synced.liquidationDeadline = nextLiquidation ? String(nextLiquidation).slice(0, 10) : "";
+    }
+    templateData.value = synced;
   },
   { deep: true },
 );
 
 watch(
   () => props.modelValue,
-  (incoming) => {
-    if (!incoming || JSON.stringify(incoming) === lastEmitted) return;
+  (incoming, prevIncoming) => {
+    if (!incoming) {
+      lastEmitted = "";
+      if (props.reportFile) mode.value = "manual";
+      return;
+    }
+    if (isManualModelMarker(incoming)) {
+      lastEmitted = "";
+      mode.value = "manual";
+      return;
+    }
+    if (!prevIncoming || isManualModelMarker(prevIncoming)) {
+      mode.value = "template";
+    }
+    if (JSON.stringify(incoming) === lastEmitted) return;
     templateData.value = createDefaultTemplateData(props.type, { ...context(), existingData: incoming });
   },
   { deep: true },
+);
+
+watch(
+  () => props.reportFile,
+  (incomingFile) => {
+    if (!incomingFile) {
+      manualFile.value = null;
+      return;
+    }
+    if (!props.modelValue || isManualModelMarker(props.modelValue)) {
+      mode.value = "manual";
+    }
+  },
+  { immediate: true },
 );
 
 watch(
@@ -169,9 +236,12 @@ watch(
 function setMode(next) {
   if (props.disabled || mode.value === next) return;
   mode.value = next;
-  if (next === "template" && manualFile.value) {
-    manualFile.value = null;
-    emit("update:reportFile", null);
+  if (next === "template") {
+    if (manualFile.value || props.reportFile) {
+      manualFile.value = null;
+      emit("update:reportFile", null);
+    }
+    publishTemplateModel(templateData.value);
   }
 }
 

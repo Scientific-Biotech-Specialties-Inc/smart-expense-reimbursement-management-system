@@ -23,6 +23,14 @@ import ConfirmModal from "@/components/base/ConfirmModal.vue";
 import { useReceiptUploads } from "@/composables/reimbursements/useReceiptUploads";
 import { useReimbursementSubmit } from "@/composables/reimbursements/useReimbursementSubmit";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
+import {
+  useRevisionGuard,
+  isManualReportTemplate,
+  isRevisionStatus,
+  serializeFileAttachment,
+  serializeReceiptList,
+  serializeTemplateData,
+} from "@/composables/useRevisionGuard";
 import { isOcrOfflineFailure } from "@/utils/ocrErrors";
 
 import {
@@ -65,12 +73,13 @@ const reportFile = ref(null);
 const reportTemplateData = ref(
   props.id ? null : createDefaultTemplateData("reimbursement", { user: auth?.user }),
 );
+const isManualMode = ref(false);
 const userComment = ref("");
 const fetching = ref(false);
 const existingStatus = ref("");
 const adminNotes = ref("");
 const revisionCount = ref(0);
-const isReviseMode = computed(() => existingStatus.value === "revise");
+const isReviseMode = computed(() => isRevisionStatus(existingStatus.value));
 const storedForwardedReceipts = ref([]);
 const forwardedSource = ref("My Expense");
 const FORWARDED_RECEIPTS_KEY = "serms_forwarded_reimbursement_receipts";
@@ -176,11 +185,21 @@ const totalVat = computed(() =>
   receipts.value.reduce((sum, r) => sum + (Number(r.tax) || 0), 0),
 );
 
+const effectiveManualMode = computed(
+  () =>
+    isManualMode.value ||
+    isManualReportTemplate(reportTemplateData.value) ||
+    (Boolean(reportFile.value) && !reportTemplateData.value),
+);
+
 const hasValidReport = computed(() => {
-  if (reportTemplateData.value && reportTemplateData.value.mode !== "manual") {
+  if (effectiveManualMode.value) {
+    return Boolean(reportFile.value);
+  }
+  if (reportTemplateData.value) {
     return validateTemplateData(reportTemplateData.value).valid || Boolean(reportFile.value);
   }
-  return Boolean(reportFile.value) || isEditMode.value;
+  return Boolean(reportFile.value);
 });
 
 const canProceed = computed(
@@ -198,6 +217,20 @@ const canProceed = computed(
         (isEditMode.value || r.eventType),
     ),
 );
+
+const {
+  isRevisionUnchanged,
+  captureBaseline: captureRevisionBaseline,
+} = useRevisionGuard({
+  isRevise: isReviseMode,
+  getSnapshot: () => ({
+    receipts: serializeReceiptList(receipts.value),
+    reportFile: serializeFileAttachment(reportFile.value),
+    reportTemplateData: serializeTemplateData(reportTemplateData.value),
+    userComment: userComment.value,
+    isManualMode: effectiveManualMode.value,
+  }),
+});
 
 const isDirty = computed(() => {
   const hasTemplatePurpose = Boolean(reportTemplateData.value?.purpose?.trim());
@@ -236,10 +269,15 @@ const { submitting, submitReimbursement, updateReimbursement } = useReimbursemen
 const showSubmitConfirmModal = ref(false);
 
 function promptSubmit() {
+  if (!canProceed.value || submitting.value || isRevisionUnchanged.value) return;
   showSubmitConfirmModal.value = true;
 }
 
 function handleConfirmSubmit() {
+  if (!canProceed.value || submitting.value || isRevisionUnchanged.value) {
+    showSubmitConfirmModal.value = false;
+    return;
+  }
   showSubmitConfirmModal.value = false;
   handleSubmit();
 }
@@ -316,18 +354,25 @@ onMounted(async () => {
 
   if (isEditMode.value) {
     fetching.value = true;
+    let hydrated = false;
     try {
       const data = await reimbursementStore.fetchOne(props.id);
-      if (data.report_template_data) {
+      if (
+        data.report_template_data &&
+        !isManualReportTemplate(data.report_template_data)
+      ) {
         reportTemplateData.value = {
           ...data.report_template_data,
           mode: data.report_template_data.mode || "template",
         };
-        reportFile.value =
-          data.report_template_data.mode === "manual" ? data.report_file_path || null : null;
+        reportFile.value = null;
+        isManualMode.value = false;
       } else {
         reportFile.value = data.report_file_path || null;
         reportTemplateData.value = null;
+        isManualMode.value = Boolean(
+          data.report_file_path || isManualReportTemplate(data.report_template_data),
+        );
       }
       userComment.value = data.user_comment || "";
       existingStatus.value = data.status || "";
@@ -400,6 +445,7 @@ onMounted(async () => {
           };
         });
       }
+      hydrated = true;
     } catch (error) {
       addToast({
         message: "Failed to load reimbursement details.",
@@ -408,6 +454,11 @@ onMounted(async () => {
       router.push("/reimbursements");
     } finally {
       fetching.value = false;
+    }
+    if (hydrated) {
+      await nextTick();
+      await nextTick();
+      captureRevisionBaseline();
     }
   }
 
@@ -587,6 +638,7 @@ function dismiss() {
           :receipts="receipts"
           :total-amount="totalAmount"
           :record-id="props.id"
+          @update:is-manual-mode="isManualMode = $event"
         />
 
         <ReimbursementSummaryPanel
@@ -600,7 +652,7 @@ function dismiss() {
         <div class="flex justify-end gap-4 pb-4">
           <button
             class="btn btn-primary btn-cta min-h-[42px] w-full sm:w-fit disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="!canProceed || submitting"
+            :disabled="!canProceed || submitting || isRevisionUnchanged"
             @click="promptSubmit"
           >
             <span

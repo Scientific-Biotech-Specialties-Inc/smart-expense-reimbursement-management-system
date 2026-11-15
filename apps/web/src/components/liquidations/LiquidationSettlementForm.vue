@@ -25,6 +25,14 @@ import { formatPeso, formatDate } from "@/utils/formatters";
 import { apiFetch } from "@/utils/apiFetch";
 import { getFileUrl } from "@/utils/fileUtils";
 import { validateTemplateData } from "@/utils/sbsiReportTemplateUtils";
+import {
+  useRevisionGuard,
+  isRevisionStatus,
+  isManualReportTemplate,
+  serializeFileAttachment,
+  serializeReceiptList,
+  serializeTemplateData,
+} from "@/composables/useRevisionGuard";
 
 const props = defineProps({
   auditTrail: {
@@ -95,6 +103,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  hasChanges: {
+    type: Boolean,
+    default: undefined,
+  },
   disabled: {
     type: Boolean,
     default: false,
@@ -115,9 +127,26 @@ const emit = defineEmits([
   "submit-liquidation",
 ]);
 
-const reportEditorRef = ref(null);
 const localTemplateData = ref(props.reportTemplateData);
 const localManualMode = ref(props.isManualMode);
+const localManualAttachment = ref(null);
+
+watch(
+  [() => props.reportAttachment, () => props.existingLiquidation?.id],
+  ([nextFile]) => {
+    if (!nextFile) {
+      localManualAttachment.value = null;
+      return;
+    }
+    const isFileInstance = typeof File !== "undefined" && nextFile instanceof File;
+    const isManualContext =
+      Boolean(props.isManualMode) ||
+      !props.reportTemplateData ||
+      isManualReportTemplate(props.reportTemplateData);
+    localManualAttachment.value = isFileInstance || isManualContext ? nextFile : null;
+  },
+  { immediate: true },
+);
 
 watch(
   () => props.reportTemplateData,
@@ -136,7 +165,7 @@ watch(
 );
 
 const effectiveTemplateData = computed(() => props.reportTemplateData ?? localTemplateData.value);
-const effectiveManualMode = computed(() => props.isManualMode || localManualMode.value);
+const effectiveManualMode = computed(() => localManualMode.value);
 const isTemplateValid = computed(() => validateTemplateData(effectiveTemplateData.value).valid);
 
 const disbursementDateValue = computed(() => {
@@ -152,15 +181,19 @@ const disbursementDateValue = computed(() => {
   return raw ? String(raw).slice(0, 10) : "";
 });
 
-function syncEditorMode() {
-  nextTick(() => {
-    const manualBtn = reportEditorRef.value?.$el?.querySelector('[data-testid="mode-manual"]');
-    if (manualBtn) {
-      const next = manualBtn.getAttribute("aria-pressed") === "true";
-      localManualMode.value = next;
-      emit("update:isManualMode", next);
+function handleEditorModeUpdate(nextMode) {
+  const next = nextMode === "manual";
+  const wasManual = localManualMode.value || props.isManualMode;
+  localManualMode.value = next;
+  emit("update:isManualMode", next);
+  if (!next) {
+    const hadAttachment = Boolean(localManualAttachment.value);
+    localManualAttachment.value = null;
+    if (wasManual && hadAttachment) {
+      emit("update:reportAttachment", null);
+      emit("file-cleared");
     }
-  });
+  }
 }
 
 function handleTemplateModelUpdate(val) {
@@ -169,13 +202,13 @@ function handleTemplateModelUpdate(val) {
 }
 
 function handleReportFileUpdate(file) {
+  localManualAttachment.value = file || null;
   emit("update:reportAttachment", file);
   if (file) {
     localManualMode.value = true;
     emit("update:isManualMode", true);
   } else {
     emit("file-cleared");
-    syncEditorMode();
   }
 }
 
@@ -196,6 +229,56 @@ const normalizeStatus = (val) =>
     .toLowerCase()
     .trim()
     .replace(/[\s/_-]+/g, "-");
+
+const isLiquidationReviseMode = computed(() =>
+  isRevisionStatus(props.existingLiquidation?.status),
+);
+
+const {
+  isRevisionUnchanged: internalRevisionUnchanged,
+  captureBaseline: captureInternalRevisionBaseline,
+  clearBaseline: clearInternalRevisionBaseline,
+} = useRevisionGuard({
+  isRevise: isLiquidationReviseMode,
+  getSnapshot: () => ({
+    receipts: serializeReceiptList(props.receipts),
+    reportAttachment: serializeFileAttachment(localManualAttachment.value),
+    reportTemplateData: serializeTemplateData(
+      localTemplateData.value ?? props.reportTemplateData,
+    ),
+    isManualMode: Boolean(effectiveManualMode.value),
+    shortfallExplanation: props.shortfallExplanation || "",
+  }),
+});
+
+let internalBaselineToken = 0;
+watch(
+  [
+    () => props.existingLiquidation?.id ?? null,
+    () => props.existingLiquidation?.status ?? "",
+    () => props.selectedAdvance?.id ?? null,
+    () => props.hasChanges,
+  ],
+  async () => {
+    if (props.hasChanges !== undefined) return;
+    const token = ++internalBaselineToken;
+    clearInternalRevisionBaseline();
+    await nextTick();
+    await nextTick();
+    if (token === internalBaselineToken) {
+      captureInternalRevisionBaseline();
+    }
+  },
+  { immediate: true },
+);
+
+const isUnchangedRevision = computed(() => {
+  if (!isLiquidationReviseMode.value) return false;
+  if (props.hasChanges !== undefined) {
+    return !props.hasChanges;
+  }
+  return internalRevisionUnchanged.value;
+});
 
 const resolvedAuditTrail = computed(() => {
   if (props.existingLiquidation?.audit_trail?.length) {
@@ -658,7 +741,6 @@ const normalizedViewReceipt = computed(() => {
     <section
       class="p-5 sm:p-6 bg-white border rounded-2xl border-slate-200/90 shadow-sm space-y-4"
       data-testid="liquidation-report-attachment-card"
-      @click="syncEditorMode"
     >
       <div class="flex items-center justify-between">
         <label class="input-label !mb-0">
@@ -668,10 +750,9 @@ const normalizedViewReceipt = computed(() => {
       </div>
 
       <SbsiReportDocumentEditor
-        ref="reportEditorRef"
         type="liquidation"
         :model-value="effectiveTemplateData"
-        :report-file="reportAttachment"
+        :report-file="localManualAttachment"
         :receipts="receipts"
         :allocated-amount="selectedAdvance?.amount ?? selectedAdvance?.balance ?? 0"
         :utilized-amount="totalExpenseAmount"
@@ -683,6 +764,7 @@ const normalizedViewReceipt = computed(() => {
         :readonly="isFormDisabled"
         @update:model-value="handleTemplateModelUpdate"
         @update:report-file="handleReportFileUpdate"
+        @update:mode="handleEditorModeUpdate"
       />
 
       <div class="pt-2 border-t border-slate-100 space-y-2">
@@ -856,13 +938,14 @@ const normalizedViewReceipt = computed(() => {
         class="h-[42px] w-full sm:w-auto sm:min-w-[120px]"
         :disabled="
           isFormDisabled ||
+          isUnchangedRevision ||
           receipts.length === 0 ||
           hasIncompleteReceiptFields ||
           receipts.some((r) => r.ocrStatus === 'processing') ||
           totalExpenseAmount === 0 ||
           submitting ||
           (effectiveManualMode
-            ? !reportAttachment || (variance > 0 && !shortfallExplanation.trim())
+            ? !localManualAttachment || (variance > 0 && !shortfallExplanation.trim())
             : !isTemplateValid)
         "
         @click="$emit('submit-liquidation')"
