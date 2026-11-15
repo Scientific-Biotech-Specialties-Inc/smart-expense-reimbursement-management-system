@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from "vue";
+import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import {
   Bell,
@@ -9,7 +9,6 @@ import {
   AlertCircle,
   Clock,
   ArrowRight,
-  Settings,
 } from "lucide-vue-next";
 import { useNotificationStore } from "@/stores/notification";
 
@@ -19,8 +18,15 @@ const emit = defineEmits(["close"]);
 const store = useNotificationStore();
 const router = useRouter();
 
+const activeTab = ref("all");
 const unread = computed(() => store.unreadCount);
-const latestAlerts = computed(() => store.alerts.slice(0, 8));
+const latestAlerts = computed(() => {
+  const list =
+    activeTab.value === "unread"
+      ? store.alerts.filter((a) => !a.read)
+      : store.alerts;
+  return list.slice(0, 8);
+});
 
 const iconMap = {
   warning: { icon: AlertTriangle, cls: "text-amber-600 border-amber-200 bg-amber-50" },
@@ -97,6 +103,53 @@ function handleViewAll() {
         </button>
       </div>
 
+      <!-- Tabs -->
+      <div
+        role="tablist"
+        aria-label="Notification filter"
+        class="flex items-center gap-1 px-4 py-2 border-b border-slate-100 bg-white"
+      >
+        <button
+          type="button"
+          role="tab"
+          data-testid="notif-tab-all"
+          :aria-selected="activeTab === 'all'"
+          :class="[
+            'px-2.5 py-1 rounded-md text-xs font-semibold transition-colors',
+            activeTab === 'all'
+              ? 'bg-primary text-white shadow-sm'
+              : 'text-slate-600 hover:bg-slate-100',
+          ]"
+          @click="activeTab = 'all'"
+        >
+          All
+        </button>
+        <button
+          type="button"
+          role="tab"
+          data-testid="notif-tab-unread"
+          :aria-selected="activeTab === 'unread'"
+          :class="[
+            'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-colors',
+            activeTab === 'unread'
+              ? 'bg-primary text-white shadow-sm'
+              : 'text-slate-600 hover:bg-slate-100',
+          ]"
+          @click="activeTab = 'unread'"
+        >
+          <span>Unread</span>
+          <span
+            v-if="unread > 0"
+            :class="[
+              'text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none',
+              activeTab === 'unread' ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary',
+            ]"
+          >
+            {{ unread }}
+          </span>
+        </button>
+      </div>
+
       <!-- Notification List -->
       <div class="max-h-[380px] overflow-y-auto divide-y divide-slate-100">
         <div
@@ -104,7 +157,9 @@ function handleViewAll() {
           class="py-12 px-4 flex flex-col items-center justify-center text-center"
         >
           <Clock class="w-6 h-6 text-slate-300 mb-2" />
-          <p class="text-xs font-medium text-slate-400">No notifications yet</p>
+          <p class="text-xs font-medium text-slate-400">
+            {{ activeTab === "unread" ? "No unread notifications" : "No notifications yet" }}
+          </p>
         </div>
 
         <div
@@ -147,17 +202,7 @@ function handleViewAll() {
       </div>
 
       <!-- Footer Link -->
-      <div class="px-4 py-2.5 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-        <button
-          type="button"
-          data-testid="panel-notification-settings"
-          class="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-primary transition-colors py-1"
-          @click="emit('close'); router.push('/settings/notifications')"
-        >
-          <Settings class="w-3.5 h-3.5" />
-          <span>Settings</span>
-        </button>
-
+      <div class="px-4 py-2.5 bg-slate-50 border-t border-slate-100 flex items-center justify-center">
         <button
           type="button"
           data-testid="view-all-notifications"
