@@ -7,15 +7,15 @@ describe("buildNavLinks", () => {
     expect(links.some((l) => l.name === "My Expense" && l.to === "/my-expense")).toBe(true);
   });
 
-  it("includes the base operator links first", () => {
+  it("places Payout directly below Cash Advances for all users", () => {
     const links = buildNavLinks();
     expect(links.map((l) => l.name).filter(Boolean)).toEqual([
       "Dashboard",
       "Reimbursements",
       "Cash Advances",
+      "Payout",
       "Liquidations",
       "My Expense",
-      "Payout",
     ]);
   });
 });
