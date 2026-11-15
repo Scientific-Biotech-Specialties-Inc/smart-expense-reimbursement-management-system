@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import LiquidationSettlementForm from "./LiquidationSettlementForm.vue";
 import ScannedReceiptsList from "@/components/reimbursements/ScannedReceiptsList.vue";
@@ -316,5 +317,129 @@ describe("LiquidationSettlementForm — Receipt Grid vs Form List", () => {
 
     const submitBtn = wrapper.find("#submit-liquidation-btn");
     expect(submitBtn.attributes("disabled")).toBeDefined();
+  });
+
+  it("does not clear template attachment on initial mount and guards standalone revise template/manual transitions", async () => {
+    const validTemplate = {
+      type: "liquidation",
+      date: "2026-10-12",
+      recipientName: "Lourdes C. Roxas",
+      salutation: "Dear Ms. Roxas,",
+      subject: "LIQUIDATION REPORT FOR CASH ADVANCE",
+      purpose: "Client Conference",
+      disbursementDate: "2026-10-10",
+      allocatedAmount: 5000,
+      utilizedAmount: 5000,
+      variance: 0,
+      breakdownItems: [{ description: "Venue", amount: 5000 }],
+      signatoryName: "Juan Dela Cruz",
+    };
+
+    const wrapper = mount(LiquidationSettlementForm, {
+      props: {
+        selectedAdvance: sampleAdvance,
+        disabled: false,
+        receipts: sampleReceipts,
+        totalExpenseAmount: 5000,
+        variance: 0,
+        existingLiquidation: {
+          id: 9,
+          status: "revise",
+          receipts: sampleReceipts,
+          report_template_data: validTemplate,
+          report_file_path: "liquidations/generated.pdf",
+          shortfall_explanation: "",
+        },
+        reportTemplateData: validTemplate,
+        reportAttachment: { name: "generated.pdf", path: "liquidations/generated.pdf" },
+        isManualMode: false,
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          FileUpload: true,
+          ReceiptImagePreview: true,
+          StatusBadge: true,
+          BaseReceiptDetailModal: true,
+          ImagePreviewModal: true,
+          BaseSignaturePad: true,
+        },
+      },
+    });
+    await nextTick();
+    await nextTick();
+
+    // Must not fire file-cleared on initial template mount
+    expect(wrapper.emitted("file-cleared")).toBeUndefined();
+    expect(wrapper.emitted("update:reportAttachment")).toBeUndefined();
+
+    const submitBtn = wrapper.find("#submit-liquidation-btn");
+    expect(submitBtn.attributes("disabled")).toBeDefined();
+
+    // Switching Template -> Manual without a newly uploaded file must keep submit disabled
+    await wrapper.find('[data-testid="mode-manual"]').trigger("click");
+    await nextTick();
+    expect(submitBtn.attributes("disabled")).toBeDefined();
+
+    // Uploading a manual File enables submit
+    const file = new File(["manual pdf"], "manual-liq.pdf", { type: "application/pdf" });
+    await wrapper.setProps({ reportAttachment: file, isManualMode: true });
+    await nextTick();
+    expect(submitBtn.attributes("disabled")).toBeUndefined();
+
+    // Switching Manual -> Template clears attachment and re-disables submit
+    await wrapper.find('[data-testid="mode-template"]').trigger("click");
+    await wrapper.setProps({ reportAttachment: null, isManualMode: false });
+    await nextTick();
+    expect(wrapper.emitted("update:reportAttachment")).toContainEqual([null]);
+    expect(wrapper.emitted("file-cleared")).toBeTruthy();
+    expect(submitBtn.attributes("disabled")).toBeDefined();
+  });
+
+  it("emits update:reportAttachment(null) and file-cleared when stubbed editor switches from manual to template", async () => {
+    const StubEditor = {
+      name: "SbsiReportDocumentEditor",
+      props: ["modelValue", "reportFile"],
+      emits: ["update:modelValue", "update:reportFile", "update:mode"],
+      template: `<div><button data-testid="emit-template" @click="$emit('update:mode', 'template')">T</button></div>`,
+    };
+
+    const wrapper = mount(LiquidationSettlementForm, {
+      props: {
+        selectedAdvance: sampleAdvance,
+        receipts: sampleReceipts,
+        totalExpenseAmount: 1700,
+        variance: 3300,
+        existingLiquidation: {
+          id: 9,
+          status: "revise",
+          receipts: sampleReceipts,
+          report_template_data: { mode: "manual" },
+          report_file_path: "liquidations/manual.pdf",
+          shortfall_explanation: "Returning balance",
+        },
+        reportTemplateData: { mode: "manual" },
+        reportAttachment: { name: "manual.pdf", path: "liquidations/manual.pdf" },
+        isManualMode: true,
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          FileUpload: true,
+          ReceiptImagePreview: true,
+          StatusBadge: true,
+          BaseReceiptDetailModal: true,
+          ImagePreviewModal: true,
+          SbsiReportDocumentEditor: StubEditor,
+        },
+      },
+    });
+    await nextTick();
+    await wrapper.find('[data-testid="emit-template"]').trigger("click");
+    await nextTick();
+
+    expect(wrapper.emitted("update:isManualMode")).toContainEqual([false]);
+    expect(wrapper.emitted("update:reportAttachment")).toContainEqual([null]);
+    expect(wrapper.emitted("file-cleared")).toBeTruthy();
   });
 });
