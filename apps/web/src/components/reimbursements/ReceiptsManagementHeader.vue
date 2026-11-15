@@ -30,7 +30,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="card p-6">
+  <section class="card p-6 relative z-30">
     <div
       class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
     >
@@ -81,7 +81,7 @@ onBeforeUnmount(() => {
           >
             <div
               v-if="isDropdownOpen"
-              class="absolute z-10 w-48 mt-2 origin-top-right right-0 bg-white divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+              class="absolute z-30 w-48 mt-2 origin-top-right right-0 bg-white divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
             >
               <div class="px-1 py-1">
                 <button
