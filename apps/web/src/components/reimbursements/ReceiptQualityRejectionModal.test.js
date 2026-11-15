@@ -66,4 +66,45 @@ describe("ReceiptQualityRejectionModal", () => {
     await overrideBtn.trigger("click");
     expect(wrapper.emitted("continue-anyway")).toHaveLength(1);
   });
+
+  it("portals above an open parent BaseModal at z-[100] and handles button clicks", async () => {
+    const { default: BaseModal } = await import("@/components/base/BaseModal.vue");
+    const wrapper = mount(
+      {
+        components: { BaseModal, ReceiptQualityRejectionModal },
+        data() {
+          return { parentOpen: true, qualityOpen: true };
+        },
+        template: `
+          <BaseModal :is-open="parentOpen" title="Settle Cash Advance">
+            <ReceiptQualityRejectionModal
+              :is-open="qualityOpen"
+              rejection-code="blurry"
+              rejection-reason="Blurry image"
+              @retake="qualityOpen = false"
+            />
+          </BaseModal>
+        `,
+      },
+      { attachTo: document.body }
+    );
+    await wrapper.vm.$nextTick();
+
+    const dialogs = Array.from(document.body.querySelectorAll('[role="dialog"]'));
+    expect(dialogs).toHaveLength(2);
+    const qualityDialog = dialogs[1];
+    expect(qualityDialog.classList.contains("z-[100]")).toBe(true);
+
+    const retakeBtn = Array.from(qualityDialog.querySelectorAll("button")).find(
+      (b) => b.textContent.includes("Upload New Receipt")
+    );
+    expect(retakeBtn).toBeDefined();
+    retakeBtn.click();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.vm.qualityOpen).toBe(false);
+    expect(wrapper.vm.parentOpen).toBe(true);
+    wrapper.unmount();
+    document.body.innerHTML = "";
+  });
 });

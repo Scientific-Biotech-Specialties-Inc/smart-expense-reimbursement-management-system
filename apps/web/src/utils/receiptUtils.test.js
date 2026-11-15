@@ -190,6 +190,25 @@ describe("getMissingReceiptFields and isReceiptFieldMissing", () => {
     };
     expect(isReceiptFieldMissing(receipt, "invoiceNumber")).toBe(true);
   });
+
+  it("markOcrReturnedAndGetMissingWarning sets hasOcrReturned and formats missing field labels", async () => {
+    const { markOcrReturnedAndGetMissingWarning } = await import("./receiptUtils");
+    const incomplete = {
+      ...completeReceipt,
+      invoiceNumber: "",
+      tin: "",
+      hasOcrReturned: false,
+    };
+    const warning = markOcrReturnedAndGetMissingWarning(incomplete);
+    expect(incomplete.hasOcrReturned).toBe(true);
+    expect(warning).toContain("Missing required field(s):");
+    expect(warning).toContain("Invoice Number");
+    expect(warning).toContain("TIN Number");
+
+    const full = { ...completeReceipt, hasOcrReturned: false };
+    expect(markOcrReturnedAndGetMissingWarning(full)).toBeNull();
+    expect(full.hasOcrReturned).toBe(true);
+  });
 });
 
 describe("itemGrossAmount and receiptGrossAmount (line-total price contract)", () => {

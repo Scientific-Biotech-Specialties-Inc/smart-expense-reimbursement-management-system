@@ -7,6 +7,7 @@ import {
   Camera,
   AlertCircle,
 } from "lucide-vue-next";
+import BaseModal from "@/components/base/BaseModal.vue";
 
 const props = defineProps({
   isOpen: {
@@ -137,14 +138,17 @@ const tips = computed(() => {
 </script>
 
 <template>
-  <Transition name="modal">
+  <BaseModal
+    :is-open="isOpen"
+    z-index-class="z-[100]"
+    max-width-class="max-w-2xl"
+    content-class="border border-red-100"
+    :title="headerTitle"
+    :description="headerSubtitle"
+  >
     <div
-      v-if="isOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+      class="flex max-h-[90vh] w-full flex-col overflow-hidden bg-white"
     >
-      <div
-        class="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-red-100 bg-white shadow-2xl animate-fade-up"
-      >
         <!-- Modal Header -->
         <header
           class="flex items-center justify-between border-b border-red-100 bg-red-50/70 px-6 py-4 text-red-950"
@@ -297,8 +301,7 @@ const tips = computed(() => {
           </div>
         </footer>
       </div>
-    </div>
-  </Transition>
+  </BaseModal>
 </template>
 
 <style scoped>
