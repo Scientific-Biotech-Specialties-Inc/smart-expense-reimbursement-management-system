@@ -70,7 +70,9 @@ function getActions(row) {
   ];
 }
 
-const tableMinWidth = computed(() => "min-w-full");
+const tableMinWidth = computed(() =>
+  props.isAdmin ? "min-w-[1120px]" : "min-w-[960px]",
+);
 </script>
 
 <template>
@@ -105,8 +107,10 @@ const tableMinWidth = computed(() => "min-w-full");
             <th
               v-for="column in columns"
               :key="column.key"
-              class="px-5 py-4 text-[11px] font-bold uppercase tracking-[0.08em]"
+              class="py-4 text-[11px] font-bold uppercase tracking-[0.08em]"
               :class="[
+                column.paddingClass || 'px-5',
+                column.widthClass,
                 column.align === 'right'
                   ? 'text-right'
                   : column.align === 'center'
@@ -119,10 +123,10 @@ const tableMinWidth = computed(() => "min-w-full");
                 class="inline-flex items-center gap-1.5 transition-colors hover:text-accent"
                 :class="
                   column.align === 'right'
-                    ? 'justify-end'
+                    ? 'justify-end text-right'
                     : column.align === 'center'
-                      ? 'justify-center'
-                      : 'justify-start'
+                      ? 'justify-center text-center'
+                      : 'justify-start text-left'
                 "
                 type="button"
                 @click="handleToggleSort(column)"
@@ -190,8 +194,11 @@ const tableMinWidth = computed(() => "min-w-full");
               :key="row.id"
               class="transition-colors duration-200 ease-out group whitespace-nowrap"
             >
-              <td class="max-w-[240px] px-5 py-5 text-sm text-slate-600">
-                <span class="block truncate font-medium text-slate-800">{{ row.reportDescription }}</span>
+              <td class="px-5 py-5 text-sm text-slate-600">
+                <span
+                  class="block truncate font-medium text-slate-800"
+                  :title="row.reportDescription"
+                >{{ row.reportDescription }}</span>
                 <span
                   v-if="row.user_comment"
                   class="block truncate text-xs text-slate-400 mt-0.5"
@@ -201,9 +208,10 @@ const tableMinWidth = computed(() => "min-w-full");
                 </span>
               </td>
 
-              <td class="px-5 py-5">
+              <td class="px-3 py-5">
                 <span
-                  class="inline-flex rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-500"
+                  class="inline-flex max-w-full truncate rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-500"
+                  :title="row.category"
                 >
                   {{ row.category }}
                 </span>

@@ -45,21 +45,21 @@ const statusFilters = computed(() =>
 
 const employeeReimbursementColumns = [
   { key: "reportDescription", label: "Report Description" },
-  { key: "category", label: "Category" },
-  { key: "amount", label: "Amount", align: "right" },
-  { key: "dateSubmitted", label: "Date Submitted" },
-  { key: "displayStatus", label: "Status", align: "center" },
-  { key: "action", sortKey: "id", label: "Action", align: "center" },
+  { key: "category", label: "Category", widthClass: "w-[140px]", paddingClass: "px-3" },
+  { key: "amount", label: "Amount", align: "right", widthClass: "w-[136px]" },
+  { key: "dateSubmitted", label: "Date Submitted", widthClass: "w-[168px]" },
+  { key: "displayStatus", label: "Status", align: "center", widthClass: "w-[148px]" },
+  { key: "action", sortKey: "id", label: "Action", align: "center", widthClass: "w-[116px]" },
 ];
 
 const adminReimbursementColumns = [
   { key: "reportDescription", label: "Report Description" },
-  { key: "category", label: "Category" },
-  { key: "amount", label: "Amount", align: "right" },
-  { key: "dateSubmitted", label: "Date Submitted" },
-  { key: "submittedBy", label: "Submitted By" },
-  { key: "displayStatus", label: "Status", align: "center" },
-  { key: "action", sortKey: "id", label: "Action", align: "center" },
+  { key: "category", label: "Category", widthClass: "w-[140px]", paddingClass: "px-3" },
+  { key: "amount", label: "Amount", align: "right", widthClass: "w-[136px]" },
+  { key: "dateSubmitted", label: "Date Submitted", widthClass: "w-[168px]" },
+  { key: "submittedBy", label: "Submitted By", widthClass: "w-[160px]" },
+  { key: "displayStatus", label: "Status", align: "center", widthClass: "w-[148px]" },
+  { key: "action", sortKey: "id", label: "Action", align: "center", widthClass: "w-[116px]" },
 ];
 
 const reimbursementColumns = computed(() =>
