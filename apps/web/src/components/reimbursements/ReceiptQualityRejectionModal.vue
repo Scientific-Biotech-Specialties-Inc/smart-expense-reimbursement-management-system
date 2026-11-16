@@ -20,7 +20,7 @@ const props = defineProps({
   },
   rejectionCode: {
     type: String,
-    default: "blurry", // "blurry" | "too_dark" | "too_small"
+    default: "blurry", // "blurry" | "too_dark" | "faded" | "too_small"
   },
   rejectionReason: {
     type: String,
@@ -57,11 +57,13 @@ watch(
 
 const isDuplicate = computed(() => props.rejectionCode === "duplicate");
 const isNotReceipt = computed(() => props.rejectionCode === "not_a_receipt");
+const isFaded = computed(() => props.rejectionCode === "faded");
 const isBlurry = computed(() => props.rejectionCode === "blurry");
 
 const headerTitle = computed(() => {
   if (isDuplicate.value) return "Duplicate Receipt Detected";
   if (isNotReceipt.value) return "Unrecognized Receipt Image";
+  if (isFaded.value) return "Faded Receipt Image Detected";
   if (isBlurry.value) return "Blurry Receipt Image Detected";
   return "Receipt Image Quality Issue";
 });
@@ -69,6 +71,7 @@ const headerTitle = computed(() => {
 const headerSubtitle = computed(() => {
   if (isDuplicate.value) return "This receipt has already been submitted to the system";
   if (isNotReceipt.value) return "The uploaded image does not appear to be a valid receipt or invoice";
+  if (isFaded.value) return "The receipt ink is too faded or washed out to read accurately";
   if (isBlurry.value) return "The receipt image is out of focus and cannot be read accurately";
   return "Action required to ensure accurate OCR data extraction";
 });
@@ -77,6 +80,8 @@ const badgeLabel = computed(() => {
   switch (props.rejectionCode) {
     case "not_a_receipt":
       return "Not a Receipt";
+    case "faded":
+      return "Faded Receipt";
     case "blurry":
       return "Blurry Image";
     case "too_dark":
@@ -103,6 +108,12 @@ const tips = computed(() => {
         "Ensure you are uploading an official receipt, sales invoice, or billing statement",
         "Make sure the merchant name, date, and total amount are clearly visible",
         "Avoid uploading selfies, random photos, or unrelated screenshots",
+      ];
+    case "faded":
+      return [
+        "Place the receipt on a dark, non-reflective surface to improve contrast",
+        "Avoid direct flash glare or harsh overhead lighting on thermal paper",
+        "Upload a clearer scan or request a re-printed receipt if the ink has faded",
       ];
     case "blurry":
       return [
@@ -245,7 +256,7 @@ const tips = computed(() => {
 
               <!-- Segment suggestion banner if resolution is low/long receipt -->
               <div
-                v-if="(rejectionCode === 'too_small' || showSegmentedOption) && !isDuplicate && !isNotReceipt"
+                v-if="(rejectionCode === 'too_small' || showSegmentedOption) && !isDuplicate && !isNotReceipt && !isFaded"
                 class="rounded-xl border border-accent/20 bg-accent-50 p-3 flex items-start gap-3"
               >
                 <Layers class="h-5 w-5 text-accent shrink-0 mt-0.5" />
@@ -266,7 +277,7 @@ const tips = computed(() => {
           class="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"
         >
           <button
-            v-if="!isDuplicate"
+            v-if="!isDuplicate && !isFaded"
             type="button"
             class="text-xs font-semibold text-slate-500 hover:text-slate-800 underline underline-offset-4 transition-colors"
             @click="emit('continue-anyway')"
@@ -274,14 +285,18 @@ const tips = computed(() => {
             {{ overrideButtonLabel }}
           </button>
           <div v-else class="text-xs text-slate-400 font-medium">
-            Duplicate receipts cannot be overridden.
+            {{
+              isFaded
+                ? "Faded receipts cannot be overridden. Please upload a clearer receipt."
+                : "Duplicate receipts cannot be overridden."
+            }}
           </div>
 
           <div
             class="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto"
           >
             <button
-              v-if="showSegmentedOption && !isDuplicate && !isNotReceipt"
+              v-if="showSegmentedOption && !isDuplicate && !isNotReceipt && !isFaded"
               type="button"
               class="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-accent/30 bg-white px-3.5 text-xs font-bold text-accent shadow-sm hover:bg-accent-50 transition-colors"
               @click="emit('upload-segmented')"

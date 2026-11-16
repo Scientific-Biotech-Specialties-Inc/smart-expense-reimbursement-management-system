@@ -67,6 +67,34 @@ describe("ReceiptQualityRejectionModal", () => {
     expect(wrapper.emitted("continue-anyway")).toHaveLength(1);
   });
 
+  it("renders distinct copy and disables override/segmented buttons for faded receipts", async () => {
+    const wrapper = mount(ReceiptQualityRejectionModal, {
+      props: {
+        isOpen: true,
+        rejectionCode: "faded",
+        rejectionReason:
+          "The receipt text is too faded or washed out to read accurately.",
+        showSegmentedOption: true,
+      },
+      global: {
+        stubs: {
+          BaseModal: {
+            template: `<div class="base-modal-stub"><slot /></div>`,
+          },
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("Faded Receipt Image Detected");
+    expect(wrapper.text()).toContain("Faded Receipt");
+    expect(wrapper.text()).toContain(
+      "Faded receipts cannot be overridden. Please upload a clearer receipt."
+    );
+    expect(wrapper.text()).not.toContain("Continue Anyway");
+    expect(wrapper.text()).not.toContain("Upload in Segments");
+    expect(wrapper.text()).not.toContain("Long Receipt?");
+  });
+
   it("portals above an open parent BaseModal at z-[100] and handles button clicks", async () => {
     const { default: BaseModal } = await import("@/components/base/BaseModal.vue");
     const wrapper = mount(
