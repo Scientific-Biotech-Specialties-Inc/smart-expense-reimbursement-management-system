@@ -136,7 +136,8 @@ class ReceiptController extends Controller
             ], 403);
         } catch (ValidationException $e) {
             return response()->json([
-                'message' => $e->validator->errors()->first('receipt') ?: $e->getMessage()
+                'message' => $e->validator->errors()->first('receipt') ?: $e->getMessage(),
+                'errors' => $e->errors(),
             ], 422);
         }
     }
@@ -187,6 +188,7 @@ class ReceiptController extends Controller
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => $e->validator->errors()->first('status') ?: $e->getMessage(),
+                'errors' => $e->errors(),
             ], 422);
         }
     }

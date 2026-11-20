@@ -279,18 +279,21 @@ export function firstFilePathField(value) {
  * Statuses for which a receipt may NOT be edited by its owner on the
  * "My Expense" page. This is the single source of truth for edit gating.
  * Any status not in this list is editable (e.g. processing, processed,
- * flagged, rejected, failed, automatic-rejected).
+ * flagged, failed).
  */
 export const EDIT_FORBIDDEN_STATUSES = [
   "approved",
   "pending",
   "pending-admin-re-review",
   "final-rejected",
+  "rejected",
+  "automatic-rejected",
 ];
 
-// Delete reuses the edit list but also allows "final-rejected" receipts.
+// Delete reuses the edit list but allows deleting rejected receipt statuses.
 export const DELETE_FORBIDDEN_STATUSES = EDIT_FORBIDDEN_STATUSES.filter(
-  (status) => status !== "final-rejected",
+  (status) =>
+    !["final-rejected", "rejected", "automatic-rejected"].includes(status),
 );
 
 /**
@@ -317,9 +320,10 @@ export function canEditReceipt(receipt) {
 /**
  * Returns true when a receipt's delete option should be available.
  *
- * Delete availability mirrors edit, except "final-rejected" receipts ARE
- * deletable (unlike edit). It reuses EDIT_FORBIDDEN_STATUSES via
- * DELETE_FORBIDDEN_STATUSES so the two gates stay aligned by construction.
+ * Delete availability mirrors edit, except "final-rejected", "rejected",
+ * and "automatic-rejected" receipts ARE deletable (unlike edit). It reuses
+ * EDIT_FORBIDDEN_STATUSES via DELETE_FORBIDDEN_STATUSES so the two gates
+ * stay aligned by construction.
  *
  * @param {object|null|undefined} receipt
  * @returns {boolean}

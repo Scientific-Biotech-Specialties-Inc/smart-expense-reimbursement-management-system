@@ -910,6 +910,55 @@ class ReimbursementLogicTest extends TestCase
             'event_type' => 'Conference / Seminar',
         ]);
     }
+
+    public function test_store_reimbursement_blocks_rejected_receipts(): void
+    {
+        $category = \App\Modules\Reimbursements\Models\ExpenseCategory::firstOrCreate(['name' => 'Meals']);
+
+        $token = $this->generateMockToken([
+            'email' => $this->employee->email,
+            'role' => $this->employee->role,
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+        ]);
+
+        foreach (['rejected', 'automatic-rejected'] as $status) {
+            $receipt = Receipt::create([
+                'uploaded_by' => $this->employee->id,
+                'file_path' => "receipts/rcpt_rej_{$status}.png",
+                'file_hash' => hash('sha256', "reimb_rejected_{$status}"),
+                'file_type' => 'png',
+                'file_size_bytes' => 1024,
+                'vendor_name' => 'Bad Receipt Vendor',
+                'total_amount' => 100.00,
+                'status' => $status,
+                'ocr_flagged' => true,
+                'rejection_code' => 'unreadable',
+                'rejection_reason' => 'Unreadable receipt.',
+            ]);
+
+            $response = $this->withHeaders([
+                'Authorization' => 'Bearer ' . $token,
+                'Accept' => 'application/json',
+            ])->post('/api/reimbursements', [
+                'description' => 'Should Reject Claim',
+                'expense_category_id' => $category->id,
+                'event_type' => 'Client Meeting',
+                'amount' => 100.00,
+                'date' => '2026-10-01',
+                'receipt_ids' => [$receipt->id],
+                'report_file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf'),
+            ]);
+
+            $response->assertStatus(422);
+            $response->assertJsonValidationErrors(['receipt_ids']);
+
+            $this->assertDatabaseHas('receipts', [
+                'id' => $receipt->id,
+                'status' => $status,
+            ]);
+        }
+    }
 }
 
 

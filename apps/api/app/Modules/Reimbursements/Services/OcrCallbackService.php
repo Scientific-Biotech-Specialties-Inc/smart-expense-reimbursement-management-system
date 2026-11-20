@@ -32,9 +32,9 @@ class OcrCallbackService
 
             $beforeState = $receipt->toArray();
 
-            // Replay guard — do not overwrite already-confirmed receipts.
-            if (in_array($receipt->status, ['pending', 'processed'], true)) {
-                Log::info('OcrCallbackService: skipping replay for already-confirmed receipt.', [
+            // Replay guard — do not overwrite already-confirmed or already-rejected receipts.
+            if (in_array(strtolower((string) $receipt->status), ['pending', 'processed', ...Receipt::REJECTED_STATUSES], true)) {
+                Log::info('OcrCallbackService: skipping replay for already-finalized receipt.', [
                     'receipt_id' => $receiptId,
                     'status'     => $receipt->status,
                 ]);
@@ -53,17 +53,26 @@ class OcrCallbackService
             $isLowConfidence = $confidenceScore < 0.80;
 
             $isDuplicate = !empty($data['is_duplicate']);
-            
-            $isRejected = ($data['status'] ?? null) === 'rejected' || !empty($data['rejection_code']) || $isDuplicate;
-            
+            $incomingStatus = isset($data['status']) ? strtolower(trim((string) $data['status'])) : null;
+            $providedCode = isset($data['rejection_code']) && trim((string) $data['rejection_code']) !== ''
+                ? trim((string) $data['rejection_code'])
+                : null;
+
+            $isRejected = $incomingStatus === 'rejected' || $providedCode !== null || $isDuplicate;
+
             if ($isDuplicate) {
                 $targetStatus = 'rejected';
                 $rejectionCode = 'duplicate';
-                $rejectionReason = 'Duplicate receipt detected based on semantic similarity.';
+                $rejectionReason = !empty($data['rejection_reason'])
+                    ? $data['rejection_reason']
+                    : (!empty($data['error']) ? $data['error'] : 'Duplicate receipt detected based on semantic similarity.');
             } else {
                 $targetStatus = $isRejected ? 'rejected' : ($isLowConfidence ? 'flagged' : 'processed');
-                $rejectionCode = $data['rejection_code'] ?? ($isRejected ? 'blurry' : null);
+                $rejectionCode = $providedCode ?? ($isRejected ? 'unreadable' : null);
                 $rejectionReason = $data['rejection_reason'] ?? $data['error'] ?? null;
+                if ($isRejected && ($rejectionReason === null || trim((string) $rejectionReason) === '')) {
+                    $rejectionReason = Receipt::DEFAULT_UNREADABLE_REASON;
+                }
             }
 
             // Update OCR fields on the receipt.

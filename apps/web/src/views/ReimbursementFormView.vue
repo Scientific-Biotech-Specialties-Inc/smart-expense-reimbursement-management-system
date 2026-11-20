@@ -100,8 +100,6 @@ const {
   qualityRejection,
   clearQualityRejection,
   showSegmentedUpload,
-  continueAnyway,
-  submitWithForce,
   submitSegments,
 } = useReceiptUploads();
 
@@ -701,9 +699,7 @@ function dismiss() {
         showSegmentedUpload = true;
         clearQualityRejection();
       "
-      @continue-anyway="
-        continueAnyway(qualityRejection?.file);
-      "
+      @close="clearQualityRejection"
     />
   </div>
 </template>

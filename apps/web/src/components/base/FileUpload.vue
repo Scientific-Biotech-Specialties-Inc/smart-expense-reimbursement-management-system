@@ -19,6 +19,7 @@ import {
   normalizeVatClassification,
 } from '../../utils/receiptUtils'
 import { useToast } from '../../composables/useToast'
+import { isOcrOfflineFailure } from '../../utils/ocrErrors'
 import ReceiptQualityRejectionModal from '../reimbursements/ReceiptQualityRejectionModal.vue'
 
 
@@ -112,25 +113,40 @@ function handleRetake() {
 }
 
 function handleContinueAnyway() {
-  const rejectedEntry = qualityRejection.value?.entry
-  if (rejectedEntry) {
-    rejectedEntry.ocrStatus = 'done'
-    rejectedEntry.isQualityOverridden = true
-    rejectedEntry.hasOcrReturned = true
-    emit('update:modelValue', files.value)
-    notifyMissingFieldsAfterTick(rejectedEntry)
-  }
   clearQualityRejection()
 }
 
-function openQualityModalForEntry(entry) {
-  if (entry.ocrStatus === 'rejected' && entry.rejectionCode !== 'duplicate') {
+async function handleRejectedEntry(
+  entry,
+  { isDuplicate = false, rejectionCode = 'quality_failed', rejectionReason = 'Receipt rejected.' } = {},
+) {
+  entry.ocrStatus = 'rejected'
+  entry.rejectionCode = rejectionCode
+  entry.rejectionReason = rejectionReason
+  if (isDuplicate) {
+    dispatchDuplicateDetected(entry)
+  } else {
     qualityRejection.value = {
       entry,
       file: entry.pages?.[0] || null,
-      rejectionCode: entry.rejectionCode,
-      rejectionReason: entry.rejectionReason,
+      rejectionCode,
+      rejectionReason,
     }
+  }
+  emit('upload-error', {
+    type: isDuplicate ? 'duplicate' : 'quality',
+    message: rejectionReason,
+    code: rejectionCode,
+    entry,
+  })
+
+  const idx = files.value.findIndex(
+    (f) => f === entry || (entry.localId && f.localId === entry.localId) || (entry.id && f.id === entry.id),
+  )
+  if (idx !== -1) {
+    await removeFile(idx)
+  } else if (entry.id && !String(entry.id).startsWith('temp-')) {
+    await apiFetch(`/api/serms/reimbursements/receipts/${entry.id}`, { method: 'DELETE' }).catch(() => {})
   }
 }
 
@@ -354,25 +370,30 @@ function startPolling(entry) {
         }
 
         if (status === 'rejected') {
+          const reason = data.rejection_reason || data.error || 'Receipt rejected.'
+          if (
+            isOcrOfflineFailure({
+              status,
+              rejectionCode: data.rejection_code,
+              rejectionReason: reason,
+            })
+          ) {
+            entry.ocrStatus = 'failed'
+            entry.rejectionCode = data.rejection_code || 'ocr_failed'
+            entry.rejectionReason = reason
+            emit('update:modelValue', files.value)
+            emit('upload-error', { type: 'failed', message: entry.rejectionReason, code: entry.rejectionCode, entry })
+            return
+          }
           const isDup =
             data.rejection_code === 'duplicate' ||
             data.is_duplicate === true ||
-            String(data.rejection_reason || '').toLowerCase().includes('duplicate')
-          entry.ocrStatus = 'rejected'
-          entry.rejectionCode = data.rejection_code || (isDup ? 'duplicate' : 'quality_failed')
-          entry.rejectionReason = data.rejection_reason || data.error || 'Receipt rejected.'
-          if (isDup) {
-            dispatchDuplicateDetected(entry)
-          } else {
-            qualityRejection.value = {
-              entry,
-              file: entry.pages?.[0] || null,
-              rejectionCode: entry.rejectionCode,
-              rejectionReason: entry.rejectionReason,
-            }
-          }
-          emit('update:modelValue', files.value)
-          emit('upload-error', { type: isDup ? 'duplicate' : 'quality', message: entry.rejectionReason, code: entry.rejectionCode, entry })
+            String(reason).toLowerCase().includes('duplicate')
+          await handleRejectedEntry(entry, {
+            isDuplicate: isDup,
+            rejectionCode: data.rejection_code || (isDup ? 'duplicate' : 'quality_failed'),
+            rejectionReason: reason,
+          })
           return
         }
 
@@ -431,27 +452,45 @@ async function simulateOCR(entry) {
         String(JSON.stringify(errorBody.errors || '')).toLowerCase().includes('duplicate')
 
       if (response.status === 422) {
-        if (hasDuplicate) {
-          entry.ocrStatus = 'rejected'
-          entry.rejectionCode = 'duplicate'
-          entry.rejectionReason = errorBody.message || errorBody?.errors?.file_hash?.[0] || 'Duplicate receipt detected.'
-          dispatchDuplicateDetected(entry)
+        const reason422 = errorBody.rejection_reason || rawMsg || ''
+        if (
+          isOcrOfflineFailure({
+            rejectionCode: errorBody.rejection_code,
+            rejectionReason: reason422,
+          })
+        ) {
+          entry.ocrStatus = 'failed'
+          entry.rejectionCode = errorBody.rejection_code || 'ocr_failed'
+          entry.rejectionReason = reason422 || 'OCR processing failed. You can retry OCR.'
           emit('update:modelValue', files.value)
-          emit('upload-error', { type: 'duplicate', message: entry.rejectionReason, code: 'duplicate', entry })
+          emit('upload-error', { type: 'failed', message: entry.rejectionReason, code: entry.rejectionCode, entry })
           return
         }
-        // Quality or other validation rejection
-        entry.ocrStatus = 'rejected'
-        entry.rejectionCode = errorBody.rejection_code || 'quality_failed'
-        entry.rejectionReason = errorBody.rejection_reason || errorBody.message || 'Image quality is too low for accurate OCR.'
-        qualityRejection.value = {
-          entry,
-          file: entry.pages?.[0] || null,
-          rejectionCode: entry.rejectionCode,
-          rejectionReason: entry.rejectionReason,
+        const isDuplicate422 =
+          hasDuplicate ||
+          errorBody?.rejection_code === 'duplicate' ||
+          errorBody?.is_duplicate === true ||
+          String(errorBody?.rejection_reason || '').toLowerCase().includes('duplicate')
+        if (isDuplicate422) {
+          await handleRejectedEntry(entry, {
+            isDuplicate: true,
+            rejectionCode: 'duplicate',
+            rejectionReason:
+              errorBody.rejection_reason ||
+              errorBody.message ||
+              errorBody?.errors?.file_hash?.[0] ||
+              'Duplicate receipt detected.',
+          })
+          return
         }
-        emit('update:modelValue', files.value)
-        emit('upload-error', { type: 'quality', message: entry.rejectionReason, code: entry.rejectionCode, entry })
+        await handleRejectedEntry(entry, {
+          isDuplicate: false,
+          rejectionCode: errorBody.rejection_code || 'quality_failed',
+          rejectionReason:
+            errorBody.rejection_reason ||
+            errorBody.message ||
+            'Image quality is too low for accurate OCR.',
+        })
         return
       }
 
@@ -474,26 +513,31 @@ async function simulateOCR(entry) {
 
     if (status === 'failed' || status === 'rejected') {
       entry.id = ocrData.id
-      entry.ocrStatus = status === 'failed' ? 'failed' : 'rejected'
-      entry.rejectionCode = ocrData.rejection_code || (status === 'failed' ? 'ocr_failed' : 'quality_failed')
-      entry.rejectionReason = ocrData.rejection_reason || `Receipt ${status}.`
-      if (status === 'rejected') {
-        const isDup =
-          entry.rejectionCode === 'duplicate' ||
-          String(entry.rejectionReason || '').toLowerCase().includes('duplicate')
-        if (isDup) {
-          dispatchDuplicateDetected(entry)
-        } else {
-          qualityRejection.value = {
-            entry,
-            file: entry.pages?.[0] || null,
-            rejectionCode: entry.rejectionCode,
-            rejectionReason: entry.rejectionReason,
-          }
-        }
+      const reason = ocrData.rejection_reason || `Receipt ${status}.`
+      const isOffline =
+        status === 'failed' ||
+        isOcrOfflineFailure({
+          status,
+          rejectionCode: ocrData.rejection_code,
+          rejectionReason: reason,
+        })
+      if (isOffline) {
+        entry.ocrStatus = 'failed'
+        entry.rejectionCode = ocrData.rejection_code || 'ocr_failed'
+        entry.rejectionReason = reason
+        emit('update:modelValue', files.value)
+        emit('upload-error', { type: 'failed', message: entry.rejectionReason, code: entry.rejectionCode, entry })
+        return
       }
-      emit('update:modelValue', files.value)
-      emit('upload-error', { type: status === 'failed' ? 'failed' : 'quality', message: entry.rejectionReason, code: entry.rejectionCode, entry })
+      const isDup =
+        ocrData.rejection_code === 'duplicate' ||
+        ocrData.is_duplicate === true ||
+        String(reason).toLowerCase().includes('duplicate')
+      await handleRejectedEntry(entry, {
+        isDuplicate: isDup,
+        rejectionCode: ocrData.rejection_code || (isDup ? 'duplicate' : 'quality_failed'),
+        rejectionReason: reason,
+      })
       return
     }
 
@@ -522,15 +566,22 @@ onBeforeUnmount(() => {
 defineExpose({ retryOcr, startPolling, hydrateEntry, cleanupUploadedFiles })
 
 async function removeFile(index) {
+  if (index < 0 || index >= files.value.length) return
   const entry = files.value[index]
   if (entry?.id && pollTimers.has(String(entry.id))) {
     clearInterval(pollTimers.get(String(entry.id)))
     pollTimers.delete(String(entry.id))
   }
-  if (entry?.previews) {
+  if (entry?.previews && typeof URL.revokeObjectURL === 'function') {
     entry.previews.forEach(preview => {
       if (preview) URL.revokeObjectURL(preview)
     })
+  }
+  if (
+    entry?.thumbnail?.startsWith('blob:') &&
+    typeof URL.revokeObjectURL === 'function'
+  ) {
+    URL.revokeObjectURL(entry.thumbnail)
   }
   const receiptId = entry?.id
   files.value.splice(index, 1)
@@ -808,15 +859,7 @@ function onFileInput(event) {
 
         <div class="flex shrink-0 items-center gap-1.5">
           <button
-            v-if="entry.ocrStatus === 'rejected' && entry.rejectionCode !== 'duplicate'"
-            class="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-white px-2.5 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-50"
-            type="button"
-            @click="openQualityModalForEntry(entry)"
-          >
-            Review Warning
-          </button>
-          <button
-            v-if="entry.ocrStatus === 'failed' || entry.ocrStatus === 'rejected'"
+            v-if="entry.ocrStatus === 'failed'"
             class="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 text-xs font-bold text-amber-700 transition-colors hover:bg-amber-100"
             type="button"
             @click="retryOcr(entry)"
@@ -853,7 +896,7 @@ function onFileInput(event) {
       :rejection-reason="qualityRejection?.rejectionReason ?? ''"
       :show-segmented-option="false"
       @retake="handleRetake"
-      @continue-anyway="handleContinueAnyway"
+      @close="clearQualityRejection"
     />
   </div>
 </template>

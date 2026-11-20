@@ -55,13 +55,19 @@ class ReimbursementService
     {
         return DB::transaction(function () use ($user, $validated, $reportFile) {
             $receiptIds = array_values(array_unique($validated['receipt_ids']));
-            $ownedReceiptCount = Receipt::whereIn('id', $receiptIds)
+            $ownedReceipts = Receipt::whereIn('id', $receiptIds)
                 ->where('uploaded_by', $user->id)
-                ->count();
+                ->get(['id', 'status']);
 
-            if ($ownedReceiptCount !== count($receiptIds)) {
+            if ($ownedReceipts->count() !== count($receiptIds)) {
                 throw ValidationException::withMessages([
                     'receipt_ids' => ['You can only submit reimbursements for your own receipts.'],
+                ]);
+            }
+
+            if ($ownedReceipts->contains(fn (Receipt $receipt) => $receipt->isRejectedStatus())) {
+                throw ValidationException::withMessages([
+                    'receipt_ids' => ['Rejected receipts cannot be submitted for reimbursement. Please delete them and upload clearer copies.'],
                 ]);
             }
 
@@ -590,6 +596,11 @@ class ReimbursementService
                 foreach ($data['receipts'] as $receiptData) {
                     $receipt = Receipt::find($receiptData['id']);
                     if ($receipt && $receipt->uploaded_by === $user->id) {
+                        if ($receipt->isRejectedStatus()) {
+                            throw ValidationException::withMessages([
+                                'receipts' => ['Rejected receipts cannot be edited or attached to a reimbursement.'],
+                            ]);
+                        }
                         $receipt->update([
                             'expense_category_id' => $receiptData['expense_category_id'] ?? $receipt->expense_category_id,
                             'event_type' => $receiptData['event_type'] ?? $receipt->event_type,
@@ -616,6 +627,15 @@ class ReimbursementService
             if (!empty($data['receipt_ids'])) {
                 $currentReceiptIds = $reimbursement->receipts()->pluck('receipts.id')->all();
                 $newReceiptIds = array_values(array_unique($data['receipt_ids']));
+
+                $hasRejected = Receipt::whereIn('id', $newReceiptIds)
+                    ->get(['id', 'status'])
+                    ->contains(fn (Receipt $receipt) => $receipt->isRejectedStatus());
+                if ($hasRejected) {
+                    throw ValidationException::withMessages([
+                        'receipt_ids' => ['Rejected receipts cannot be attached to a reimbursement. Please delete them and upload clearer copies.'],
+                    ]);
+                }
 
                 $detachedReceiptIds = array_values(array_diff($currentReceiptIds, $newReceiptIds));
 

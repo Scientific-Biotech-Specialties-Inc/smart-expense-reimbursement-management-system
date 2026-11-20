@@ -61,6 +61,11 @@ class LiquidationController extends Controller
                 continue;
             }
             $receipt = Receipt::findOrFail($receiptData['id']);
+            if ($receipt->isRejectedStatus()) {
+                throw ValidationException::withMessages([
+                    'receipts' => ['Rejected receipts cannot be submitted in a liquidation. Please remove the rejected receipt and upload a clearer copy.'],
+                ]);
+            }
             $receipt->update([
                 'vendor_name' => $receiptData['vendor_name'] ?? $receiptData['vendor'] ?? $receipt->vendor_name,
                 'transaction_date' => $receiptData['transaction_date'] ?? $receiptData['date'] ?? $receipt->transaction_date,

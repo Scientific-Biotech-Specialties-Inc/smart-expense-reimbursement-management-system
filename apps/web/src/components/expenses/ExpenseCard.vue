@@ -80,7 +80,7 @@ const canDelete = computed(() => canDeleteReceipt(props.expense));
           <div>
             <p class="text-[11px] font-bold text-danger">Automatic Rejected</p>
             <p class="mt-0.5 text-[10px] leading-snug text-slate-500">
-              Update the details or upload a clearer copy.
+              Rejected receipts cannot be edited. Delete this receipt and upload a clearer copy.
             </p>
           </div>
         </div>

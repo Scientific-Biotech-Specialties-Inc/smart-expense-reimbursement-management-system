@@ -129,7 +129,6 @@ const {
   qualityRejection,
   clearQualityRejection,
   showSegmentedUpload,
-  continueAnyway,
   submitSegments,
 } = useReceiptUploads({ draftKey: "serms_expense_draft_receipts" });
 
@@ -167,7 +166,8 @@ const canSaveNew = computed(
   () =>
     localReceipts.value.length > 0 &&
     allOcrComplete.value &&
-    requiredFieldsComplete.value,
+    requiredFieldsComplete.value &&
+    localReceipts.value.every((r) => !r.isRejected && r.status !== "rejected"),
 );
 
 // Map the camelCase OCR draft into the snake_case shape the util expects,
@@ -192,11 +192,6 @@ function buildUpdatePayload(receipt) {
     },
   });
   prefill.location = receipt.location || null;
-  // If the user deliberately overrode a quality or non-receipt warning and filled
-  // the details manually, promote the receipt status from 'rejected' to 'processed'.
-  if (receipt.isQualityOverridden) {
-    prefill.status = "processed";
-  }
   // NOTE: We deliberately do NOT force `status = "processed"` by default here. The receipt
   // was created by ReceiptService::storeReceipt() with status `processing` and OCR
   // was already dispatched. Forcing `processed` would make the async AI OCR callback
@@ -1226,6 +1221,6 @@ function formatCurrency(amount) {
       showSegmentedUpload = true;
       clearQualityRejection();
     "
-    @continue-anyway="continueAnyway()"
+    @close="clearQualityRejection"
   />
 </template>
