@@ -4,8 +4,13 @@ import { mount } from "@vue/test-utils";
 import { ref } from "vue";
 import ReimbursementFormView from "@/views/ReimbursementFormView.vue";
 
-const { routerPushMock, receiptsState } = vi.hoisted(() => {
-  return { routerPushMock: vi.fn(), receiptsState: { value: [] } };
+const { routerPushMock, receiptsState, qualityRejectionState, clearQualityRejectionMock } = vi.hoisted(() => {
+  return {
+    routerPushMock: vi.fn(),
+    receiptsState: { value: [] },
+    qualityRejectionState: { value: null },
+    clearQualityRejectionMock: vi.fn(),
+  };
 });
 
 vi.mock("@/stores/policy", () => ({
@@ -55,8 +60,8 @@ vi.mock("@/composables/reimbursements/useReceiptUploads", () => ({
     addReceiptFiles: vi.fn(),
     removeReceipt: vi.fn(),
     clearDraftReceipts: vi.fn(),
-    qualityRejection: ref(null),
-    clearQualityRejection: vi.fn(),
+    qualityRejection: qualityRejectionState,
+    clearQualityRejection: clearQualityRejectionMock,
     showSegmentedUpload: ref(false),
     continueAnyway: vi.fn(),
     submitWithForce: vi.fn(),
@@ -88,7 +93,12 @@ function mountForm() {
         ReimbursementSummaryPanel: true,
         SegmentedReceiptUpload: true,
         ConfirmModal: true,
-        ReceiptQualityRejectionModal: true,
+        ReceiptQualityRejectionModal: {
+          name: "ReceiptQualityRejectionModal",
+          props: ["isOpen", "rejectionCode", "rejectionReason"],
+          emits: ["close", "retake", "upload-segmented"],
+          template: `<div class="quality-modal-stub" :data-open="isOpen" />`,
+        },
         BaseToggleSwitch: true,
       },
     },
@@ -131,5 +141,25 @@ describe("ReimbursementFormView — duplicate Upload New One cancel goes to /rei
     expect(html).not.toContain("reimbursement-empty-state");
     expect(text).not.toContain("Upload Receipts");
     expect(text).not.toContain("Drag and drop receipt images here");
+  });
+
+  it("wires @close on ReceiptQualityRejectionModal to clearQualityRejection", async () => {
+    clearQualityRejectionMock.mockClear();
+    qualityRejectionState.value = {
+      receiptId: "temp-1",
+      file: null,
+      rejectionCode: "unreadable",
+      rejectionReason: "Critical details unreadable.",
+    };
+    const wrapper = mountForm();
+    await wrapper.vm.$nextTick();
+
+    const modal = wrapper.findComponent({ name: "ReceiptQualityRejectionModal" });
+    expect(modal.exists()).toBe(true);
+    expect(modal.props("isOpen")).toBe(true);
+
+    await modal.vm.$emit("close");
+    expect(clearQualityRejectionMock).toHaveBeenCalledTimes(1);
+    qualityRejectionState.value = null;
   });
 });

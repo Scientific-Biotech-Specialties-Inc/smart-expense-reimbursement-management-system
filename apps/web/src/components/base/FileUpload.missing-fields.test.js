@@ -194,7 +194,7 @@ describe("FileUpload — Liquidation OCR missing fields warning", () => {
     await nextTick();
   });
 
-  it("dispatches liquidation duplicate event with localId and removes entry on remove-duplicate-receipt", async () => {
+  it("dispatches liquidation duplicate event and auto-purges entry immediately on 422 duplicate rejection", async () => {
     apiFetchMock.mockResolvedValue({
       ok: false,
       status: 422,
@@ -229,10 +229,10 @@ describe("FileUpload — Liquidation OCR missing fields warning", () => {
     await flushPromises();
     await nextTick();
 
-    expect(wrapper.vm.receipts).toHaveLength(1);
     expect(dupEvents).toHaveLength(1);
     expect(dupEvents[0].source).toBe("liquidation");
     expect(dupEvents[0].receiptId).toBeTruthy();
+    expect(wrapper.vm.receipts).toHaveLength(0);
 
     window.dispatchEvent(
       new CustomEvent("remove-duplicate-receipt", {
@@ -245,5 +245,123 @@ describe("FileUpload — Liquidation OCR missing fields warning", () => {
     expect(wrapper.vm.receipts).toHaveLength(0);
     window.removeEventListener("receipt-duplicate-detected", onDup);
     wrapper.unmount();
+  });
+
+  it("opens rejection modal and auto-purges entry on 422 non-duplicate quality/unreadable rejection", async () => {
+    apiFetchMock.mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({
+        rejection_code: "unreadable",
+        rejection_reason: "Critical receipt details (Total Amount) could not be read.",
+      }),
+    });
+
+    const receipts = ref([]);
+    const wrapper = mount(
+      {
+        components: { FileUpload },
+        setup: () => ({ receipts }),
+        template: `<FileUpload v-model="receipts" />`,
+      },
+      {
+        global: {
+          stubs: {
+            ConfirmModal: true,
+            ReceiptQualityRejectionModal: {
+              name: "ReceiptQualityRejectionModal",
+              props: ["isOpen", "rejectionCode", "rejectionReason"],
+              emits: ["close", "retake"],
+              template: `<div class="quality-modal-stub" :data-open="isOpen" :data-code="rejectionCode">{{ rejectionReason }}</div>`,
+            },
+          },
+        },
+      },
+    );
+
+    const file = new File(["img"], "damaged.jpg", { type: "image/jpeg" });
+    wrapper.findComponent(FileUpload).vm.processFiles([file], "single");
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.vm.receipts).toHaveLength(0);
+    const modal = wrapper.find(".quality-modal-stub");
+    expect(modal.attributes("data-open")).toBe("true");
+    expect(modal.attributes("data-code")).toBe("unreadable");
+    expect(modal.text()).toContain("Critical receipt details (Total Amount) could not be read.");
+
+    wrapper.findComponent({ name: "ReceiptQualityRejectionModal" }).vm.$emit("close");
+    await nextTick();
+    expect(wrapper.find(".quality-modal-stub").attributes("data-open")).toBe("false");
+    wrapper.unmount();
+  });
+
+  it("auto-purges persisted rejected entry from form and backend when polling resolves to status='rejected'", async () => {
+    vi.useFakeTimers();
+    try {
+      apiFetchMock
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 201,
+          json: async () => ({
+            data: { id: 777, status: "processing" },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              id: 777,
+              status: "rejected",
+              rejection_code: "faded",
+              rejection_reason: "Receipt ink is too faded to read Total Amount.",
+            },
+          }),
+        })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+
+      const receipts = ref([]);
+      const wrapper = mount(
+        {
+          components: { FileUpload },
+          setup: () => ({ receipts }),
+          template: `<FileUpload v-model="receipts" />`,
+        },
+        {
+          global: {
+            stubs: {
+              ConfirmModal: true,
+              ReceiptQualityRejectionModal: {
+                name: "ReceiptQualityRejectionModal",
+                props: ["isOpen", "rejectionCode", "rejectionReason"],
+                template: `<div class="quality-modal-stub" :data-open="isOpen" :data-code="rejectionCode">{{ rejectionReason }}</div>`,
+              },
+            },
+          },
+        },
+      );
+
+      const file = new File(["img"], "faded.jpg", { type: "image/jpeg" });
+      wrapper.findComponent(FileUpload).vm.processFiles([file], "single");
+      await flushPromises();
+      expect(wrapper.vm.receipts).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await flushPromises();
+      await nextTick();
+
+      expect(wrapper.vm.receipts).toHaveLength(0);
+      expect(apiFetchMock).toHaveBeenCalledWith(
+        "/api/serms/reimbursements/receipts/777",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+      const modal = wrapper.find(".quality-modal-stub");
+      expect(modal.attributes("data-open")).toBe("true");
+      expect(modal.attributes("data-code")).toBe("faded");
+      wrapper.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

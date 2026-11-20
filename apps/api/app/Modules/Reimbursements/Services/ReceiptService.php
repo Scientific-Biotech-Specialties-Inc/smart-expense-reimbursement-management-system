@@ -158,7 +158,7 @@ class ReceiptService
             // runs inline by default so it works without a dedicated queue worker).
             $this->dispatchOcrJob($receipt);
 
-            $receipt->load('category', 'items', 'uploader');
+            $receipt->refresh()->load('category', 'items', 'uploader');
 
             // Audit Log
             AuditLogService::log(
@@ -172,7 +172,7 @@ class ReceiptService
                 ipAddress: request()->ip(),
             );
 
-            if (!$isDraft) {
+            if (!$isDraft && !$receipt->isRejectedStatus()) {
                 NotificationService::notifyUser(
                     userId: $user->id,
                     type: 'receipt_uploaded',
@@ -205,6 +205,12 @@ class ReceiptService
             // Authorization: admin OR the uploader (owner) of the receipt.
             if (!$canManage && $receipt->uploaded_by !== $user->id) {
                 throw new AuthorizationException('Unauthorized.');
+            }
+
+            if (!$canManage && $receipt->isRejectedStatus()) {
+                throw ValidationException::withMessages([
+                    'status' => ['Rejected receipts cannot be edited or overridden. Please delete this receipt and upload a clearer copy.'],
+                ]);
             }
 
             // Admin-only fields: admin_notes may only be set by admins.
@@ -314,6 +320,12 @@ class ReceiptService
 
             if ($receipt->uploaded_by !== $user->id) {
                 throw new AuthorizationException('Unauthorized. You can only resubmit your own receipts.');
+            }
+
+            if ($receipt->isRejectedStatus()) {
+                throw ValidationException::withMessages([
+                    'status' => ['Rejected receipts cannot be edited or resubmitted. Please delete this receipt and upload a clearer copy.'],
+                ]);
             }
 
             if (in_array($receipt->status, ['approved', 'pending', 'pending-admin-re-review', 'final-rejected'], true)) {

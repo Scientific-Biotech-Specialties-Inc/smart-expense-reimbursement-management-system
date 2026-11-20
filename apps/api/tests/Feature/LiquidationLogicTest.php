@@ -369,4 +369,54 @@ class LiquidationLogicTest extends TestCase
         $this->cashAdvance->refresh();
         $this->assertEquals('incomplete', $this->cashAdvance->status);
     }
+
+    public function test_submit_liquidation_blocks_rejected_receipts(): void
+    {
+        $token = $this->generateMockToken([
+            'email' => $this->employee->email,
+            'role' => $this->employee->role,
+            'first_name' => 'John',
+            'last_name' => 'Employee',
+        ]);
+
+        foreach (['rejected', 'automatic-rejected'] as $status) {
+            $receipt = Receipt::create([
+                'uploaded_by' => $this->employee->id,
+                'file_path' => "receipts/liq_rej_{$status}.png",
+                'file_hash' => hash('sha256', "liq_rejected_{$status}"),
+                'file_type' => 'png',
+                'file_size_bytes' => 512,
+                'vendor_name' => 'Rejected Liq Vendor',
+                'total_amount' => 5000.00,
+                'status' => $status,
+                'ocr_flagged' => true,
+                'rejection_code' => 'faded',
+                'rejection_reason' => 'Receipt is too faded.',
+            ]);
+
+            $response = $this->withHeaders([
+                'Authorization' => 'Bearer ' . $token,
+            ])->postJson('/api/liquidations', [
+                'cash_advance_id' => $this->cashAdvance->id,
+                'receipts' => [
+                    [
+                        'id' => $receipt->id,
+                        'vendor_name' => 'Tampered Liq Vendor',
+                        'transaction_date' => '2026-06-12',
+                        'total_amount' => 5000.00,
+                    ],
+                ],
+                'total_expense_amount' => 5000.00,
+            ]);
+
+            $response->assertStatus(422);
+            $response->assertJsonValidationErrors(['receipts']);
+
+            $this->assertDatabaseHas('receipts', [
+                'id' => $receipt->id,
+                'status' => $status,
+                'vendor_name' => 'Rejected Liq Vendor',
+            ]);
+        }
+    }
 }

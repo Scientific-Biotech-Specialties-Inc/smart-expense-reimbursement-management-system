@@ -28,6 +28,8 @@ class OcrCallbackController extends Controller
                 'status'               => $receipt->status,
                 'ocr_flagged'          => $receipt->ocr_flagged,
                 'ocr_confidence_score' => $receipt->ocr_confidence_score,
+                'rejection_code'       => $receipt->rejection_code,
+                'rejection_reason'     => $receipt->rejection_reason,
             ],
         ]);
     }

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { ref } from "vue";
 import { mount } from "@vue/test-utils";
 import ReceiptUploadModal from "@/components/expenses/ReceiptUploadModal.vue";
 
@@ -25,23 +26,34 @@ vi.mock("@/composables/useToast", () => ({
   useToast: () => ({ addToast: vi.fn() }),
 }));
 
-vi.mock("@/composables/reimbursements/useReceiptUploads", () => ({
-  useReceiptUploads: () => ({
-    localReceipts: { value: [] },
-    receiptDrag: { value: false },
-    receiptInput: { value: null },
-    handleReceiptDrop: vi.fn(),
-    handleReceiptSelect: vi.fn(),
-    addReceiptFiles: vi.fn(),
-    removeReceipt: vi.fn(),
-    clearDraftReceipts: vi.fn(),
-    qualityRejection: { value: null },
-    clearQualityRejection: vi.fn(),
-    showSegmentedUpload: { value: false },
-    continueAnyway: vi.fn(),
-    submitSegments: vi.fn(),
-  }),
+const { mockLocalReceipts, mockQualityRejection, mockClearQualityRejection } = vi.hoisted(() => ({
+  mockLocalReceipts: { ref: null },
+  mockQualityRejection: { ref: null },
+  mockClearQualityRejection: vi.fn(),
 }));
+
+vi.mock("@/composables/reimbursements/useReceiptUploads", async () => {
+  const { ref: vueRef } = await import("vue");
+  mockLocalReceipts.ref = vueRef([]);
+  mockQualityRejection.ref = vueRef(null);
+  return {
+    useReceiptUploads: () => ({
+      localReceipts: mockLocalReceipts.ref,
+      receiptDrag: vueRef(false),
+      receiptInput: vueRef(null),
+      handleReceiptDrop: vi.fn(),
+      handleReceiptSelect: vi.fn(),
+      addReceiptFiles: vi.fn(),
+      removeReceipt: vi.fn(),
+      clearDraftReceipts: vi.fn(),
+      qualityRejection: mockQualityRejection.ref,
+      clearQualityRejection: mockClearQualityRejection,
+      showSegmentedUpload: vueRef(false),
+      continueAnyway: vi.fn(),
+      submitSegments: vi.fn(),
+    }),
+  };
+});
 
 vi.mock("@/composables/useUnsavedChanges", () => ({
   useUnsavedChanges: () => ({
@@ -57,7 +69,12 @@ const stubs = {
   CurrencySelect: true,
   ScannedReceiptsList: true,
   SegmentedReceiptUpload: true,
-  ReceiptQualityRejectionModal: true,
+  ReceiptQualityRejectionModal: {
+    name: "ReceiptQualityRejectionModal",
+    props: ["isOpen", "rejectionCode", "rejectionReason"],
+    emits: ["close", "retake", "upload-segmented"],
+    template: `<div class="quality-modal-stub" :data-open="isOpen" />`,
+  },
 };
 
 function mountModal(props = {}) {
@@ -190,5 +207,80 @@ describe("ReceiptUploadModal — BUG 1 (duplicate surfaced in edit modal)", () =
     window.removeEventListener("receipt-duplicate-detected", handler);
 
     expect(events).toHaveLength(0);
+  });
+});
+
+describe("ReceiptUploadModal — strict rejection gating and modal close", () => {
+  beforeEach(() => {
+    mockLocalReceipts.ref.value = [];
+    mockQualityRejection.ref.value = null;
+    mockClearQualityRejection.mockClear();
+  });
+
+  it("blocks Save Receipt (canSaveNew) when any receipt has isRejected=true or status='rejected'", async () => {
+    const wrapper = mountModal();
+    mockLocalReceipts.ref.value = [
+      {
+        id: 10,
+        date: "2026-11-16",
+        categoryId: 1,
+        isUploading: false,
+        isProcessing: false,
+        isRejected: true,
+      },
+    ];
+    await wrapper.vm.$nextTick();
+
+    const saveBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Save Receipt"));
+    expect(saveBtn).toBeDefined();
+    expect(saveBtn.attributes("disabled")).toBeDefined();
+
+    mockLocalReceipts.ref.value = [
+      {
+        id: 11,
+        date: "2026-11-16",
+        categoryId: 1,
+        isUploading: false,
+        isProcessing: false,
+        isRejected: false,
+        status: "rejected",
+      },
+    ];
+    await wrapper.vm.$nextTick();
+    expect(saveBtn.attributes("disabled")).toBeDefined();
+
+    mockLocalReceipts.ref.value = [
+      {
+        id: 12,
+        date: "2026-11-16",
+        categoryId: 1,
+        isUploading: false,
+        isProcessing: false,
+        isRejected: false,
+        status: "processed",
+      },
+    ];
+    await wrapper.vm.$nextTick();
+    expect(saveBtn.attributes("disabled")).toBeUndefined();
+  });
+
+  it("wires @close on ReceiptQualityRejectionModal to clearQualityRejection", async () => {
+    const wrapper = mountModal();
+    mockQualityRejection.ref.value = {
+      receiptId: "temp-1",
+      file: null,
+      rejectionCode: "unreadable",
+      rejectionReason: "Critical details unreadable.",
+    };
+    await wrapper.vm.$nextTick();
+
+    const qualityModal = wrapper.findComponent({ name: "ReceiptQualityRejectionModal" });
+    expect(qualityModal.exists()).toBe(true);
+    expect(qualityModal.props("isOpen")).toBe(true);
+
+    await qualityModal.vm.$emit("close");
+    expect(mockClearQualityRejection).toHaveBeenCalledTimes(1);
   });
 });

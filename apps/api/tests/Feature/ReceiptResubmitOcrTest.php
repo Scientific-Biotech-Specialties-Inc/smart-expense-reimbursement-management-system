@@ -31,13 +31,14 @@ class ReceiptResubmitOcrTest extends TestCase
         ]);
 
         Storage::fake('supabase');
-        Queue::fake();
 
         // Set the AI service URL after the app is fully booted so it takes effect
         // at runtime (the engine reads it at call time).
         config([
+            'filesystems.disks.supabase.url' => 'http://storage.test/supabase',
             'services.ai_service.url' => 'http://ai-service.test',
             'services.ai_service.api_key' => 'test-key',
+            'services.ai_service.ocr_queue_connection' => 'sync',
         ]);
 
         // OCR dispatches synchronously by default (no worker needed). Fake the
@@ -271,5 +272,187 @@ class ReceiptResubmitOcrTest extends TestCase
             'status' => 'failed',
             'rejection_code' => 'ocr_failed',
         ]);
+    }
+
+    public function test_store_receipt_returns_synchronous_422_rejection_and_skips_uploaded_notification(): void
+    {
+        $reason = 'The receipt text is too faded or washed out to read critical details (Total Amount). Please upload a clearer photo with better contrast or request a clearer copy of the receipt.';
+
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::fake([
+            'http://ai-service.test/api/ocr/process' => Http::response([
+                'status' => 'rejected',
+                'rejection_code' => 'faded',
+                'rejection_reason' => $reason,
+                'message' => $reason,
+            ], 422),
+        ]);
+
+        $file = UploadedFile::fake()->image('faded_receipt.png', 400, 600);
+
+        $response = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->post('/api/reimbursements/receipts', [
+                'file' => $file,
+            ]);
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.status', 'rejected');
+        $response->assertJsonPath('data.ocr_flagged', true);
+        $response->assertJsonPath('data.rejection_code', 'faded');
+        $response->assertJsonPath('data.rejection_reason', $reason);
+
+        $receiptId = $response->json('data.id');
+
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receiptId,
+            'status' => 'rejected',
+            'ocr_flagged' => true,
+            'rejection_code' => 'faded',
+            'rejection_reason' => $reason,
+        ]);
+
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $this->employee->id,
+            'type' => 'receipt_auto_rejected',
+            'record_type' => 'receipt',
+            'record_id' => $receiptId,
+        ]);
+
+        $this->assertDatabaseMissing('notifications', [
+            'user_id' => $this->employee->id,
+            'type' => 'receipt_uploaded',
+            'record_type' => 'receipt',
+            'record_id' => $receiptId,
+        ]);
+    }
+
+    public function test_update_receipt_blocks_uploader_from_editing_or_promoting_rejected_and_automatic_rejected_receipts(): void
+    {
+        foreach (['rejected', 'automatic-rejected'] as $status) {
+            $receipt = Receipt::create([
+                'uploaded_by' => $this->employee->id,
+                'file_path' => ["receipts/blocked_update_{$status}.png"],
+                'file_hash' => [hash('sha256', "blocked_update_{$status}")],
+                'file_type' => ['png'],
+                'file_size_bytes' => [1024],
+                'vendor_name' => 'Original Rejected Vendor',
+                'total_amount' => 150.00,
+                'status' => $status,
+                'ocr_flagged' => true,
+                'rejection_code' => 'unreadable',
+                'rejection_reason' => 'Receipt is too unreadable.',
+            ]);
+
+            $patchResponse = $this
+                ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+                ->actingAs($this->employee)
+                ->patchJson("/api/reimbursements/receipts/{$receipt->id}", [
+                    'vendor_name' => 'Tampered Vendor',
+                    'status' => 'processed',
+                ]);
+
+            $patchResponse->assertStatus(422);
+            $patchResponse->assertJsonValidationErrors(['status']);
+
+            $putResponse = $this
+                ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+                ->actingAs($this->employee)
+                ->putJson("/api/expenses/{$receipt->id}", [
+                    'vendor_name' => 'Tampered Expense Vendor',
+                ]);
+
+            $putResponse->assertStatus(422);
+            $putResponse->assertJsonValidationErrors(['status']);
+
+            $this->assertDatabaseHas('receipts', [
+                'id' => $receipt->id,
+                'status' => $status,
+                'ocr_flagged' => true,
+                'vendor_name' => 'Original Rejected Vendor',
+                'rejection_code' => 'unreadable',
+                'rejection_reason' => 'Receipt is too unreadable.',
+            ]);
+        }
+    }
+
+    public function test_resubmit_receipt_blocks_uploader_from_editing_or_promoting_rejected_and_automatic_rejected_receipts(): void
+    {
+        foreach (['rejected', 'automatic-rejected'] as $status) {
+            $receipt = Receipt::create([
+                'uploaded_by' => $this->employee->id,
+                'file_path' => ["receipts/blocked_resubmit_{$status}.png"],
+                'file_hash' => [hash('sha256', "blocked_resubmit_{$status}")],
+                'file_type' => ['png'],
+                'file_size_bytes' => [1024],
+                'vendor_name' => 'Original Rejected Vendor',
+                'total_amount' => 150.00,
+                'status' => $status,
+                'ocr_flagged' => true,
+                'rejection_code' => 'faded',
+                'rejection_reason' => 'Receipt text is too faded.',
+            ]);
+
+            $response = $this
+                ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+                ->actingAs($this->employee)
+                ->postJson("/api/reimbursements/receipts/{$receipt->id}/resubmit", [
+                    'vendor_name' => 'Promoted Vendor',
+                    'total_amount' => 250.00,
+                ]);
+
+            $response->assertStatus(422);
+            $response->assertJsonValidationErrors(['status']);
+
+            $this->assertDatabaseHas('receipts', [
+                'id' => $receipt->id,
+                'status' => $status,
+                'ocr_flagged' => true,
+                'vendor_name' => 'Original Rejected Vendor',
+                'total_amount' => '150.00',
+            ]);
+        }
+    }
+
+    public function test_delete_receipt_still_allows_deleting_rejected_and_automatic_rejected_receipts(): void
+    {
+        $nonDraftRejected = Receipt::create([
+            'uploaded_by' => $this->employee->id,
+            'file_path' => ['receipts/delete_rejected.png'],
+            'file_hash' => [hash('sha256', 'delete_rejected')],
+            'file_type' => ['png'],
+            'file_size_bytes' => [1024],
+            'status' => 'rejected',
+            'is_draft' => false,
+            'ocr_flagged' => true,
+            'rejection_code' => 'unreadable',
+        ]);
+
+        $draftAutoRejected = Receipt::create([
+            'uploaded_by' => $this->employee->id,
+            'file_path' => ['receipts/delete_auto_rejected.png'],
+            'file_hash' => [hash('sha256', 'delete_auto_rejected')],
+            'file_type' => ['png'],
+            'file_size_bytes' => [1024],
+            'status' => 'automatic-rejected',
+            'is_draft' => true,
+            'ocr_flagged' => true,
+            'rejection_code' => 'faded',
+        ]);
+
+        $res1 = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->deleteJson("/api/reimbursements/receipts/{$nonDraftRejected->id}");
+        $res1->assertStatus(200);
+        $this->assertSoftDeleted('receipts', ['id' => $nonDraftRejected->id]);
+
+        $res2 = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->deleteJson("/api/reimbursements/receipts/{$draftAutoRejected->id}");
+        $res2->assertStatus(200);
+        $this->assertDatabaseMissing('receipts', ['id' => $draftAutoRejected->id]);
     }
 }

@@ -12,23 +12,23 @@ describe("canEditReceipt (My Expense edit gating)", () => {
     "pending",
     "pending-admin-re-review",
     "final-rejected",
+    "rejected",
+    "automatic-rejected",
   ];
   const editable = [
     "processing",
     "processed",
     "flagged",
-    "rejected",
     "failed",
-    "automatic-rejected",
   ];
 
-  it("blocks the four forbidden statuses", () => {
+  it("blocks all forbidden statuses including rejected and automatic-rejected", () => {
     for (const status of forbidden) {
       expect(canEditReceipt({ status })).toBe(false);
     }
   });
 
-  it("allows processing, processed, rejected, failed, and other non-forbidden statuses", () => {
+  it("allows processing, processed, flagged, failed, and other non-forbidden statuses", () => {
     for (const status of editable) {
       expect(canEditReceipt({ status })).toBe(true);
     }
@@ -38,12 +38,16 @@ describe("canEditReceipt (My Expense edit gating)", () => {
     expect(canEditReceipt({ status: "APPROVED" })).toBe(false);
     expect(canEditReceipt({ status: "Processing" })).toBe(true);
     expect(canEditReceipt({ status: "PENDING-ADMIN-RE-REVIEW" })).toBe(false);
+    expect(canEditReceipt({ status: "REJECTED" })).toBe(false);
+    expect(canEditReceipt({ status: "AUTOMATIC-REJECTED" })).toBe(false);
   });
 
   it("falls back to complianceStatus when status is missing", () => {
     expect(canEditReceipt({ complianceStatus: "pending" })).toBe(false);
     expect(canEditReceipt({ complianceStatus: "processed" })).toBe(true);
     expect(canEditReceipt({ complianceStatus: "final-rejected" })).toBe(false);
+    expect(canEditReceipt({ complianceStatus: "rejected" })).toBe(false);
+    expect(canEditReceipt({ complianceStatus: "automatic-rejected" })).toBe(false);
   });
 
   it("returns false for null/undefined/empty receipt", () => {
@@ -58,11 +62,13 @@ describe("canEditReceipt (My Expense edit gating)", () => {
       "pending",
       "pending-admin-re-review",
       "final-rejected",
+      "rejected",
+      "automatic-rejected",
     ]);
   });
 });
 
-describe("canDeleteReceipt (delete gating, allows final-rejected)", () => {
+describe("canDeleteReceipt (delete gating, allows rejected statuses)", () => {
   const forbidden = [
     "approved",
     "pending",
@@ -90,20 +96,20 @@ describe("canDeleteReceipt (delete gating, allows final-rejected)", () => {
     }
   });
 
-  it("allows final-rejected even though edit does not", () => {
-    expect(canDeleteReceipt({ status: "final-rejected" })).toBe(true);
-    expect(canEditReceipt({ status: "final-rejected" })).toBe(false);
+  it("allows final-rejected, rejected, and automatic-rejected even though edit does not", () => {
+    for (const status of ["final-rejected", "rejected", "automatic-rejected"]) {
+      expect(canDeleteReceipt({ status })).toBe(true);
+      expect(canEditReceipt({ status })).toBe(false);
+    }
   });
 
-  it("matches canEditReceipt for all statuses except final-rejected", () => {
+  it("matches canEditReceipt for all non-rejected statuses", () => {
     const others = [
       ...forbidden,
       "processing",
       "processed",
       "flagged",
-      "rejected",
       "failed",
-      "automatic-rejected",
     ];
     for (const status of others) {
       expect(canDeleteReceipt({ status })).toBe(canEditReceipt({ status }));
@@ -114,12 +120,16 @@ describe("canDeleteReceipt (delete gating, allows final-rejected)", () => {
     expect(canDeleteReceipt({ status: "APPROVED" })).toBe(false);
     expect(canDeleteReceipt({ status: "Processing" })).toBe(true);
     expect(canDeleteReceipt({ status: "PENDING-ADMIN-RE-REVIEW" })).toBe(false);
+    expect(canDeleteReceipt({ status: "REJECTED" })).toBe(true);
+    expect(canDeleteReceipt({ status: "AUTOMATIC-REJECTED" })).toBe(true);
   });
 
   it("falls back to complianceStatus when status is missing", () => {
     expect(canDeleteReceipt({ complianceStatus: "pending" })).toBe(false);
     expect(canDeleteReceipt({ complianceStatus: "processed" })).toBe(true);
     expect(canDeleteReceipt({ complianceStatus: "final-rejected" })).toBe(true);
+    expect(canDeleteReceipt({ complianceStatus: "rejected" })).toBe(true);
+    expect(canDeleteReceipt({ complianceStatus: "automatic-rejected" })).toBe(true);
   });
 
   it("returns false for null/undefined/empty receipt", () => {
