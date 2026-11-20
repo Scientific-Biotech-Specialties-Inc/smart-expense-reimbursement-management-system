@@ -22,6 +22,7 @@ import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor
 import { useLiquidationStore } from "@/stores/liquidation";
 import { useReportExport } from "@/composables/useReportExport";
 import { formatPeso, formatDate } from "@/utils/formatters";
+import { sumPenaltyRecords } from "@/utils/liquidationPenalties";
 import { apiFetch } from "@/utils/apiFetch";
 import { getFileUrl } from "@/utils/fileUtils";
 import { validateTemplateData } from "@/utils/sbsiReportTemplateUtils";
@@ -415,6 +416,40 @@ const roadmapAging = computed(() => {
   }
 });
 
+const requestedAdvanceAmount = computed(() =>
+  Number(props.selectedAdvance?.amount ?? props.selectedAdvance?.balance ?? 0),
+);
+
+const totalPenaltyAmount = computed(() => {
+  const sa = props.selectedAdvance;
+  if (!sa) return 0;
+  const fromRecords = sumPenaltyRecords(sa.penalties);
+  if (fromRecords > 0) return fromRecords;
+  if (sa.penalties_total !== undefined && sa.penalties_total !== null) {
+    return Number(sa.penalties_total) || 0;
+  }
+  return Number(roadmapAging.value?.penalty || 0);
+});
+
+const penaltyDaysCount = computed(() => {
+  const sa = props.selectedAdvance;
+  if (Array.isArray(sa?.penalties) && sa.penalties.length > 0) {
+    return sa.penalties.length;
+  }
+  return totalPenaltyAmount.value > 0
+    ? Math.round(totalPenaltyAmount.value / 50)
+    : 0;
+});
+
+const totalAdvanceBalance = computed(() =>
+  Number(
+    props.selectedAdvance?.balance ??
+      props.selectedAdvance?.outstanding_balance ??
+      props.selectedAdvance?.amount ??
+      0,
+  ),
+);
+
 async function handleRemoveReceipt(receiptToRemove) {
   const updated = props.receipts.filter(
     (r) =>
@@ -553,7 +588,13 @@ const normalizedViewReceipt = computed(() => {
           Outstanding Balance
         </p>
         <p class="text-xl font-bold text-primary">
-          {{ formatPeso(selectedAdvance.balance || 0) }}
+          {{ formatPeso(totalAdvanceBalance) }}
+        </p>
+        <p
+          v-if="totalPenaltyAmount > 0"
+          class="text-[11px] font-medium text-danger mt-0.5"
+        >
+          Includes {{ formatPeso(totalPenaltyAmount) }} overdue penalty
         </p>
       </div>
     </div>
@@ -825,17 +866,37 @@ const normalizedViewReceipt = computed(() => {
       </p>
     </section>
 
-    <div class="p-4 mt-2 border border-slate-200 bg-clinical/20 sm:p-5">
+    <div
+      data-testid="liquidation-settlement-summary"
+      class="p-4 mt-2 border border-slate-200 bg-clinical/20 sm:p-5"
+    >
       <h4 class="text-sm font-semibold text-slate-700 mb-4">
         Settlement Summary
       </h4>
 
       <div class="flex">
         <div class="w-full space-y-4">
+          <template v-if="totalPenaltyAmount > 0">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-sm text-slate-600">Requested Amount</span>
+              <span class="font-semibold text-slate-700">{{
+                formatPeso(requestedAdvanceAmount)
+              }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-sm text-slate-600">
+                Overdue Penalty ({{ penaltyDaysCount }}
+                {{ penaltyDaysCount === 1 ? "day" : "days" }} &times; ₱50.00)
+              </span>
+              <span class="font-semibold text-danger"
+                >+{{ formatPeso(totalPenaltyAmount) }}</span
+              >
+            </div>
+          </template>
           <div class="flex items-center justify-between gap-3">
             <span class="text-sm text-slate-600">Total Balance</span>
             <span class="font-bold text-primary">{{
-              formatPeso(selectedAdvance.balance ?? selectedAdvance.amount ?? 0)
+              formatPeso(totalAdvanceBalance)
             }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">

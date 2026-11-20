@@ -22,6 +22,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
 
+## [Unreleased] - Nov 20, 2026
+
+### Fixed
+- **Overdue Penalty Balance Reconciliation & 7-Day Grace Period Enforcement (`apps/api`, `apps/web`, `docs/TECHNICAL_IMPLEMENTATION_DETAILS.md`):**
+  - **Shared Backend Sync (`PenaltySyncService.php`):** Extracted `App\Modules\Shared\Services\PenaltySyncService` (shared by `ComputeDailyPenalties`, `CashAdvanceController`, and `LiquidationController`) to enforce the canonical 7-day grace period after `expected_liquidation_date`, accrue daily `PHP 50.00` `PenaltyRecord` rows into `cash_advances.outstanding_balance` (propagating to `liquidations.outstanding_balance`), pause daily accrual while a liquidation is `pending` / `under-review` (resuming on `revise` / `incomplete`), and write `OVERDUE_PENALTY` audit logs on `entity_type = 'cash_advance'`.
+  - **Deadline Notifications & PDF Reports (`CheckLiquidationDeadlines.php`, `ReportGeneratorService.php`):** Aligned Stage 3 overdue notifications and liquidation PDF penalty fallback with the 7-day grace period.
+  - **Seeder Repair (`OverdueCashAdvanceSeeder.php`):** Updated overdue fixture due dates to `7 + overdueDays` days ago, seeded daily `PHP 50.00` `PenaltyRecord` entries, and persisted penalty-inclusive `outstanding_balance` (`PHP 10,250.00`, `PHP 15,200.00`, `PHP 5,150.00`) across `cash_advances` and `liquidations`.
+  - **Frontend Liquidation UI & Math (`liquidationPenalties.js`, `liquidation.js`, `LiquidationsView.vue`, `LiquidationSettlementForm.vue`, `LiquidationReviewModal.vue`, `UnifiedRoadmapStepper.vue`):** Enforced the 7-day grace period in `calculateAging` and roadmap/overdue helpers, fixed `calculateLiquidationStatus` and `roadmapOverpayment` to evaluate against `outstandingBalance` rather than `cashAdvanceAmount`, and added `Requested Amount` + `Overdue Penalty` = `Total Balance` breakdowns in Settlement Summary and the Admin Review modal.
+
 ## [2.0.1] - Nov 14, 2026
 
 ### Removed

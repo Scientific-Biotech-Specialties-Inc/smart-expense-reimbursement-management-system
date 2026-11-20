@@ -6,6 +6,7 @@ use Illuminate\Console\Command;
 use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\Liquidations\Models\PenaltyRecord;
 use App\Modules\Notifications\Services\NotificationService;
+use App\Modules\Shared\Services\PenaltySyncService;
 use Carbon\Carbon;
 
 class CheckLiquidationDeadlines extends Command
@@ -81,12 +82,12 @@ class CheckLiquidationDeadlines extends Command
                         'due_date' => $formattedDue,
                     ]
                 );
-            } elseif ($daysLeft < 0) {
-                // Stage 3: Overdue alert for employee and all admins (G2-071 Task 2 & 3, G2-077 Task 2)
-                $daysOverdue = abs($daysLeft);
+            } elseif ($daysLeft < -PenaltySyncService::GRACE_PERIOD_DAYS) {
+                // Stage 3: Overdue alert past 7-day grace period for employee and all admins
+                $daysOverdue = abs($daysLeft) - PenaltySyncService::GRACE_PERIOD_DAYS;
                 $penaltySum = (float) PenaltyRecord::where('cash_advance_id', $advance->id)->sum('penalty_amount');
                 if ($penaltySum <= 0) {
-                    $penaltySum = $daysOverdue * 50.00;
+                    $penaltySum = $daysOverdue * PenaltySyncService::DAILY_PENALTY_PHP;
                 }
                 $formattedPenalty = NotificationService::formatPeso($penaltySum);
                 $dayWord = $daysOverdue === 1 ? 'day' : 'days';

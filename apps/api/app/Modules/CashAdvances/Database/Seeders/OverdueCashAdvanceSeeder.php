@@ -97,10 +97,12 @@ class OverdueCashAdvanceSeeder extends Seeder
         int $categoryId
     ): void {
         $today = Carbon::today();
-        $dueDate = $today->copy()->subDays($overdueDays);
+        $dueDate = $today->copy()->subDays(7 + $overdueDays);
         $disbursedAt = $dueDate->copy()->subDays(10);
         $approvedAt = $disbursedAt->copy()->subDays(2);
         $submittedAt = $approvedAt->copy()->subDays(2);
+        $penaltyTotal = $overdueDays * 50.00;
+        $totalBalance = $advanceAmount + $penaltyTotal;
 
         $advance = CashAdvance::where('user_id', $user->id)
             ->where('purpose', $purpose)
@@ -111,7 +113,7 @@ class OverdueCashAdvanceSeeder extends Seeder
                 'user_id' => $user->id,
                 'purpose' => $purpose,
                 'amount' => $advanceAmount,
-                'outstanding_balance' => $advanceAmount,
+                'outstanding_balance' => $totalBalance,
                 'expected_disbursement_date' => $disbursedAt,
                 'expected_liquidation_date' => $dueDate,
                 'status' => 'overdue',
@@ -126,7 +128,7 @@ class OverdueCashAdvanceSeeder extends Seeder
         } else {
             $advance->forceFill([
                 'amount' => $advanceAmount,
-                'outstanding_balance' => $advanceAmount,
+                'outstanding_balance' => $totalBalance,
                 'expected_disbursement_date' => $disbursedAt,
                 'expected_liquidation_date' => $dueDate,
                 'status' => 'overdue',
@@ -163,7 +165,7 @@ class OverdueCashAdvanceSeeder extends Seeder
             ['from' => 'pending', 'to' => 'approved', 'at' => $approvedAt, 'by' => $approver->id],
             ['from' => 'approved', 'to' => 'disbursed', 'at' => $disbursedAt, 'by' => $approver->id],
             ['from' => 'disbursed', 'to' => 'signed', 'at' => $disbursedAt->copy()->addDay(), 'by' => $user->id],
-            ['from' => 'signed', 'to' => 'overdue', 'at' => $dueDate->copy()->addDay(), 'by' => $approver->id],
+            ['from' => 'signed', 'to' => 'overdue', 'at' => $dueDate->copy()->addDays(8), 'by' => $approver->id],
         ];
 
         foreach ($transitions as $t) {
@@ -176,13 +178,15 @@ class OverdueCashAdvanceSeeder extends Seeder
             ]);
         }
 
-        // Penalty record
+        // Daily penalty records (₱50/day past the 7-day grace period)
         PenaltyRecord::where('cash_advance_id', $advance->id)->delete();
-        PenaltyRecord::create([
-            'cash_advance_id' => $advance->id,
-            'days_overdue' => $overdueDays,
-            'penalty_amount' => $overdueDays * 50.00,
-        ]);
+        for ($day = 1; $day <= $overdueDays; $day++) {
+            PenaltyRecord::create([
+                'cash_advance_id' => $advance->id,
+                'days_overdue' => $day,
+                'penalty_amount' => 50.00,
+            ]);
+        }
 
         // Seed 3 real receipts (receipt 1.jpg, receipt 2.jpg, receipt 3.jpg) for this liquidation
         $realReceipts = $this->seedRealReceiptsForLiquidation(
@@ -195,14 +199,14 @@ class OverdueCashAdvanceSeeder extends Seeder
 
         $receiptIds = array_map(fn ($r) => $r->id, $realReceipts);
 
-        // Liquidation pointing to advance with excess amount and real receipts
+        // Liquidation pointing to advance with penalty-inclusive balance and real receipts
         $liquidation = Liquidation::where('cash_advance_id', $advance->id)->first();
         if ($liquidation) {
             $liquidation->update([
                 'status' => 'pending',
                 'reimbursement_ids' => $receiptIds,
                 'total_expense_amount' => $expenseAmount,
-                'outstanding_balance' => $advanceAmount,
+                'outstanding_balance' => $totalBalance,
             ]);
         } else {
             $liquidation = Liquidation::create([
@@ -211,7 +215,7 @@ class OverdueCashAdvanceSeeder extends Seeder
                 'status' => 'pending',
                 'reimbursement_ids' => $receiptIds,
                 'total_expense_amount' => $expenseAmount,
-                'outstanding_balance' => $advanceAmount,
+                'outstanding_balance' => $totalBalance,
                 'shortfall_explanation' => null,
                 'admin_note' => null,
             ]);
@@ -237,10 +241,12 @@ class OverdueCashAdvanceSeeder extends Seeder
         string $reference
     ): void {
         $today = Carbon::today();
-        $dueDate = $today->copy()->subDays($overdueDays);
+        $dueDate = $today->copy()->subDays(7 + $overdueDays);
         $disbursedAt = $dueDate->copy()->subDays(10);
         $approvedAt = $disbursedAt->copy()->subDays(2);
         $submittedAt = $approvedAt->copy()->subDays(2);
+        $penaltyTotal = $overdueDays * 50.00;
+        $totalBalance = $advanceAmount + $penaltyTotal;
 
         $advance = CashAdvance::where('user_id', $user->id)
             ->where('purpose', $purpose)
@@ -251,7 +257,7 @@ class OverdueCashAdvanceSeeder extends Seeder
                 'user_id' => $user->id,
                 'purpose' => $purpose,
                 'amount' => $advanceAmount,
-                'outstanding_balance' => $advanceAmount,
+                'outstanding_balance' => $totalBalance,
                 'expected_disbursement_date' => $disbursedAt,
                 'expected_liquidation_date' => $dueDate,
                 'status' => 'overdue',
@@ -266,7 +272,7 @@ class OverdueCashAdvanceSeeder extends Seeder
         } else {
             $advance->forceFill([
                 'amount' => $advanceAmount,
-                'outstanding_balance' => $advanceAmount,
+                'outstanding_balance' => $totalBalance,
                 'expected_disbursement_date' => $disbursedAt,
                 'expected_liquidation_date' => $dueDate,
                 'status' => 'overdue',
@@ -300,7 +306,7 @@ class OverdueCashAdvanceSeeder extends Seeder
             ['from' => 'pending', 'to' => 'approved', 'at' => $approvedAt, 'by' => $approver->id],
             ['from' => 'approved', 'to' => 'disbursed', 'at' => $disbursedAt, 'by' => $approver->id],
             ['from' => 'disbursed', 'to' => 'signed', 'at' => $disbursedAt->copy()->addDay(), 'by' => $user->id],
-            ['from' => 'signed', 'to' => 'overdue', 'at' => $dueDate->copy()->addDay(), 'by' => $approver->id],
+            ['from' => 'signed', 'to' => 'overdue', 'at' => $dueDate->copy()->addDays(8), 'by' => $approver->id],
         ];
 
         foreach ($transitions as $t) {
@@ -314,11 +320,13 @@ class OverdueCashAdvanceSeeder extends Seeder
         }
 
         PenaltyRecord::where('cash_advance_id', $advance->id)->delete();
-        PenaltyRecord::create([
-            'cash_advance_id' => $advance->id,
-            'days_overdue' => $overdueDays,
-            'penalty_amount' => $overdueDays * 50.00,
-        ]);
+        for ($day = 1; $day <= $overdueDays; $day++) {
+            PenaltyRecord::create([
+                'cash_advance_id' => $advance->id,
+                'days_overdue' => $day,
+                'penalty_amount' => 50.00,
+            ]);
+        }
     }
 
     /**
