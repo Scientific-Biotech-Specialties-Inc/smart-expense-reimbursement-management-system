@@ -2,6 +2,10 @@
 import { computed, ref } from "vue";
 import { X, ShieldCheck, Eye, FileText, Download } from "lucide-vue-next";
 import { formatPeso, formatDate } from "@/utils/formatters";
+import {
+  computePenaltyDaysPastGrace,
+  sumPenaltyRecords,
+} from "@/utils/liquidationPenalties";
 import { downloadSbsiReportPdf } from "@/utils/sbsiPdfGenerator";
 import BaseButton from "@/components/base/BaseButton.vue";
 import StatusBadge from "@/components/base/StatusBadge.vue";
@@ -150,22 +154,40 @@ const roadmapAging = computed(() => {
   }
 });
 
+const reviewPenaltyTotal = computed(() => {
+  const fromRecords = sumPenaltyRecords(roadmapPenalties.value);
+  if (fromRecords > 0) return fromRecords;
+  const explicit = Number(
+    props.reviewingCase?.penaltiesTotal ??
+      roadmapCashAdvance.value?.penalties_total ??
+      0,
+  );
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  return Number(roadmapAging.value?.penalty || 0);
+});
+
+const reviewTotalAdvanceBalance = computed(() =>
+  Number(
+    props.reviewingCase?.outstandingBalance ??
+      roadmapCashAdvance.value?.outstanding_balance ??
+      roadmapCashAdvance.value?.balance ??
+      (Number(props.reviewingCase?.cashAdvanceAmount || 0) +
+        reviewPenaltyTotal.value),
+  ),
+);
+
 const roadmapOverpayment = computed(() => {
   const total = Number(roadmapLiquidation.value?.total_expense_amount ?? 0);
-  const bal = Number(roadmapCashAdvance.value?.amount ?? roadmapCashAdvance.value?.balance ?? props.reviewingCase?.cashAdvanceAmount ?? 0);
+  const bal = reviewTotalAdvanceBalance.value;
   return Math.max(0, total - bal);
 });
 
 const isCaseOverdue = computed(() => {
   if (String(props.reviewStatus).toLowerCase().trim() === "overdue") return true;
   if (roadmapAging.value?.isOverdue) return true;
+  if (roadmapPenalties.value.length > 0) return true;
   const due = props.reviewingCase?.dueDate || props.reviewingCase?.expected_liquidation_date || roadmapCashAdvance.value?.expected_liquidation_date;
-  if (!due) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(due);
-  d.setHours(0, 0, 0, 0);
-  return d < today;
+  return computePenaltyDaysPastGrace(due) > 0;
 });
 
 function handleRoadmapNavigate(payload) {
@@ -250,6 +272,16 @@ function handleRoadmapNavigate(payload) {
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Advance Date</p>
               <p class="text-sm text-slate-700">{{ formatDateOnly(reviewingCase.dateOfAdvances) }}</p>
             </div>
+            <template v-if="reviewPenaltyTotal > 0">
+              <div>
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Overdue Penalty</p>
+                <p class="text-sm font-semibold text-danger">+{{ formatPeso(reviewPenaltyTotal) }}</p>
+              </div>
+              <div>
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Total Balance (incl. Penalty)</p>
+                <p class="text-sm font-semibold text-slate-800">{{ formatPeso(reviewTotalAdvanceBalance) }}</p>
+              </div>
+            </template>
           </section>
 
           <!-- Receipts -->

@@ -359,11 +359,14 @@ class ReportGeneratorService
         }
 
         if ($today->gt($dueDate)) {
-            $daysOverdue = abs((int) $today->diffInDays($dueDate));
-            $computedPenalty = $penaltySum > 0 ? $penaltySum : ($daysOverdue * 50.0);
+            $daysPastDue = abs((int) $today->diffInDays($dueDate));
+            $daysOverdue = max(0, $daysPastDue - PenaltySyncService::GRACE_PERIOD_DAYS);
+            $computedPenalty = $penaltySum > 0 ? $penaltySum : ($daysOverdue * PenaltySyncService::DAILY_PENALTY_PHP);
             return [
                 'due_date_label' => $dueLabel,
-                'countdown_label' => "{$daysOverdue} day(s) overdue",
+                'countdown_label' => $daysOverdue > 0
+                    ? "{$daysOverdue} day(s) overdue"
+                    : "Grace period ({$daysPastDue} day(s) past due)",
                 'penalty_amount' => $computedPenalty,
             ];
         }

@@ -297,4 +297,57 @@ describe("LiquidationReviewModal Header Chipsets", () => {
     expect(modal.props("templateData")).toEqual(templateData);
     expect(modal.props("fileUrl")).toBe("https://cdn.example.com/liquidations/report-202.pdf");
   });
+
+  it("displays penalty breakdown and computes roadmapOverpayment against penalty-inclusive balance", () => {
+    const wrapper = mount(LiquidationReviewModal, {
+      props: {
+        isOpen: true,
+        reviewingCase: {
+          id: "LIQ-007",
+          cashAdvanceAmount: 10000,
+          outstandingBalance: 10250,
+          submittedReceiptTotal: 12500,
+          dueDate: "2026-11-08",
+          dateOfAdvances: "2026-11-01",
+          requestorName: "General Employee",
+          penalties: [
+            { days_overdue: 1, penalty_amount: 50 },
+            { days_overdue: 2, penalty_amount: 50 },
+            { days_overdue: 3, penalty_amount: 50 },
+            { days_overdue: 4, penalty_amount: 50 },
+            { days_overdue: 5, penalty_amount: 50 },
+          ],
+          cash_advance: {
+            id: 19,
+            amount: 10000,
+            outstanding_balance: 10250,
+            status: "overdue",
+            expected_liquidation_date: "2026-11-08",
+          },
+        },
+        reviewStatus: "Overpayment",
+        reviewOutstandingBalance: 0,
+        acceptedReviewTotal: 12500,
+        reviewReceipts: [],
+        getFileUrl: () => "",
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          ReceiptImagePreview: true,
+          BaseReceiptImage: true,
+          SbsiReportPreviewModal: true,
+        },
+      },
+    });
+
+    const text = wrapper.text();
+    expect(text).toContain("Total Balance (incl. Penalty)");
+    expect(text).toContain("10,250.00");
+    expect(text).toContain("Overdue Penalty");
+    expect(text).toContain("250.00");
+    // 12,500 expenses - 10,250 balance = 2,250 overpayment (not 2,500)
+    const stepper = wrapper.findComponent({ name: "UnifiedRoadmapStepper" });
+    expect(stepper.props("overpaymentAmount")).toBe(2250);
+  });
 });

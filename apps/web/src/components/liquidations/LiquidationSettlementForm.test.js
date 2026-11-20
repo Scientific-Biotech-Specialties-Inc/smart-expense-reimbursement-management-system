@@ -442,4 +442,53 @@ describe("LiquidationSettlementForm — Receipt Grid vs Form List", () => {
     expect(wrapper.emitted("update:reportAttachment")).toContainEqual([null]);
     expect(wrapper.emitted("file-cleared")).toBeTruthy();
   });
+
+  it("displays Requested Amount + Overdue Penalty = Total Balance breakdown in Settlement Summary when penalties exist", () => {
+    const wrapper = mount(LiquidationSettlementForm, {
+      props: {
+        selectedAdvance: {
+          id: 19,
+          purpose: "Regional Client Onsite",
+          amount: 10000,
+          balance: 10250,
+          outstanding_balance: 10250,
+          status: "overdue",
+          acknowledgedAt: "2026-11-01",
+          penalties: [
+            { days_overdue: 1, penalty_amount: 50 },
+            { days_overdue: 2, penalty_amount: 50 },
+            { days_overdue: 3, penalty_amount: 50 },
+            { days_overdue: 4, penalty_amount: 50 },
+            { days_overdue: 5, penalty_amount: 50 },
+          ],
+        },
+        receipts: [],
+        totalExpenseAmount: 10000,
+        variance: 250,
+        liquidationStatus: "Incomplete",
+        liquidationOutstandingBalance: 250,
+        overpaymentAmount: 0,
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          FileUpload: true,
+          ScannedReceiptsList: true,
+          SbsiReportDocumentEditor: true,
+          BaseReceiptDetailModal: true,
+        },
+      },
+    });
+
+    const summary = wrapper.find('[data-testid="liquidation-settlement-summary"]');
+    expect(summary.exists()).toBe(true);
+    expect(summary.text()).toContain("Requested Amount");
+    expect(summary.text()).toContain("10,000.00");
+    expect(summary.text()).toContain("Overdue Penalty");
+    expect(summary.text()).toContain("250.00");
+    expect(summary.text()).toContain("Total Balance");
+    expect(summary.text()).toContain("10,250.00");
+    expect(summary.text()).toContain("Outstanding Balance");
+    expect(summary.text()).toContain("250.00");
+  });
 });

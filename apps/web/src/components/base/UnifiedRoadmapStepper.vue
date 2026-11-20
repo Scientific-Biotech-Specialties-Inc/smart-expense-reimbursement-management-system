@@ -10,6 +10,11 @@ import {
   ArrowRight,
 } from "lucide-vue-next";
 import { formatPeso, formatDate } from "@/utils/formatters";
+import {
+  DAILY_PENALTY_PHP,
+  computePenaltyDaysPastGrace,
+  sumPenaltyRecords,
+} from "@/utils/liquidationPenalties";
 import { useHorizontalScroll } from "@/composables/useHorizontalScroll";
 import RoadmapStepItem from "./RoadmapStepItem.vue";
 
@@ -478,47 +483,25 @@ const isOverdue = computed(() => {
   const due =
     props.cashAdvance?.expected_liquidation_date || props.cashAdvance?.dueDate;
   if (!due) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(due);
-  d.setHours(0, 0, 0, 0);
   const terminal = ["liquidated", "settled", "rejected"];
   if (terminal.includes(caStatus.value)) return false;
   if (["pending", "approved", "under-review"].includes(caStatus.value))
     return false;
-  return d < today;
+  return computePenaltyDaysPastGrace(due) > 0;
 });
 
 const totalPenalty = computed(() => {
-  if (props.penalties && props.penalties.length > 0) {
-    return props.penalties.reduce(
-      (s, p) =>
-        s + Number(p.penalty_amount ?? p.amount ?? p.penaltyAmount ?? 0),
-      0,
-    );
-  }
-  if (
-    props.cashAdvance?.penalties &&
-    Array.isArray(props.cashAdvance.penalties)
-  ) {
-    return props.cashAdvance.penalties.reduce(
-      (s, p) => s + Number(p.penalty_amount ?? p.amount ?? 0),
-      0,
-    );
-  }
+  const fromProps = sumPenaltyRecords(props.penalties);
+  if (fromProps > 0) return fromProps;
+  const fromAdvance = sumPenaltyRecords(props.cashAdvance?.penalties);
+  if (fromAdvance > 0) return fromAdvance;
   if (props.aging?.penalty) return Number(props.aging.penalty);
   if (isOverdue.value) {
     const due =
       props.cashAdvance?.expected_liquidation_date ||
       props.cashAdvance?.dueDate;
-    if (due) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const d = new Date(due);
-      d.setHours(0, 0, 0, 0);
-      const diff = Math.floor((today - d) / (1000 * 60 * 60 * 24));
-      if (diff > 0) return diff * 50;
-    }
+    const penaltyDays = computePenaltyDaysPastGrace(due);
+    if (penaltyDays > 0) return penaltyDays * DAILY_PENALTY_PHP;
   }
   return 0;
 });

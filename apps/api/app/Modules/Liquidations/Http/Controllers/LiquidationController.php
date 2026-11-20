@@ -9,6 +9,7 @@ use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Shared\Services\CashAdvanceEnrichmentService;
 use App\Modules\Shared\Services\PasswordVerificationService;
+use App\Modules\Shared\Services\PenaltySyncService;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Jobs\DispatchReceiptToAiService;
@@ -25,8 +26,10 @@ class LiquidationController extends Controller
     use ValidatesReceiptDuplicates;
     use HandlesReportTemplateData;
 
-    public function __construct(private readonly CashAdvanceEnrichmentService $enrichmentService)
-    {
+    public function __construct(
+        private readonly CashAdvanceEnrichmentService $enrichmentService,
+        private readonly PenaltySyncService $penaltySync
+    ) {
     }
 
     /**
@@ -140,10 +143,13 @@ class LiquidationController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
+        $canManage = $user->can('serms.liquidations.manage');
+
+        $this->penaltySync->syncPendingOverdueAdvances($canManage ? null : (int) $user->id);
 
         $with = array_merge(['user', 'cashAdvance'], array_map(fn($r) => "cashAdvance.$r", self::CASH_ADVANCE_ROADMAP_WITH));
 
-        if (!$request->user()->can('serms.liquidations.manage')) {
+        if (!$canManage) {
             $liquidations = Liquidation::where('user_id', $user->id)
                 ->with($with)
                 ->orderByDesc('created_at')
@@ -447,10 +453,14 @@ class LiquidationController extends Controller
                 return response()->json(['message' => 'Conflict. Cash advance is not in a reconcilable state.'], 409);
             }
 
+            // Reconcile any unapplied overdue penalties into outstanding_balance before snapshotting
+            $this->penaltySync->syncAdvance($advance, true);
+            $advance->refresh();
+
             // Update each receipt in database with user-edited fields
             $receiptIds = $this->syncLiquidationReceipts($receiptsData);
 
-            // Snapshot the cash advance's current outstanding balance
+            // Snapshot the cash advance's current outstanding balance (principal + accrued penalties)
             $currentOutstandingBalance = $advance->outstanding_balance ?? $advance->amount;
 
             // Calculate variance based on the current balance, not original amount
@@ -561,12 +571,18 @@ class LiquidationController extends Controller
     public function show(Request $request, $id)
     {
         $user = $request->user();
-        $with = array_merge(['user', 'cashAdvance'], array_map(fn($r) => "cashAdvance.$r", self::CASH_ADVANCE_ROADMAP_WITH));
-        $liquidation = Liquidation::with($with)->findOrFail($id);
+        $liquidation = Liquidation::with('cashAdvance')->findOrFail($id);
 
         if (!$request->user()->can('serms.liquidations.manage') && $liquidation->user_id !== $user->id) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
+
+        if ($liquidation->cashAdvance) {
+            $this->penaltySync->syncAdvance($liquidation->cashAdvance);
+        }
+
+        $with = array_merge(['user', 'cashAdvance'], array_map(fn($r) => "cashAdvance.$r", self::CASH_ADVANCE_ROADMAP_WITH));
+        $liquidation = Liquidation::with($with)->findOrFail($id);
 
         $this->hydrateLiquidation($liquidation);
 
@@ -788,6 +804,11 @@ class LiquidationController extends Controller
 
             // Reset revise → pending on re-submission (rejected terminal stays rejected)
             if ($liquidation->status === 'revise') {
+                if ($advance = CashAdvance::find($liquidation->cash_advance_id)) {
+                    $this->penaltySync->syncAdvance($advance, true);
+                    $advance->refresh();
+                    $liquidation->outstanding_balance = $advance->outstanding_balance ?? $advance->amount;
+                }
                 $liquidation->status = 'pending';
             }
 

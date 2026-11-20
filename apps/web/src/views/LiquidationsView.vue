@@ -37,6 +37,10 @@ import {
 import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
 import { formatPeso, formatDate, truncateText } from "@/utils/formatters";
 import { numberOrZero } from "@/utils/numbers";
+import {
+  computePenaltyDaysPastGrace,
+  sumPenaltyRecords,
+} from "@/utils/liquidationPenalties";
 import { getFileUrl } from "@/utils/fileUtils";
 import { firstFilePathField } from "@/utils/receiptUtils";
 import { createDefaultTemplateData } from "@/utils/sbsiReportTemplateUtils";
@@ -253,7 +257,8 @@ const liquidationStatus = computed(() => {
 });
 const overpaymentAmount = computed(() =>
   Math.max(
-    totalExpenseAmount.value - numberOrZero(selectedAdvance.value?.balance),
+    totalExpenseAmount.value -
+      numberOrZero(selectedAdvance.value?.balance ?? selectedAdvance.value?.amount),
     0,
   ),
 );
@@ -444,11 +449,27 @@ const sourceCases = computed(() => {
       };
     });
 
+    const penalties = item.cash_advance?.penalties || item.penalties || [];
+    const penaltiesTotal = numberOrZero(
+      item.penalties_total ??
+        item.cash_advance?.penalties_total ??
+        sumPenaltyRecords(penalties),
+    );
+    const resolvedBalance = numberOrZero(
+      item.outstanding_balance ??
+        item.cash_advance?.outstanding_balance ??
+        item.cash_advance?.balance ??
+        item.cash_advance?.amount,
+    );
+
     const statusContext = {
       cashAdvanceAmount: Number(item.cash_advance?.amount || 0),
+      outstandingBalance: resolvedBalance,
       dueDate:
         item.cash_advance?.expected_liquidation_date ||
         item.cash_advance?.dueDate,
+      penalties,
+      cashAdvanceStatus: item.cash_advance?.status,
     };
 
     const displayStatus = mapBackendStatusToDisplayStatus(
@@ -462,6 +483,9 @@ const sourceCases = computed(() => {
       databaseId: item.id,
       advanceId: `CA-${String(item.cash_advance_id).padStart(3, "0")}`,
       cashAdvanceId: item.cash_advance_id,
+      cashAdvanceStatus: item.cash_advance?.status || null,
+      penalties,
+      penaltiesTotal,
       purpose:
         item.purpose ||
         item.cash_advance?.purpose ||
@@ -485,9 +509,7 @@ const sourceCases = computed(() => {
         item.cash_advance?.expected_liquidation_date ||
         item.cash_advance?.dueDate,
       cashAdvanceAmount: Number(item.cash_advance?.amount || 0),
-      outstandingBalance: numberOrZero(
-        item.outstanding_balance ?? item.cash_advance?.amount,
-      ),
+      outstandingBalance: resolvedBalance,
       receipts: mappedReceipts,
       submittedReceiptTotal: Number(item.total_expense_amount || 0),
       shortfallExplanation: item.shortfall_explanation || "",
@@ -824,15 +846,16 @@ const isModalAdvanceOverdue = computed(() => {
   if (!selectedAdvance.value) return false;
   if (modalAdvanceStatus.value === "overdue") return true;
   if (liqStore.calculateAging(selectedAdvance.value)?.isOverdue) return true;
+  if (
+    Array.isArray(selectedAdvance.value?.penalties) &&
+    selectedAdvance.value.penalties.length > 0
+  ) {
+    return true;
+  }
   const due =
     selectedAdvance.value.dueDate ||
     selectedAdvance.value.expected_liquidation_date;
-  if (!due) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(due);
-  d.setHours(0, 0, 0, 0);
-  return d < today;
+  return computePenaltyDaysPastGrace(due) > 0;
 });
 
 function employeeSortValue(advance, key) {
@@ -1149,7 +1172,12 @@ function handleEditLiquidation(row) {
     selectAdvance({
       id: advId,
       amount: row.cashAdvanceAmount,
+      balance: row.outstandingBalance,
       outstanding_balance: row.outstandingBalance,
+      penalties: row.penalties || [],
+      penalties_total: row.penaltiesTotal || 0,
+      dueDate: row.dueDate,
+      status: row.cashAdvanceStatus || row.status,
     });
   }
   // Scroll to settlement form for immediate editing
@@ -1435,21 +1463,27 @@ function acceptedReceiptTotal(row, receipts) {
 }
 
 function calculateLiquidationStatus(row, acceptedTotal) {
-  const outstanding = Math.max(row.cashAdvanceAmount - acceptedTotal, 0);
-  if (acceptedTotal > row.cashAdvanceAmount) return "Overpayment";
+  const balanceTarget = numberOrZero(
+    row.outstandingBalance ?? row.cashAdvanceAmount,
+  );
+  const outstanding = Math.max(balanceTarget - acceptedTotal, 0);
+  if (acceptedTotal > balanceTarget) return "Overpayment";
   if (outstanding === 0) return "Liquidated";
-  if (isPastDue(row.dueDate)) return "Overdue";
+  if (isPastDue(row.dueDate, row)) return "Overdue";
   return "Incomplete";
 }
 
-function isPastDue(value) {
-  if (!value) return false;
-  const dueDate = new Date(value);
-  if (Number.isNaN(dueDate.getTime())) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  dueDate.setHours(0, 0, 0, 0);
-  return dueDate < today;
+function isPastDue(value, row = null) {
+  if (
+    String(row?.cashAdvanceStatus || row?.status || "").toLowerCase() ===
+    "overdue"
+  ) {
+    return true;
+  }
+  if (Array.isArray(row?.penalties) && row.penalties.length > 0) {
+    return true;
+  }
+  return computePenaltyDaysPastGrace(value) > 0;
 }
 
 function toggleSort(column) {
