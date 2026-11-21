@@ -8,6 +8,15 @@ Please refer to [**`DOC_CHANGELOG.md`**](DOC_CHANGELOG.md) for the complete vers
 
 ## [Unreleased] - Nov 21, 2026
 
+### Added
+- **Smart Multi-Receipt Auto-Split & Per-Card Isolation (`docs/SERMS.md`, `apps/web`):**
+  - Updated `docs/SERMS.md` with the Smart Multi-Receipt Auto-Split workflow and `split_receipts` / `segment_indices` polling & callback contract across Reimbursements, My Expense, and Liquidations.
+  - **`receiptUtils.js`:** Added shared A-09 helpers `hasSplitReceipts()`, `formatSplitReceiptsToastMessage()`, `resolveSplitSegmentIndices()`, and `isDuplicateOcrResponse()`.
+  - **`useReceiptUploads.js`:** Added 1-file fallback in `submitSegments()`, enforced the 6-file cap, checked `split_receipts` before early `rejected`/`failed` returns in `startPolling()`, expanded multi-receipt placeholders into individual draft cards (preserving `isMultiReceipt` only when a group owns `> 1` image), guarded blob URL revocation against sibling reuse, and isolated per-card rejections/duplicates with dynamic index lookup.
+  - **`FileUpload.vue`:** Updated liquidation `startPolling()` / OCR resolution to check `split_receipts` before `failed`/`rejected` early returns, partition `entry.pages` / `entry.previews`, insert child entries in-place while emitting `update:modelValue`, and evaluate each split entry independently (`hydrateEntry`, `handleRejectedEntry`, or `ocrStatus = 'failed'`) with sibling-safe blob cleanup.
+  - **`ReimbursementFormView.vue`:** Updated `onReceiptSelect()` to fall back directly to `addReceiptFiles()` on 1-file Multi Receipt selections, enforce the 6-file cap on multi-file selections, and reset `uploadMode` to `'single'` on selection or cancel.
+  - **Vitest Coverage:** Added `useReceiptUploads.test.js` and `FileUpload.test.js`, and extended `receiptUtils.test.js`, `ReceiptUploadModal.spec.js`, and `ReimbursementFormView.duplicate-cancel.test.js`.
+
 ### Changed
 - **Liquidation Minimum Balance Enforcement (`docs/SERMS.md`, `docs/PRD.md`, `apps/api`, `apps/web`):**
   - Updated `docs/SERMS.md` and `docs/PRD.md` to mandate `total_expense_amount >= outstanding_balance` on liquidation submissions and edits (`422` validation error on `total_expense_amount` when below balance), replacing shortfall-permitted submission flow.

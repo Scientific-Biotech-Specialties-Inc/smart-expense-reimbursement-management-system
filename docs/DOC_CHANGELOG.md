@@ -24,6 +24,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased] - Nov 21, 2026
 
+### Added
+- **Smart Multi-Receipt Auto-Split & Per-Card Isolation (`docs/SERMS.md`, `apps/web`):**
+  - Documented the Multi-Receipt Auto-Split workflow and `split_receipts` / `segment_indices` cross-service contract in `docs/SERMS.md` (§4.2 and §6.3) and `docs/CHANGELOG.md`.
+  - **Shared Utilities (`receiptUtils.js`):** Extracted `hasSplitReceipts()`, `formatSplitReceiptsToastMessage()`, `resolveSplitSegmentIndices()`, and `isDuplicateOcrResponse()`.
+  - **Reimbursements & My Expense (`useReceiptUploads.js`, `ReimbursementFormView.vue`):** Delegated 1-file `submitSegments()` and `onReceiptSelect()` Multi Receipt selections to `addReceiptFiles()`, capped multi-file batches at 6, expanded `split_receipts` before early rejection/failure returns, isolated per-card rejections/duplicates by card `id`/reference, and guarded blob URL revocation across siblings.
+  - **Liquidations (`FileUpload.vue`):** Partitioned `pages`/`previews` on `split_receipts`, inserted child entries after the placeholder entry, showed the split info toast, and evaluated each entry independently (`hydrateEntry`, `handleRejectedEntry`, or `failed` status).
+  - **Vitest Coverage:** Added `useReceiptUploads.test.js` and `FileUpload.test.js`, and extended `receiptUtils.test.js`, `ReceiptUploadModal.spec.js`, and `ReimbursementFormView.duplicate-cancel.test.js`.
+
 ### Changed
 - **Liquidation Minimum Balance Enforcement (`docs/SERMS.md`, `docs/PRD.md`, `apps/api`, `apps/web`):**
   - Updated `docs/SERMS.md` and `docs/PRD.md` to require `total_expense_amount >= outstanding_balance` (equal to or greater than the current penalty-inclusive balance) on liquidation submissions and updates, blocking under-balance submissions at both UI and API layers.

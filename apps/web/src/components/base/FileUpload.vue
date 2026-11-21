@@ -14,9 +14,13 @@ import {
 import { apiFetch } from '../../utils/apiFetch'
 import {
   formatDateForInput,
+  formatSplitReceiptsToastMessage,
+  hasSplitReceipts,
+  isDuplicateOcrResponse,
   markOcrReturnedAndGetMissingWarning,
   normalizeDiscountType,
   normalizeVatClassification,
+  resolveSplitSegmentIndices,
 } from '../../utils/receiptUtils'
 import { useToast } from '../../composables/useToast'
 import { isOcrOfflineFailure } from '../../utils/ocrErrors'
@@ -178,15 +182,20 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function createUploadEntry(pages, displayName, size) {
+function createUploadEntry(pages, displayName, size, existingPreviews = null) {
+  const previews =
+    Array.isArray(existingPreviews) && existingPreviews.length === pages.length
+      ? existingPreviews
+      : pages.map(f => (f?.type?.startsWith('image/') ? URL.createObjectURL(f) : null))
   return {
     localId: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     pages,
     name: displayName,
     fileName: displayName,
+    fileType: pages[0]?.type || '',
     size,
-    previews: pages.map(f => (f.type.startsWith('image/') ? URL.createObjectURL(f) : null)),
-    thumbnail: pages[0]?.type.startsWith('image/') ? URL.createObjectURL(pages[0]) : null,
+    previews,
+    thumbnail: previews[0] || null,
     ocrStatus: 'idle',
     hasOcrReturned: false,
     merchantName: '',
@@ -332,6 +341,148 @@ function hydrateEntry(entry, ocrData) {
   notifyMissingFieldsAfterTick(entry)
 }
 
+function buildGroupMeta(groupPages, payload, indexFallback) {
+  const displayName =
+    groupPages.length > 1
+      ? `Multi-page Receipt (${groupPages.length} pages)`
+      : (groupPages[0]?.name || payload?.vendor_name || `Receipt-${payload?.id ?? indexFallback + 1}`)
+  const size = groupPages.reduce((acc, f) => acc + (f?.size || 0), 0)
+  return { displayName, size }
+}
+
+async function applySingleOcrOutcome(targetEntry, payload) {
+  if (payload?.id) targetEntry.id = payload.id
+  const status = String(payload?.status || '').toLowerCase()
+  const reason = payload?.rejection_reason || payload?.error || ''
+
+  if (
+    status === 'failed' ||
+    (status === 'rejected' &&
+      isOcrOfflineFailure({
+        status,
+        rejectionCode: payload?.rejection_code,
+        rejectionReason: reason,
+      }))
+  ) {
+    targetEntry.ocrStatus = 'failed'
+    targetEntry.rejectionCode = payload?.rejection_code || 'ocr_failed'
+    targetEntry.rejectionReason =
+      reason || 'OCR processing failed. You can retry OCR.'
+    emit('update:modelValue', files.value)
+    emit('upload-error', {
+      type: 'failed',
+      message: targetEntry.rejectionReason,
+      code: targetEntry.rejectionCode,
+      entry: targetEntry,
+    })
+    return
+  }
+
+  if (status === 'rejected') {
+    const isDup = isDuplicateOcrResponse(payload)
+    await handleRejectedEntry(targetEntry, {
+      isDuplicate: isDup,
+      rejectionCode:
+        payload?.rejection_code || (isDup ? 'duplicate' : 'quality_failed'),
+      rejectionReason: reason || 'Receipt rejected.',
+    })
+    return
+  }
+
+  hydrateEntry(targetEntry, payload)
+}
+
+async function applySplitEntries(entry, data) {
+  const allPayloads = [data, ...data.split_receipts]
+  addToast({
+    message: formatSplitReceiptsToastMessage(allPayloads.length),
+    type: 'info',
+  })
+
+  const origPages = Array.isArray(entry.pages) ? entry.pages : []
+  const origPreviews = Array.isArray(entry.previews) ? entry.previews : []
+  const segmentIndexGroups = resolveSplitSegmentIndices(allPayloads, origPages.length)
+
+  const entryIdx = files.value.findIndex(
+    (f) =>
+      f === entry ||
+      (entry.localId && f.localId === entry.localId) ||
+      (entry.id != null && f.id === entry.id),
+  )
+  const primaryEntry = entryIdx !== -1 ? files.value[entryIdx] : entry
+
+  const targetEntries = []
+  const newEntries = []
+
+  allPayloads.forEach((payload, i) => {
+    const indices = segmentIndexGroups[i] || []
+    const groupPages = indices.map((idx) => origPages[idx]).filter(Boolean)
+    const groupPreviews = indices
+      .map((idx) => origPreviews[idx])
+      .filter((u) => u !== undefined)
+    const { displayName, size } = buildGroupMeta(groupPages, payload, i)
+
+    if (i === 0) {
+      primaryEntry.pages = groupPages
+      primaryEntry.previews =
+        groupPreviews.length === groupPages.length
+          ? groupPreviews
+          : groupPages.map((f) =>
+              f?.type?.startsWith('image/') ? URL.createObjectURL(f) : null,
+            )
+      primaryEntry.name = displayName
+      primaryEntry.fileName = displayName
+      primaryEntry.fileType = groupPages[0]?.type || primaryEntry.fileType || ''
+      primaryEntry.size = origPages.length > 0 ? size : primaryEntry.size
+      primaryEntry.thumbnail = primaryEntry.previews[0] || null
+      if (primaryEntry.previews.length > 1) {
+        primaryEntry.isMultiReceipt = true
+        primaryEntry.images = primaryEntry.previews
+      } else {
+        primaryEntry.isMultiReceipt = false
+        primaryEntry.images = undefined
+      }
+      if (payload?.id) primaryEntry.id = payload.id
+      targetEntries.push(primaryEntry)
+    } else {
+      const created = createUploadEntry(
+        groupPages,
+        displayName,
+        size,
+        groupPreviews.length === groupPages.length ? groupPreviews : null,
+      )
+      if (payload?.id) created.id = payload.id
+      if (created.previews.length > 1) {
+        created.isMultiReceipt = true
+        created.images = created.previews
+      } else {
+        created.isMultiReceipt = false
+      }
+      newEntries.push(created)
+      targetEntries.push(created)
+    }
+  })
+
+  if (entryIdx !== -1) {
+    files.value.splice(entryIdx + 1, 0, ...newEntries)
+  } else {
+    files.value.push(primaryEntry, ...newEntries)
+  }
+  emit('update:modelValue', files.value)
+
+  for (let i = 0; i < allPayloads.length; i++) {
+    await applySingleOcrOutcome(targetEntries[i], allPayloads[i])
+  }
+}
+
+async function resolveOcrPayload(entry, data) {
+  if (hasSplitReceipts(data)) {
+    await applySplitEntries(entry, data)
+    return
+  }
+  await applySingleOcrOutcome(entry, data)
+}
+
 function startPolling(entry) {
   if (!entry?.id) return
   const key = String(entry.id)
@@ -341,12 +492,14 @@ function startPolling(entry) {
       // Primary: reimbursement receipt endpoint (shared receipt table)
       let data = null
       let res = await apiFetch(`/api/serms/reimbursements/receipts/${entry.id}`, { method: 'GET' })
+      if (pollTimers.get(key) !== timer) return
       if (res.ok) {
         const json = await res.json()
         data = json.data ?? json
       } else {
         // Fallback: liquidation receipt endpoint
         const alt = await apiFetch(`/api/serms/liquidations/receipts/${entry.id}`, { method: 'GET' })
+        if (pollTimers.get(key) !== timer) return
         if (alt.ok) {
           const json = await alt.json()
           data = json.data ?? json
@@ -355,50 +508,13 @@ function startPolling(entry) {
         }
       }
 
+      if (pollTimers.get(key) !== timer) return
       const status = String(data.status || '').toLowerCase()
       if (status !== 'processing' && status !== 'pending-ocr' && status !== '') {
         clearInterval(timer)
         pollTimers.delete(key)
 
-        if (status === 'failed') {
-          entry.ocrStatus = 'failed'
-          entry.rejectionCode = data.rejection_code || 'ocr_failed'
-          entry.rejectionReason = data.rejection_reason || 'OCR processing failed. You can retry OCR.'
-          emit('update:modelValue', files.value)
-          emit('upload-error', { type: 'failed', message: entry.rejectionReason, code: entry.rejectionCode, entry })
-          return
-        }
-
-        if (status === 'rejected') {
-          const reason = data.rejection_reason || data.error || 'Receipt rejected.'
-          if (
-            isOcrOfflineFailure({
-              status,
-              rejectionCode: data.rejection_code,
-              rejectionReason: reason,
-            })
-          ) {
-            entry.ocrStatus = 'failed'
-            entry.rejectionCode = data.rejection_code || 'ocr_failed'
-            entry.rejectionReason = reason
-            emit('update:modelValue', files.value)
-            emit('upload-error', { type: 'failed', message: entry.rejectionReason, code: entry.rejectionCode, entry })
-            return
-          }
-          const isDup =
-            data.rejection_code === 'duplicate' ||
-            data.is_duplicate === true ||
-            String(reason).toLowerCase().includes('duplicate')
-          await handleRejectedEntry(entry, {
-            isDuplicate: isDup,
-            rejectionCode: data.rejection_code || (isDup ? 'duplicate' : 'quality_failed'),
-            rejectionReason: reason,
-          })
-          return
-        }
-
-        // processed / flagged / pending — hydrate with OCR results
-        hydrateEntry(entry, data)
+        await resolveOcrPayload(entry, data)
       }
     } catch (e) {
       console.error('Polling error for liquidation receipt', entry.id, e)
@@ -511,38 +627,7 @@ async function simulateOCR(entry) {
       return
     }
 
-    if (status === 'failed' || status === 'rejected') {
-      entry.id = ocrData.id
-      const reason = ocrData.rejection_reason || `Receipt ${status}.`
-      const isOffline =
-        status === 'failed' ||
-        isOcrOfflineFailure({
-          status,
-          rejectionCode: ocrData.rejection_code,
-          rejectionReason: reason,
-        })
-      if (isOffline) {
-        entry.ocrStatus = 'failed'
-        entry.rejectionCode = ocrData.rejection_code || 'ocr_failed'
-        entry.rejectionReason = reason
-        emit('update:modelValue', files.value)
-        emit('upload-error', { type: 'failed', message: entry.rejectionReason, code: entry.rejectionCode, entry })
-        return
-      }
-      const isDup =
-        ocrData.rejection_code === 'duplicate' ||
-        ocrData.is_duplicate === true ||
-        String(reason).toLowerCase().includes('duplicate')
-      await handleRejectedEntry(entry, {
-        isDuplicate: isDup,
-        rejectionCode: ocrData.rejection_code || (isDup ? 'duplicate' : 'quality_failed'),
-        rejectionReason: reason,
-      })
-      return
-    }
-
-    // Immediate data (should be rare — hydrates directly without polling)
-    hydrateEntry(entry, ocrData)
+    await resolveOcrPayload(entry, ocrData)
   } catch (error) {
     console.error('OCR processing failed:', error)
     // Keep entry but surface as failed so user can retry; preserve file previews
@@ -572,14 +657,23 @@ async function removeFile(index) {
     clearInterval(pollTimers.get(String(entry.id)))
     pollTimers.delete(String(entry.id))
   }
+  const isBlobUsedElsewhere = (url) => {
+    if (!url) return false
+    return files.value.some((other, otherIdx) => {
+      if (otherIdx === index || other === entry) return false
+      if (other.thumbnail === url) return true
+      return Array.isArray(other.previews) && other.previews.includes(url)
+    })
+  }
   if (entry?.previews && typeof URL.revokeObjectURL === 'function') {
     entry.previews.forEach(preview => {
-      if (preview) URL.revokeObjectURL(preview)
+      if (preview && !isBlobUsedElsewhere(preview)) URL.revokeObjectURL(preview)
     })
   }
   if (
     entry?.thumbnail?.startsWith('blob:') &&
-    typeof URL.revokeObjectURL === 'function'
+    typeof URL.revokeObjectURL === 'function' &&
+    !isBlobUsedElsewhere(entry.thumbnail)
   ) {
     URL.revokeObjectURL(entry.thumbnail)
   }
@@ -800,7 +894,7 @@ function onFileInput(event) {
     <TransitionGroup v-if="files.length > 0" name="file-list" tag="div" class="flex flex-col gap-3">
       <div
         v-for="(entry, index) in files"
-        :key="entry.name + index"
+        :key="entry.localId || entry.id || (entry.name + index)"
         class="flex items-center gap-3 rounded-xl border border-accent/15 bg-accent-50/20 p-3"
       >
         <div class="relative flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white">

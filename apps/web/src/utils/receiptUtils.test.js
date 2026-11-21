@@ -411,4 +411,50 @@ describe("getMissingReceiptFields edge cases", () => {
   });
 });
 
+describe("split receipt utilities", () => {
+  it("hasSplitReceipts and formatSplitReceiptsToastMessage detect non-empty split_receipts", async () => {
+    const { hasSplitReceipts, formatSplitReceiptsToastMessage } = await import("./receiptUtils");
+    expect(hasSplitReceipts(null)).toBe(false);
+    expect(hasSplitReceipts({})).toBe(false);
+    expect(hasSplitReceipts({ split_receipts: [] })).toBe(false);
+    expect(hasSplitReceipts({ split_receipts: [{ id: 2 }] })).toBe(true);
+    expect(formatSplitReceiptsToastMessage(3)).toBe(
+      "Detected 3 separate receipts — split into individual receipt cards.",
+    );
+  });
+
+  it("resolveSplitSegmentIndices prefers explicit segment_indices and falls back to sequential file counts", async () => {
+    const { resolveSplitSegmentIndices } = await import("./receiptUtils");
+    expect(
+      resolveSplitSegmentIndices(
+        [
+          { segment_indices: [0, 2], file_path: ["a.jpg", "c.jpg"] },
+          { segment_indices: [1], file_path: ["b.jpg"] },
+        ],
+        3,
+      ),
+    ).toEqual([[0, 2], [1]]);
+
+    expect(
+      resolveSplitSegmentIndices(
+        [
+          { file_path: ["a.jpg", "b.jpg"] },
+          { file_url: ["https://cdn/c.jpg"] },
+          {},
+        ],
+        4,
+      ),
+    ).toEqual([[0, 1], [2], [3]]);
+  });
+
+  it("isDuplicateOcrResponse identifies duplicate codes, flags, and messages", async () => {
+    const { isDuplicateOcrResponse } = await import("./receiptUtils");
+    expect(isDuplicateOcrResponse({ rejection_code: "duplicate" })).toBe(true);
+    expect(isDuplicateOcrResponse({ is_duplicate: true })).toBe(true);
+    expect(isDuplicateOcrResponse({ rejection_reason: "Duplicate receipt detected." })).toBe(true);
+    expect(isDuplicateOcrResponse({ rejection_code: "blurry", rejection_reason: "Too blurry" })).toBe(false);
+  });
+});
+
+
 

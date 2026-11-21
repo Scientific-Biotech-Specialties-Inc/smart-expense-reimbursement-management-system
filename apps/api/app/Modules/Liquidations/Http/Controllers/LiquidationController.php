@@ -14,6 +14,7 @@ use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Jobs\DispatchReceiptToAiService;
 use App\Modules\Shared\Traits\HandlesReportTemplateData;
+use App\Modules\Shared\Traits\HydratesSplitReceipts;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -25,6 +26,7 @@ class LiquidationController extends Controller
 {
     use ValidatesReceiptDuplicates;
     use HandlesReportTemplateData;
+    use HydratesSplitReceipts;
 
     public function __construct(
         private readonly CashAdvanceEnrichmentService $enrichmentService,
@@ -235,7 +237,7 @@ class LiquidationController extends Controller
 
         // Duplicate guard — same as ReceiptService::storeReceipt
         try {
-            $this->validateDuplicateReceipt($fileHashes);
+            $this->validateUploadDuplicates($fileHashes);
         } catch (ValidationException $e) {
             // Best-effort cleanup of just-uploaded objects so duplicates don't orphan files
             foreach ($filePaths as $path) {
@@ -371,7 +373,7 @@ class LiquidationController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        return response()->json(['data' => $receipt]);
+        return response()->json(['data' => $this->hydrateSplitMetadata($receipt)]);
     }
 
     /**

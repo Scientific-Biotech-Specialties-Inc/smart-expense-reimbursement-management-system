@@ -134,6 +134,7 @@ function triggerUpload(mode = 'single') {
 }
 
 function onReceiptInputCancel() {
+  uploadMode.value = "single";
   // User dismissed the native file chooser without picking a file (e.g. after
   // DuplicateReceiptModal "Upload New One"). Reset so the same file can be
   // re-picked next time. When no receipts remain in create mode, return to the
@@ -146,12 +147,15 @@ function onReceiptInputCancel() {
 }
 
 function onReceiptSelect(e) {
-  if (uploadMode.value === 'multi') {
+  if (uploadMode.value === "multi") {
     const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      submitSegments(files);
+    if (files.length >= 2) {
+      submitSegments(files.slice(0, 6));
+    } else if (files.length === 1) {
+      addReceiptFiles(files);
     }
-    if (e.target) e.target.value = '';
+    uploadMode.value = "single";
+    if (e.target) e.target.value = "";
   } else {
     handleReceiptSelect(e);
   }

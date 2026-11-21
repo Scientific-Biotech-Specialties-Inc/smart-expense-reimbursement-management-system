@@ -120,7 +120,18 @@ class ReceiptService
             $files = is_array($file) ? $file : [$file];
             $storedFile = $this->storeReceiptFiles($files);
 
-            $this->validateDuplicateReceipt($storedFile['file_hash']);
+            try {
+                $this->validateUploadDuplicates($storedFile['file_hash']);
+            } catch (ValidationException $e) {
+                foreach ($storedFile['file_path'] as $path) {
+                    try {
+                        Storage::disk('supabase')->delete($path);
+                    } catch (\Throwable $ignored) {
+                        Log::warning('ReceiptService: failed to cleanup duplicate upload', ['path' => $path]);
+                    }
+                }
+                throw $e;
+            }
 
             $isDraft = (bool) ($validated['is_draft'] ?? false);
 
