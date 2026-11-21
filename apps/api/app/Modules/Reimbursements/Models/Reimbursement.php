@@ -15,6 +15,7 @@ class Reimbursement extends Model
         'fast_track_eligible',
         'vendor_audit_required',
         'unverified_vendors',
+        'reference_no',
     ];
 
     protected $fillable = [
@@ -26,6 +27,8 @@ class Reimbursement extends Model
         'expense_category_id',
         'contract_id',
         'client_name',
+        'ticket_id',
+        'ticket_number',
         'event_type',
         'amount',
         'date',
@@ -47,6 +50,7 @@ class Reimbursement extends Model
 
     protected $casts = [
         'contract_id' => 'integer',
+        'ticket_id' => 'integer',
         'amount' => 'decimal:2',
         'date' => 'date',
         'approved_at' => 'datetime',
@@ -54,6 +58,17 @@ class Reimbursement extends Model
         'is_request' => 'boolean',
         'report_template_data' => 'array',
     ];
+
+    public function getReferenceNoAttribute(): string
+    {
+        if (!$this->id) {
+            return '';
+        }
+
+        $year = $this->created_at ? $this->created_at->format('Y') : date('Y');
+
+        return 'RMB-' . $year . '-' . str_pad((string) $this->id, 5, '0', STR_PAD_LEFT);
+    }
 
     private function resolvedReceipts()
     {

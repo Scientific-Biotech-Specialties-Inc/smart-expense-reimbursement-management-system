@@ -252,4 +252,33 @@ describe("useReimbursementSubmit — userComment handling", () => {
     expect(sentFormData.get("report_file")).toBe(manualFile);
     expect(JSON.parse(sentFormData.get("report_template_data"))).toEqual({ mode: "manual" });
   });
+
+  it("appends ticket_id and ticket_number to FormData on submit and update", async () => {
+    const { submitReimbursement, updateReimbursement } = useReimbursementSubmit(emit, router);
+    const reportFile = new File(["dummy"], "report.pdf", { type: "application/pdf" });
+
+    await submitReimbursement({
+      receipts: [validReceipt],
+      reportFile,
+      totalAmount: 250,
+      ticketId: 42,
+      ticketNumber: "TKT-0042",
+    });
+
+    const submitForm = submitMock.mock.calls[0][0];
+    expect(submitForm.get("ticket_id")).toBe("42");
+    expect(submitForm.get("ticket_number")).toBe("TKT-0042");
+
+    await updateReimbursement(9, {
+      receipts: [validReceipt],
+      reportFile: null,
+      totalAmount: 250,
+      ticketId: 43,
+      ticketNumber: "TKT-0043",
+    });
+
+    const updateForm = updateRequestMock.mock.calls[0][1];
+    expect(updateForm.get("ticket_id")).toBe("43");
+    expect(updateForm.get("ticket_number")).toBe("TKT-0043");
+  });
 });

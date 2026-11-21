@@ -7,8 +7,8 @@
 **Version:** 2.1.0  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** Nov 21, 2026 (Bi-Directional CMS ↔ SERMS Integration & Staging Reconciliation)  
-**Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
+**Last reconciled:** Nov 21, 2026 (Bi-Directional TS ↔ SERMS Integration & Staging Reconciliation)  
+**Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [TS_INTEGRATION_HANDOFF.md](TS_INTEGRATION_HANDOFF.md) · [AGENTS.md](../AGENTS.md)
 
 ---
 
@@ -25,6 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased] - Nov 21, 2026
 
 ### Added
+- **Bi-Directional Ticketing System (TS) ↔ SERMS Integration (`docs/SERMS.md`, `docs/TS_INTEGRATION_HANDOFF.md`, `apps/api`, `apps/web`, `docker-compose.yml`):**
+  - Updated `docs/SERMS.md` (§2.3, §5, §6.1, §6.6) and `docs/index.md`, and created `docs/TS_INTEGRATION_HANDOFF.md` with the locked SERMS ↔ TS API contracts (`401`/`403`/`404`/`422`), TS-side implementation plan (`ticket-service`, `VerifyInternalToken`, `nginx.gateway.conf.template`, `TicketDetailModal.jsx` / `ProofCompletionModal.jsx`), local port-forwarding vs Azure Container Apps (`ticketing.bicep` / `serms.bicep`) guide with production secret rotation warning, `curl` verification steps, and copy-paste TS agent prompt.
+  - **Backend (`apps/api`, `docker-compose.yml`):** Added `services.ts` config/env (`TS_API_URL`, `TS_REIMBURSEMENT_STATUS_URL`, `TS_INTERNAL_SECRET`, `TS_SERVICE_TIMEOUT=10`), `AuthenticateInternalService` TS secret priority + `EnsureIdempotency` file/null-user support, migration `2026_11_21_000001_add_ticket_fields_to_reimbursements_table.php` (`ticket_id`, `ticket_number`, non-unique `reimbursements_source_submission_idx`), `Reimbursement::$appends` `reference_no` (`RMB-YYYY-00000`), `AuditLogService` `TS_REIMBURSEMENT_RECEIVED` metadata, shared `ReceiptService` helpers, `TsReimbursementImportService`, `InternalTsController`, `TsClientService`, `TsController` (single `whereIn` batch enrichment), `UpdateTsReimbursementStatusJob`, `TsInternalReimbursementTest.php`, and `TsOutboundIntegrationTest.php`.
+  - **Frontend (`apps/web`):** Added `useTsStore`, `<TsTicketSelect>`, and `<TsTicketsPanel>`; extended `StatusBadge.vue` with TS ticket statuses; wired `?ticket_id=&ticket_number=` prefill and ticket selection into `MetaAndAttachments.vue`, `useReimbursementSubmit.js`, and `ReimbursementFormView.vue`; exposed the `Tickets (TS)` tab to all authenticated users in `ReimbursementsView.vue`; and displayed `reference_no`, ticket badges, and `From TS` indicators across `useReimbursementFilters.js`, `ReimbursementsTable.vue`, and `ReimbursementDetailsModal.vue` with full Vitest coverage.
 - **Cash Advance Disbursement via `GrantPayoutModal` & Unified Payout Integration (`docs/SERMS.md`, `apps/api`, `apps/web`):**
   - Updated `docs/SERMS.md` (§4.2, §6.1, §6.4) to specify Cash Advance disbursement through the shared `GrantPayoutModal` (`granted_by`, `payout_method`, `payout_method_other`, `granter_signature`, password verification, and legacy `{ channel, reference, password }` backwards compatibility), unified `payout` enrichment via `CashAdvanceEnrichmentService`, `CASH_ADVANCE_DISBURSED` audit trail fields, and unified `PayoutView.vue` tracking & employee acknowledgement.
   - **Backend (`apps/api`):** Added `2026_11_21_000001_add_payout_fields_to_cash_advance_disbursements_table.php`, updated `CashAdvanceDisbursement`, `DisburseCashAdvanceRequest`, `CashAdvanceController`, `CashAdvanceService`, `CashAdvanceEnrichmentService`, and `AuditLogService`, and added `CashAdvancePayoutDisbursementTest.php`.
@@ -41,6 +45,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   - Updated `docs/SERMS.md` and `docs/PRD.md` to require `total_expense_amount >= outstanding_balance` (equal to or greater than the current penalty-inclusive balance) on liquidation submissions and updates, blocking under-balance submissions at both UI and API layers.
   - **Backend (`LiquidationController.php`):** Added `assertExpenseMeetsBalance()` with cent-precision validation in both `store()` (post-penalty sync, pre-receipt mutation) and `update()` (covering `pending` and penalty-synced `revise` edits) returning HTTP `422` on `total_expense_amount`, and removed the prior `variance > 0` `shortfall_explanation` gate.
   - **Frontend (`liquidationPenalties.js`, `LiquidationSettlementForm.vue`, `LiquidationsView.vue`, `useLiquidationSubmit.js`):** Extracted `resolveAdvanceBalance` and `isExpenseBelowBalance`, disabled `#submit-liquidation-btn` with an accessible inline `role="alert"` message (`data-testid="liquidation-balance-error"`) when expenses are below balance, guarded `promptSubmitLiquidation()` / `submitLiquidation()` in `LiquidationsView.vue`, and removed automatic shortfall note synthesis in `useLiquidationSubmit.js`.
+
+### Fixed
+- **PRS Webhook Dispatch Isolation Guard (`apps/api/app/Modules/Reimbursements/Services/ReimbursementService.php`):**
+  - Guarded `UpdatePrsReimbursementStatusJob::dispatch(...)` in both `approveReimbursement()` and `grantReimbursement()` with `$reimbursement->source_system === 'prs'` so TS-originated (and other non-PRS) reimbursement claims never trigger PRS status webhooks.
 
 ## [Unreleased] - Nov 20, 2026
 

@@ -1,13 +1,13 @@
 <script setup>
 import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
-import { useRouter } from "vue-router";
+import * as vueRouter from "vue-router";
 import { usePolicyStore } from "@/stores/policy";
 import { useReceiptStore } from "@/stores/receipts";
 import { useReimbursementStore } from "@/stores/reimbursement";
 import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
 import { createDefaultTemplateData, validateTemplateData } from "@/utils/sbsiReportTemplateUtils";
-import { Save, Send } from "lucide-vue-next";
+import { Layers, Save, Send, Ticket, UploadCloud } from "lucide-vue-next";
 
 // Components
 import ReceiptsManagementHeader from "@/components/reimbursements/ReceiptsManagementHeader.vue";
@@ -17,6 +17,7 @@ import ReimbursementSummaryPanel from "@/components/reimbursements/Reimbursement
 import ReimbursementFormHeader from "@/components/reimbursements/ReimbursementFormHeader.vue";
 import ReceiptQualityRejectionModal from "@/components/reimbursements/ReceiptQualityRejectionModal.vue";
 import SegmentedReceiptUpload from "@/components/reimbursements/SegmentedReceiptUpload.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
 import ConfirmModal from "@/components/base/ConfirmModal.vue";
 
 // Composables
@@ -66,7 +67,13 @@ try {
   auth = null;
 }
 const { addToast } = useToast();
-const router = useRouter();
+const router = typeof vueRouter.useRouter === "function" ? vueRouter.useRouter() : null;
+let route = null;
+try {
+  route = typeof vueRouter.useRoute === "function" ? vueRouter.useRoute() : null;
+} catch {
+  route = null;
+}
 
 // State
 const reportFile = ref(null);
@@ -77,6 +84,8 @@ const isManualMode = ref(false);
 const userComment = ref("");
 const contractId = ref(null);
 const clientName = ref("");
+const ticketId = ref(null);
+const ticketNumber = ref("");
 const fetching = ref(false);
 const existingStatus = ref("");
 const adminNotes = ref("");
@@ -143,8 +152,8 @@ function onReceiptInputCancel() {
   // Reimbursements list instead of stranding the user on an empty
   // /reimbursements/new page.
   if (receiptInput.value) receiptInput.value.value = "";
-  if (!isEditMode.value && receipts.value.length === 0) {
-    router.push("/reimbursements");
+  if (!isEditMode.value && receipts.value.length === 0 && !ticketId.value) {
+    router?.push("/reimbursements");
   }
 }
 
@@ -235,6 +244,8 @@ const {
     isManualMode: effectiveManualMode.value,
     contractId: contractId.value,
     clientName: clientName.value,
+    ticketId: ticketId.value,
+    ticketNumber: ticketNumber.value,
   }),
 });
 
@@ -305,6 +316,8 @@ async function handleSubmit() {
         userComment: userComment.value,
         contractId: contractId.value,
         clientName: clientName.value,
+        ticketId: ticketId.value,
+        ticketNumber: ticketNumber.value,
       });
     } else {
       success = await submitReimbursement({
@@ -315,6 +328,8 @@ async function handleSubmit() {
         userComment: userComment.value,
         contractId: contractId.value,
         clientName: clientName.value,
+        ticketId: ticketId.value,
+        ticketNumber: ticketNumber.value,
       });
     }
     if (!success) {
@@ -362,6 +377,33 @@ onMounted(async () => {
     }
   }
 
+  if (!isEditMode.value) {
+    const rawTicketId = route?.query?.ticket_id;
+    const rawTicketNumber = route?.query?.ticket_number;
+    const resolvedTicketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
+    const resolvedTicketNumber = Array.isArray(rawTicketNumber)
+      ? rawTicketNumber[0]
+      : rawTicketNumber;
+    if (
+      resolvedTicketId !== undefined &&
+      resolvedTicketId !== null &&
+      String(resolvedTicketId).trim() !== ""
+    ) {
+      const parsedTicketId = Number(resolvedTicketId);
+      ticketId.value =
+        Number.isFinite(parsedTicketId) && parsedTicketId > 0
+          ? parsedTicketId
+          : String(resolvedTicketId).trim();
+    }
+    if (
+      resolvedTicketNumber !== undefined &&
+      resolvedTicketNumber !== null &&
+      String(resolvedTicketNumber).trim() !== ""
+    ) {
+      ticketNumber.value = String(resolvedTicketNumber).trim();
+    }
+  }
+
   if (isEditMode.value) {
     fetching.value = true;
     let hydrated = false;
@@ -387,6 +429,8 @@ onMounted(async () => {
       userComment.value = data.user_comment || "";
       contractId.value = data.contract_id ?? null;
       clientName.value = data.client_name || "";
+      ticketId.value = data.ticket_id ?? null;
+      ticketNumber.value = data.ticket_number || "";
       existingStatus.value = data.status || "";
       adminNotes.value = data.admin_notes || data.rejection_comment || "";
       revisionCount.value = data.revision_count || 1;
@@ -613,6 +657,45 @@ function dismiss() {
         </p>
       </div>
 
+      <section
+        v-if="!isEditMode && receipts.length === 0 && ticketId"
+        class="card p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border border-indigo-200 bg-indigo-50/40"
+      >
+        <div class="flex items-start gap-3">
+          <div class="p-2.5 rounded-xl bg-indigo-100 text-indigo-700 shrink-0">
+            <Ticket class="w-5 h-5" aria-hidden="true" />
+          </div>
+          <div>
+            <p class="text-sm font-bold text-slate-800">
+              Linked to Support Ticket {{ ticketNumber || `#${ticketId}` }}
+            </p>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Attach at least one receipt (JPEG, PNG, or PDF, max 2MB) to continue creating this reimbursement request.
+            </p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <BaseButton
+            variant="primary"
+            size="sm"
+            type="button"
+            @click="triggerUpload('single')"
+          >
+            <UploadCloud class="w-4 h-4" aria-hidden="true" />
+            <span>Attach Single Receipt</span>
+          </BaseButton>
+          <BaseButton
+            variant="outline"
+            size="sm"
+            type="button"
+            @click="triggerUpload('multi')"
+          >
+            <Layers class="w-4 h-4" aria-hidden="true" />
+            <span>Attach Multi Receipt</span>
+          </BaseButton>
+        </div>
+      </section>
+
       <template v-if="receipts.length > 0 || isEditMode">
         <!--  CARD 1: Upload Receipt Management  -->
         <ReceiptsManagementHeader
@@ -649,6 +732,8 @@ function dismiss() {
           v-model:user-comment="userComment"
           v-model:contract-id="contractId"
           v-model:client-name="clientName"
+          v-model:ticket-id="ticketId"
+          v-model:ticket-number="ticketNumber"
           :receipts="receipts"
           :total-amount="totalAmount"
           :record-id="props.id"

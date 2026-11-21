@@ -8,6 +8,7 @@ use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Jobs\UpdatePrsReimbursementStatusJob;
+use App\Modules\Reimbursements\Jobs\UpdateTsReimbursementStatusJob;
 use App\Modules\Shared\Services\PasswordVerificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -128,6 +129,8 @@ class ReimbursementService
                 'expense_category_id' => $expenseCategoryId,
                 'contract_id' => $validated['contract_id'] ?? null,
                 'client_name' => $validated['client_name'] ?? null,
+                'ticket_id' => $validated['ticket_id'] ?? null,
+                'ticket_number' => $validated['ticket_number'] ?? null,
                 'event_type' => $validated['event_type'] ?? null,
                 'amount' => $validated['amount'],
                 'date' => $validated['date'],
@@ -274,9 +277,11 @@ class ReimbursementService
                 ipAddress: $ipAddress
             );
 
-            if ($reimbursement->is_request == 1 && !empty($reimbursement->source_submission_id)) {
+            if ($reimbursement->source_system === 'prs' && $reimbursement->is_request == 1 && !empty($reimbursement->source_submission_id)) {
                 UpdatePrsReimbursementStatusJob::dispatch($reimbursement->source_submission_id);
             }
+
+            $this->dispatchTsStatusUpdateIfApplicable($reimbursement);
 
             $formattedAmount = NotificationService::formatPeso($reimbursement->amount);
             NotificationService::notifyUser(
@@ -355,6 +360,8 @@ class ReimbursementService
                 afterState: $afterState,
                 ipAddress: $ipAddress
             );
+
+            $this->dispatchTsStatusUpdateIfApplicable($reimbursement);
 
             $formattedAmount = NotificationService::formatPeso($reimbursement->amount);
             $statusType = $isTerminal ? 'reimbursement_rejected' : 'reimbursement_revised';
@@ -442,9 +449,11 @@ class ReimbursementService
                 ipAddress: $ipAddress
             );
 
-            if ($reimbursement->is_request == 1 && !empty($reimbursement->source_submission_id)) {
+            if ($reimbursement->source_system === 'prs' && $reimbursement->is_request == 1 && !empty($reimbursement->source_submission_id)) {
                 UpdatePrsReimbursementStatusJob::dispatch($reimbursement->source_submission_id);
             }
+
+            $this->dispatchTsStatusUpdateIfApplicable($reimbursement);
 
             $formattedAmount = NotificationService::formatPeso($reimbursement->amount);
             NotificationService::notifyUser(
@@ -708,6 +717,14 @@ class ReimbursementService
                 $updatePayload['client_name'] = $data['client_name'];
             }
 
+            if (array_key_exists('ticket_id', $data)) {
+                $updatePayload['ticket_id'] = $data['ticket_id'];
+            }
+
+            if (array_key_exists('ticket_number', $data)) {
+                $updatePayload['ticket_number'] = $data['ticket_number'];
+            }
+
             // Reset revise → pending on re-submission (rejected terminal cannot be reset)
             if ($reimbursement->status === 'revise') {
                 $updatePayload['status'] = 'pending';
@@ -800,5 +817,25 @@ class ReimbursementService
 
             return true;
         });
+    }
+
+    /**
+     * Dispatch outbound status sync job to Ticketing System (TS) when claim originated from or links to a ticket.
+     */
+    private function dispatchTsStatusUpdateIfApplicable(Reimbursement $reimbursement): void
+    {
+        if ($reimbursement->source_system === 'ts' || !empty($reimbursement->ticket_id)) {
+            $ticketId = $reimbursement->ticket_id
+                ? (int) $reimbursement->ticket_id
+                : (is_numeric($reimbursement->source_submission_id) ? (int) $reimbursement->source_submission_id : null);
+
+            UpdateTsReimbursementStatusJob::dispatch(
+                (int) $reimbursement->id,
+                $ticketId,
+                $reimbursement->ticket_number,
+                (string) $reimbursement->status,
+                $reimbursement->rejection_comment
+            );
+        }
     }
 }

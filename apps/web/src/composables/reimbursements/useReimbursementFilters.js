@@ -110,6 +110,10 @@ export function useReimbursementFilters(store) {
       rows = rows.filter((row) =>
         [
           row.id,
+          row.reference_no,
+          row.ticket_number,
+          row.ticket_id,
+          row.source_system,
           row.reportDescription,
           row.category,
           row.submittedBy,

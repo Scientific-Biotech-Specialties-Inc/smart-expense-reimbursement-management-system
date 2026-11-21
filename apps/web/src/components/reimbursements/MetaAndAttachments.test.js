@@ -114,4 +114,39 @@ describe("MetaAndAttachments", () => {
     expect(wrapper.emitted("update:isManualMode")).toContainEqual([false]);
     expect(wrapper.emitted("update:reportFile")).toContainEqual([null]);
   });
+
+  it("embeds TsTicketSelect alongside CmsContractSelect and relays update:ticketId and update:ticketNumber", async () => {
+    const TsTicketSelectStub = {
+      name: "TsTicketSelect",
+      props: ["ticketId", "ticketNumber"],
+      emits: ["update:ticketId", "update:ticketNumber"],
+      template: `<div data-testid="ts-ticket-select-stub">
+        <button data-testid="pick-ticket" @click="$emit('update:ticketId', 42); $emit('update:ticketNumber', 'TKT-0042')">Pick</button>
+      </div>`,
+    };
+
+    const wrapper = mount(MetaAndAttachments, {
+      props: {
+        reportFile: null,
+        ticketId: 10,
+        ticketNumber: "TKT-0010",
+      },
+      global: {
+        stubs: {
+          SbsiReportDocumentEditor: true,
+          CmsContractSelect: true,
+          TsTicketSelect: TsTicketSelectStub,
+        },
+      },
+    });
+
+    const ticketComp = wrapper.findComponent(TsTicketSelectStub);
+    expect(ticketComp.exists()).toBe(true);
+    expect(ticketComp.props("ticketId")).toBe(10);
+    expect(ticketComp.props("ticketNumber")).toBe("TKT-0010");
+
+    await wrapper.find('[data-testid="pick-ticket"]').trigger("click");
+    expect(wrapper.emitted("update:ticketId")?.[0]).toEqual([42]);
+    expect(wrapper.emitted("update:ticketNumber")?.[0]).toEqual(["TKT-0042"]);
+  });
 });

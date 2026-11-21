@@ -97,7 +97,7 @@ export function useReimbursementSubmit(emit, router) {
     }
   }
 
-  async function submitReimbursement({ receipts, reportFile, reportTemplateData = null, totalAmount, userComment, contractId = null, clientName = "" }) {
+  async function submitReimbursement({ receipts, reportFile, reportTemplateData = null, totalAmount, userComment, contractId = null, clientName = "", ticketId = null, ticketNumber = "" }) {
     if (submitting.value) return false;
     const isTemplateMode = Boolean(reportTemplateData && reportTemplateData.mode !== "manual");
     if (!receipts.length || (!isTemplateMode && !reportFile) || receipts.some(r => r.isUploading)) {
@@ -183,6 +183,12 @@ export function useReimbursementSubmit(emit, router) {
           formData.append("client_name", clientName);
         }
       }
+      if (ticketId) {
+        formData.append("ticket_id", ticketId);
+        if (ticketNumber) {
+          formData.append("ticket_number", ticketNumber);
+        }
+      }
       if (receipts[0]?.eventType) {
         formData.append("event_type", receipts[0].eventType);
       }
@@ -218,7 +224,7 @@ export function useReimbursementSubmit(emit, router) {
     }
   }
 
-  async function updateReimbursement(id, { receipts, reportFile, reportTemplateData = null, totalAmount, userComment, contractId = null, clientName = "" }) {
+  async function updateReimbursement(id, { receipts, reportFile, reportTemplateData = null, totalAmount, userComment, contractId = null, clientName = "", ticketId = undefined, ticketNumber = "" }) {
     if (submitting.value) return false;
     if (!receipts.length || receipts.some(r => r.isUploading)) {
       return false;
@@ -281,6 +287,10 @@ export function useReimbursementSubmit(emit, router) {
       if (contractId !== undefined) {
         formData.append("contract_id", contractId ?? "");
         formData.append("client_name", clientName ?? "");
+      }
+      if (ticketId !== undefined) {
+        formData.append("ticket_id", ticketId ?? "");
+        formData.append("ticket_number", ticketNumber ?? "");
       }
       if (receipts[0]?.eventType) {
         formData.append("event_type", receipts[0].eventType);
