@@ -52,4 +52,42 @@ describe("ReimbursementsTable column sizing", () => {
     expect(cells[0].classes()).not.toContain("max-w-[240px]");
     expect(cells[1].classes()).toContain("px-3");
   });
+
+  it("displays From TS source tag, ticket badge, and reference_no when linked to a TS ticket", () => {
+    const tsRows = [
+      {
+        id: 55,
+        reference_no: "RMB-2026-00055",
+        source_system: "ts",
+        ticket_id: 42,
+        ticket_number: "TKT-0042",
+        reportDescription: "Calibration travel claim",
+        category: "TRAVEL",
+        amount: 2500,
+        currency: "PHP",
+        dateSubmitted: "2026-11-21",
+        displayStatus: "pending",
+      },
+    ];
+
+    const wrapper = mount(ReimbursementsTable, {
+      props: {
+        rows: tsRows,
+        totalRows: 1,
+        columns,
+        currentPage: 1,
+      },
+      global: {
+        stubs: {
+          StatusBadge: true,
+          ActionDropdownMenu: true,
+          BasePagination: true,
+        },
+      },
+    });
+
+    expect(wrapper.text()).toContain("From TS");
+    expect(wrapper.text()).toContain("Ticket TKT-0042");
+    expect(wrapper.text()).toContain("RMB-2026-00055");
+  });
 });

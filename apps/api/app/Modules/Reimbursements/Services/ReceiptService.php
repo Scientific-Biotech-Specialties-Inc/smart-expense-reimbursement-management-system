@@ -119,20 +119,7 @@ class ReceiptService
     {
         return DB::transaction(function () use ($user, $validated, $file) {
             $files = is_array($file) ? $file : [$file];
-            $storedFile = $this->storeReceiptFiles($files);
-
-            try {
-                $this->validateUploadDuplicates($storedFile['file_hash']);
-            } catch (ValidationException $e) {
-                foreach ($storedFile['file_path'] as $path) {
-                    try {
-                        Storage::disk('supabase')->delete($path);
-                    } catch (\Throwable $ignored) {
-                        Log::warning('ReceiptService: failed to cleanup duplicate upload', ['path' => $path]);
-                    }
-                }
-                throw $e;
-            }
+            $storedFile = $this->storeAndValidateUploadedFiles($files);
 
             $isDraft = (bool) ($validated['is_draft'] ?? false);
 
@@ -453,6 +440,50 @@ class ReceiptService
     }
 
     /**
+     * Upload files to Supabase, compute SHA-256 hashes, and validate against duplicates.
+     * Cleans up any uploaded files in Supabase if storage or duplicate validation fails.
+     *
+     * @param  array<int, mixed> $files
+     * @return array{file_path: array<int, string>, file_hash: array<int, string>, file_type: array<int, string>, file_size_bytes: array<int, int>}
+     */
+    public function storeAndValidateUploadedFiles(array $files): array
+    {
+        $storedFile = $this->storeReceiptFiles($files);
+
+        try {
+            $this->validateUploadDuplicates($storedFile['file_hash']);
+        } catch (\Throwable $e) {
+            $this->cleanupStoredFiles($storedFile['file_path']);
+            throw $e;
+        }
+
+        return $storedFile;
+    }
+
+    /**
+     * Best-effort cleanup of stored Supabase object paths when an upload or transaction fails.
+     *
+     * @param  array<int, string> $paths
+     */
+    public function cleanupStoredFiles(array $paths): void
+    {
+        foreach ($paths as $path) {
+            if (!$path || str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+                continue;
+            }
+
+            try {
+                Storage::disk('supabase')->delete($path);
+            } catch (\Throwable $e) {
+                Log::warning('ReceiptService: failed to cleanup stored file from Supabase', [
+                    'path'  => $path,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
      * Store uploaded files on the configured Supabase disk and return DB column arrays.
      */
     private function storeReceiptFiles(array $files): array
@@ -462,18 +493,25 @@ class ReceiptService
         $fileTypes = [];
         $fileSizes = [];
 
-        foreach ($files as $file) {
-            if (!$file) continue;
+        try {
+            foreach ($files as $file) {
+                if (!$file) {
+                    continue;
+                }
 
-            $fileType = $file->extension();
-            if ($fileType === 'jpg') {
-                $fileType = 'jpeg';
+                $fileType = $file->extension();
+                if ($fileType === 'jpg') {
+                    $fileType = 'jpeg';
+                }
+
+                $filePaths[] = $file->store('receipts', 'supabase');
+                $fileHashes[] = hash_file('sha256', $file->getRealPath());
+                $fileTypes[] = $fileType;
+                $fileSizes[] = $file->getSize();
             }
-
-            $filePaths[] = $file->store('receipts', 'supabase');
-            $fileHashes[] = hash_file('sha256', $file->getRealPath());
-            $fileTypes[] = $fileType;
-            $fileSizes[] = $file->getSize();
+        } catch (\Throwable $e) {
+            $this->cleanupStoredFiles($filePaths);
+            throw $e;
         }
 
         return [
@@ -499,7 +537,7 @@ class ReceiptService
      * surrounding DB transaction or leaves the user guessing — the receipt is left
      * in a clear `failed` state (surfaced by the UI) instead of silently stalling.
      */
-    private function dispatchOcrJob(Receipt $receipt): void
+    public function dispatchOcrJob(Receipt $receipt): void
     {
         $connection = config('services.ai_service.ocr_queue_connection', 'sync');
 
@@ -533,19 +571,7 @@ class ReceiptService
     {
         // 1. Delete physical files from Supabase storage
         $filePaths = is_array($receipt->file_path) ? $receipt->file_path : (array) $receipt->file_path;
-        foreach ($filePaths as $path) {
-            if ($path && !str_starts_with($path, 'http://') && !str_starts_with($path, 'https://')) {
-                try {
-                    Storage::disk('supabase')->delete($path);
-                } catch (\Throwable $e) {
-                    Log::warning('purgeReceiptArtifacts: failed to delete file from storage', [
-                        'receipt_id' => $receipt->id,
-                        'path'       => $path,
-                        'error'      => $e->getMessage(),
-                    ]);
-                }
-            }
-        }
+        $this->cleanupStoredFiles($filePaths);
 
         // 2. Purge AI vector embedding from ocr-pipeline pgvector
         try {

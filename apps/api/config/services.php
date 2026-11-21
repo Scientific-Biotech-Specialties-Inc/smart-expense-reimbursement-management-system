@@ -85,5 +85,22 @@ return [
         'timeout'         => (int) env('CMS_SERVICE_TIMEOUT', 5),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Ticketing System (TS) Integration
+    |--------------------------------------------------------------------------
+    |
+    | Outbound base URL, optional status webhook URL, shared internal secret,
+    | and request timeout for SERMS <-> Ticketing System integration.
+    |
+    */
+
+    'ts' => [
+        'api_url'                  => env('TS_API_URL'),
+        'reimbursement_status_url' => env('TS_REIMBURSEMENT_STATUS_URL'),
+        'internal_secret'          => env('TS_INTERNAL_SECRET') ?: env('INTERNAL_SERVICE_SECRET'),
+        'timeout'                  => (int) env('TS_SERVICE_TIMEOUT', 10),
+    ],
+
 ];
 

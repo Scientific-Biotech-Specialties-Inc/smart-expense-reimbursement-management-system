@@ -8,7 +8,7 @@
 **Owner:** SERMS Engineering & Architecture Council (Capstone Team)  
 **Status:** Canonical Source of Truth  
 **Last reconciled:** 2026-09-01 (Documentation suite refactor & standardization of 'What this is' sections across all docs)  
-**Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [CHANGELOG.md](CHANGELOG.md) · [AGENTS.md](../AGENTS.md)
+**Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [CHANGELOG.md](CHANGELOG.md) · [TS_INTEGRATION_HANDOFF.md](TS_INTEGRATION_HANDOFF.md) · [AGENTS.md](../AGENTS.md)
 
 ---
 
@@ -82,14 +82,16 @@ graph TD
         AuthModule -->|SSO / Reverse Proxy| TS[TS\nTicketing System]
     end
 
+    SERMS <-->|Contract & Vendor Sync| CMS
     SERMS <-->|Bi-directional Status Sync| PRS
+    SERMS <-->|Ticket Reimbursement & Status Sync| TS
     SERMS -->|Async OCR Extraction| OCR[ocr-pipeline\nExternal AI OCR Service]
 ```
 
 1. **CMS (Customer Management System):** Manages SBSI healthcare accounts, hospital/laboratory client profiles, contact points, and customer engagement histories.
 2. **SERMS (Smart Expense Reimbursement Management System — This Project):** Automates reimbursement submissions, cash advance disbursements, OCR receipt parsing, BIR VAT classifications, advance liquidations, and overdue penalty assessments.
 3. **PRS (Productivity Report System):** Tracks employee daily deliverables, field diagnostic schedules, and synchronizes reimbursement statuses for project cost accounting.
-4. **TS (Ticketing System):** Manages customer service tickets, clinical diagnostic equipment maintenance requests, and technical escalation pipelines.
+4. **TS (Ticketing System):** Manages customer service tickets, clinical diagnostic equipment maintenance requests, and technical escalation pipelines, forwarding field engineer ticket reimbursements into SERMS and synchronizing ticket/reimbursement statuses bi-directionally.
 5. **Central Access Gateway (`capstone-auth-module`):** All sub-systems (CMS, SERMS, PRS, TS) can **only** be accessed through `capstone-auth-module`. It provides unified SSO, JWT token issuance, session validation, and reverse proxy routing.
 
 ---
@@ -141,6 +143,7 @@ graph TD
     subgraph "shared-capstone-network (Docker)"
         AuthModule[capstone-auth-module\n:3001]
         PrsModule[PRS Service\nprs_api:8000]
+        TsModule[TS Gateway / Ticket Service\nticketing-gateway:80 / ticket-service:8000]
 
         subgraph "SERMS Stack"
             Nginx[Nginx :8000]
@@ -169,6 +172,8 @@ graph TD
     PHP -->|JWT token validation proxy| AuthModule
     Worker -->|Process Penalties & DB Queues| MySQL
     Worker -->|POST status update| PrsModule
+    Worker -->|POST TS reimbursement status| TsModule
+    PHP <-->|X-Internal-Secret / X-Internal-Token| TsModule
     Worker -->|1. Dispatch OCR Job\nPOST /api/ocr| AiOcrService
     AiOcrService -->|Persist raw AI docs| MongoDb
     AiOcrService -->|2. Async Webhook Callback\nPOST /api/serms/ai/ocr-callback| Nginx
@@ -183,14 +188,14 @@ graph TD
 | Module | Route Prefix / Namespace | Key Controllers & Services | Key Jobs & Workers | Responsibility |
 |---|---|---|---|---|
 | **`CashAdvances`** | `/api/cash-advances`<br>`App\Modules\CashAdvances` | `CashAdvanceController`<br>`CashAdvanceService` | `CalculateOverdueCashAdvancesJob` | Lifecycle of cash advances: request, threshold verification, manager approval, Grant Payout disbursement logging (`granted_by`, `payout_method`, `granter_signature`), unified `payout` hydration via `CashAdvanceEnrichmentService`, and employee acknowledgment. |
-| **`Reimbursements`** | `/api/reimbursements`<br>`App\Modules\Reimbursements` | `ReimbursementController`<br>`ReceiptController`<br>`ExpenseCategoryController`<br>`PrsReimbursementRequestController`<br>`PrsWebhookController`<br>`OcrCallbackController`<br>`ReimbursementService`<br>`ReceiptService` | `UpdatePrsReimbursementStatusJob`<br>`DispatchReceiptToAiService` | Reimbursement claim submission, multi-receipt uploading & OCR dispatch, 90-day duplicate checking, BIR VAT classification, PRS status sync, and approval workflows. |
+| **`Reimbursements`** | `/api/reimbursements`<br>`App\Modules\Reimbursements` | `ReimbursementController`<br>`ReceiptController`<br>`ExpenseCategoryController`<br>`PrsReimbursementRequestController`<br>`PrsWebhookController`<br>`OcrCallbackController`<br>`ReimbursementService`<br>`ReceiptService`<br>`TsReimbursementImportService` | `UpdatePrsReimbursementStatusJob`<br>`UpdateTsReimbursementStatusJob`<br>`DispatchReceiptToAiService` | Reimbursement claim submission, multi-receipt uploading & OCR dispatch, 90-day duplicate checking, BIR VAT classification, PRS status sync (`source_system === 'prs'` guarded), TS ticket reimbursement ingestion (`ticket_id`, `ticket_number`, `reference_no`), TS status sync, and approval workflows. |
 | **`Expenses`** | `/api/expenses`<br>`App\Modules\Expenses` | `ExpenseController`<br>`ExpenseService` | — | Generic expense logging, line-item recording, receipt linkage, and expense category association. |
 | **`Liquidations`** | `/api/liquidations`<br>`App\Modules\Liquidations` | `LiquidationController` | `CalculateDailyPenaltiesJob` | Cash advance liquidation reports, receipt item matching & scanning, variance/shortfall computation, accounting audit verification, and daily penalty accruals. |
 | **`AuditLogs`** | `App\Modules\AuditLogs` | `AuditLogService` | — | Centralized append-only audit trail logging (`AuditLogService::log()`) and compliance export action tracking. |
 | **`Notifications`** | `App\Modules\Notifications` | `NotificationDeliveryService` | — | Template-based in-app notification dispatching, failed attempt logging, and role-based hierarchy resolution. |
 | **`Ai`** | `App\Modules\Ai` | `AiServiceOcrEngine`<br>`TesseractOcrEngine` | — | OCR contract bindings (`OcrEngineInterface`, `AsyncOcrEngineInterface`), external OCR service communication, payload signing, and webhook validation. |
 | **`Users`** | `/api/profile`<br>`App\Modules\Users` | `ProfileController`<br>`ProfileService`<br>`User` Model & Providers | — | User identity mapping, profile management (personal/contact details Dual-Sync with `capstone-auth-module`), Supabase avatar and hybrid signature storage, client-encrypted password updates, and user-scoped audit activity logs. |
-| **`Shared`** | `/api/crypto`<br>`/api/auth`<br>`/api/internal`<br>`/api/cms`<br>`App\Modules\Shared` | `CryptoController`<br>`AuthController`<br>`InternalCmsController`<br>`CmsController`<br>`PayloadDecryptionService`<br>`PasswordVerificationService`<br>`CmsClientService`<br>`CmsContractExpenseService`<br>`CmsVendorVerificationService`<br>`CmsRecurringExpenseService` | — | Cryptographic public key distribution (`GET /api/crypto/key`), client payload pre-encryption decryption middleware (`DecryptPayloadMiddleware`), external auth SSO proxying (`/api/auth/me`), password re-verification, internal service-to-service endpoints (`X-Internal-Secret`), and CMS bi-directional integration proxies/sync. |
+| **`Shared`** | `/api/crypto`<br>`/api/auth`<br>`/api/internal`<br>`/api/cms`<br>`/api/ts`<br>`App\Modules\Shared` | `CryptoController`<br>`AuthController`<br>`InternalCmsController`<br>`InternalTsController`<br>`CmsController`<br>`TsController`<br>`PayloadDecryptionService`<br>`PasswordVerificationService`<br>`CmsClientService`<br>`CmsContractExpenseService`<br>`CmsVendorVerificationService`<br>`CmsRecurringExpenseService`<br>`TsClientService` | — | Cryptographic public key distribution (`GET /api/crypto/key`), client payload pre-encryption decryption middleware (`DecryptPayloadMiddleware`), external auth SSO proxying (`/api/auth/me`), password re-verification, internal service-to-service endpoints (`X-Internal-Secret`), and CMS / TS bi-directional integration proxies/sync. |
 
 ### 6.2 Client-Side Pre-Encryption Architecture
 To prevent shoulder theft, network snooping, and plaintext leakage of sensitive PII/financial mutations:
@@ -243,6 +248,27 @@ To connect SERMS expenses, vendor compliance, and recurring vendor spend with th
    - `GET /api/cms/contracts/active` proxies `GET {CMS_CONTRACT_URL}/active` with graceful offline fallback so `<CmsContractSelect>` lets employees link optional `contract_id` + `client_name` on Reimbursements and Cash Advances.
    - `OcrCallbackService::handle()` and `ReceiptService` invoke `CmsVendorVerificationService::verifyAndTagReceipt()` against `GET {CMS_VENDOR_URL}/internal/vendors/lookup`, tagging `[Accredited Vendor]` (with default expense category pre-fill), `[Unverified Vendor — Secondary Accounting Audit Required]`, or failing safely (`[CMS Lookup Unavailable — Manual Verification Required]`) when CMS is offline. `Reimbursement` claims dynamically compute `fast_track_eligible`, `vendor_audit_required`, and `unverified_vendors`, prioritizing clean accredited claims in the approval queue and requiring explicit `secondary_audit_confirmed` (+ optional `secondary_audit_note`, persisted in `secondary_audit_*` columns and `CLAIM_APPROVED` audit logs) before unverified/flagged claims can be approved.
    - Accounting-scoped `POST /api/cms/vendors/suggest` (`201`/`200`/`409` handling) and `GET /api/cms/recurring-expenses` + `POST /api/cms/contract-requests` (`CmsRecurringExpenseService` detecting `>= 3` claims per vendor in 12 months and persisting `cms_contract_requests` + audit logs).
+
+### 6.6 TS ↔ SERMS Bi-Directional Integration Architecture
+To integrate field service ticket reimbursements and ticket lifecycle lookups between the Ticketing System (TS) and SERMS (see full handoff spec in [TS_INTEGRATION_HANDOFF.md](TS_INTEGRATION_HANDOFF.md)):
+1. **Service-to-Service Auth (`auth.internal` & Dual Headers):**
+   - Inbound TS -> SERMS routes (`/api/internal/ts/*`) enforce `AuthenticateInternalService` (`X-Internal-Secret` validated via `hash_equals()`, checking `config('services.ts.internal_secret')` first then `config('services.cms.internal_secret')`, with `TS_INTERNAL_SECRET` / `INTERNAL_SERVICE_SECRET` env fallbacks; returning `401 Unauthorized` on missing or invalid headers). `EnsureIdempotency` also safely hashes `UploadedFile` metadata and scopes unauthenticated (`user_id = null`) idempotency keys for multipart S2S calls.
+   - Outbound SERMS -> TS requests (`TsClientService` and `UpdateTsReimbursementStatusJob`) transmit **both** `X-Internal-Token` and `X-Internal-Secret` populated from `config('services.ts.internal_secret')` (`TS_INTERNAL_SECRET ?: INTERNAL_SERVICE_SECRET`), matching TS `ticket-service` (`VerifyInternalToken`) and `capstone-azure-infra/infra/modules/ticketing.bicep` (which provisions both `INTERNAL_TOKEN` and `INTERNAL_SERVICE_SECRET`).
+2. **Inbound Ticket Reimbursement Submission (`POST /api/internal/ts/reimbursements`):**
+   - Accepts `multipart/form-data` containing `ticket_id`, `ticket_number`, `employee_email` (or `employee[email]`), `employee_name` (or `employee[name]`), optional `employee_id`/`department`, `amount`, `expense_category` (ID or name) / `expense_category_id`, `description` (or `purpose`, max `255` chars), `expense_date` (or `date`), and `receipts[]` (or `attachments[]`: 1+ JPEG/JPG/PNG/PDF files, max 2MB each).
+   - Reuses `ReceiptService` (`storeAndValidateUploadedFiles()`, `cleanupStoredFiles()`, `dispatchOcrJob()`) for Supabase S3 storage, SHA-256 `file_hash`, 90-day duplicate check, and asynchronous `DispatchReceiptToAiService` OCR queue dispatch (with Supabase cleanup if validation or transaction fails).
+   - Persists `Receipt` (`is_draft: false`, `status: 'processing'`) and `Reimbursement` in `pending` status (`source_system: 'ts'`, `source_submission_id: (string) $ticketId`, `ticket_id`, `ticket_number`, `is_request: true`, computed `reference_no: 'RMB-YYYY-00000'`), dispatches user/admin notifications, and logs `TS_REIMBURSEMENT_RECEIVED` via `AuditLogService::log()` inside the same `DB::transaction()`.
+   - **Cardinality & Idempotency Rule:** Enforces **1 active reimbursement per `ticket_id`**. Retries while a non-rejected reimbursement exists for `ticket_id` return `200 OK` with `{ reimbursement_id, reference_no, status, message, data }`. Migration `2026_11_21_000001_add_ticket_fields_to_reimbursements_table.php` replaced the prior unique constraint on `(source_system, source_submission_id)` with non-unique `reimbursements_source_submission_idx` so a new claim can be created when the prior claim reached terminal `rejected`.
+3. **Inbound Ticket Reimbursement Status Pull (`GET /api/internal/ts/reimbursements/by-ticket/{ticketId}`):**
+   - Protected by `auth.internal`. Returns latest reimbursement state (`reimbursement_id`, `reference_no`, `status`, `message`, `ticket_id`, `ticket_number`, `amount`, `rejection_comment`, `approved_at`, `updated_at`, `history`) or `404 Not Found` if none exists.
+4. **Outbound Ticket List Proxy & SERMS UI (`GET /api/ts/tickets` / `/api/serms/ts/tickets`):**
+   - Protected by `auth.external`. `TsClientService::listTickets()` calls `GET {TS_API_URL}/internal/tickets` with graceful offline fallback (`{ available: false, data: [], error }`), and `TsController::tickets()` batch-enriches tickets with SERMS reimbursement summaries in one `whereIn('ticket_id', ...)` query (avoiding N+1).
+   - Frontend integrates `useTsStore`, `<TsTicketSelect>` (in `MetaAndAttachments.vue` + `ReimbursementFormView.vue` with `?ticket_id=&ticket_number=` query prefill), `<TsTicketsPanel>` (accessible to all authenticated SERMS users under the `Tickets (TS)` tab in `ReimbursementsView.vue`), and ticket / `From TS` badges in `ReimbursementsTable.vue` and `ReimbursementDetailsModal.vue`.
+5. **Optional Outbound Webhook Sync & PRS Guard Fix:**
+   - `UpdateTsReimbursementStatusJob` (dispatched on `approve`, `revise`, `reject`, and `grant` when `$reimbursement->source_system === 'ts' || !empty($reimbursement->ticket_id)`) POSTs `{ ticket_id, ticket_number, reimbursement_id, reference_no, status, message, rejection_comment, updated_at }` to `TS_REIMBURSEMENT_STATUS_URL` with `X-Internal-Token` and `X-Internal-Secret` (skipping cleanly if unconfigured).
+   - Fixed `ReimbursementService::approveReimbursement()` and `grantReimbursement()` so `UpdatePrsReimbursementStatusJob` is strictly guarded by `$reimbursement->source_system === 'prs'`, preventing TS or manual claims from firing PRS webhooks.
+6. **Environment Configuration (`config/services.php` `services.ts`, `.env.example`, `docker-compose.yml`):**
+   - `TS_API_URL`, `TS_REIMBURSEMENT_STATUS_URL`, `TS_INTERNAL_SECRET`, `TS_SERVICE_TIMEOUT` (default `10`), and `INTERNAL_SERVICE_SECRET` (local test defaults must be rotated to strong 32+ byte secrets in production).
 
 ---
 

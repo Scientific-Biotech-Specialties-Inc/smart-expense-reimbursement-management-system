@@ -49,6 +49,7 @@ class AuditLogService
         'SIGNATURE_REMOVED' => ['label' => 'Digital Signature Removed', 'tone' => 'warning', 'domain' => 'profile', 'domain_label' => 'Profile'],
         'CMS_VENDOR_SUGGESTED' => ['label' => 'Vendor Suggested to CMS', 'tone' => 'info', 'domain' => 'cms', 'domain_label' => 'CMS Integration'],
         'CMS_CONTRACT_REQUEST_FORWARDED' => ['label' => 'Contract Request Forwarded to CMS', 'tone' => 'info', 'domain' => 'cms', 'domain_label' => 'CMS Integration'],
+        'TS_REIMBURSEMENT_RECEIVED' => ['label' => 'Received from Ticketing System', 'tone' => 'info', 'domain' => 'ts', 'domain_label' => 'Ticketing Integration'],
     ];
 
     private const DIFF_FIELDS = [
@@ -76,6 +77,8 @@ class AuditLogService
         'contact_number' => 'Contact Number',
         'contract_id' => 'CMS Contract ID',
         'client_name' => 'Client Name',
+        'ticket_id' => 'TS Ticket ID',
+        'ticket_number' => 'TS Ticket Number',
         'vendor_status_tag' => 'Vendor Verification Tag',
         'secondary_audit_confirmed_at' => 'Secondary Audit Confirmed At',
         'secondary_audit_by' => 'Secondary Audit By',
@@ -316,7 +319,7 @@ class AuditLogService
         }
 
         // Hybrid Fallback: synthesize baseline submission if missing
-        if (!in_array('CLAIM_SUBMITTED', $loggedActionTypes, true)) {
+        if (!in_array('CLAIM_SUBMITTED', $loggedActionTypes, true) && !in_array('TS_REIMBURSEMENT_RECEIVED', $loggedActionTypes, true)) {
             $submitterName = $rm->user ? $rm->user->name : ($rm->submitted_by_name ?? 'Employee');
             $createdAt = $rm->date ?? $rm->created_at;
             $entries[] = [

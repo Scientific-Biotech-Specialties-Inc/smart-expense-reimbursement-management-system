@@ -10,6 +10,7 @@ import {
   ChevronsUpDown,
   Eye,
   Pencil,
+  Ticket,
   Trash2,
 } from "lucide-vue-next";
 import ActionDropdownMenu from "@/components/base/ActionDropdownMenu.vue";
@@ -199,6 +200,30 @@ const tableMinWidth = computed(() =>
                   class="block truncate font-medium text-slate-800"
                   :title="row.reportDescription"
                 >{{ row.reportDescription }}</span>
+                <div
+                  v-if="row.reference_no || row.source_system === 'ts' || row.ticket_id || row.ticket_number"
+                  class="mt-1 flex flex-wrap items-center gap-1.5"
+                >
+                  <span
+                    v-if="row.reference_no"
+                    class="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600"
+                  >
+                    {{ row.reference_no }}
+                  </span>
+                  <span
+                    v-if="row.source_system === 'ts' || row.ticket_id"
+                    class="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700"
+                  >
+                    <Ticket class="w-2.5 h-2.5" aria-hidden="true" />
+                    <span>From TS</span>
+                  </span>
+                  <span
+                    v-if="row.ticket_id || row.ticket_number"
+                    class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700"
+                  >
+                    Ticket {{ row.ticket_number || `#${row.ticket_id}` }}
+                  </span>
+                </div>
                 <div
                   v-if="row.displayStatus === 'pending' && (row.fastTrackEligible || row.vendorAuditRequired)"
                   class="mt-1 flex flex-wrap items-center gap-1"

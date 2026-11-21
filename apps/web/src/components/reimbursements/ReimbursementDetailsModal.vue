@@ -16,6 +16,7 @@ import {
   FileText,
   Download,
   Eye,
+  Ticket,
   Wallet,
 } from "lucide-vue-next";
 
@@ -144,11 +145,30 @@ function categoryName(record) {
             <div>
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">
                 Reimbursement Ref #{{ viewingRecord.id }}
+                <span
+                  v-if="viewingRecord.reference_no"
+                  class="ml-1.5 font-mono font-semibold text-slate-600"
+                >
+                  {{ viewingRecord.reference_no }}
+                </span>
               </p>
               <div class="flex flex-wrap items-center gap-2.5">
                 <h2 class="text-2xl font-bold text-slate-800">
                   {{ formatAmount(viewingRecord.amount || 0, viewingRecord.currency || 'PHP') }}
                 </h2>
+                <span
+                  v-if="viewingRecord.source_system === 'ts' || viewingRecord.ticket_id"
+                  class="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700"
+                >
+                  <Ticket class="w-3 h-3" aria-hidden="true" />
+                  <span>From TS</span>
+                </span>
+                <span
+                  v-if="viewingRecord.ticket_id || viewingRecord.ticket_number"
+                  class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
+                >
+                  Ticket {{ viewingRecord.ticket_number || `#${viewingRecord.ticket_id}` }}
+                </span>
                 <span
                   v-if="viewingRecord.fast_track_eligible"
                   class="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700"
@@ -316,6 +336,18 @@ function categoryName(record) {
                 <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Linked CMS Contract</p>
                 <p class="text-sm text-slate-700">
                   {{ viewingRecord.client_name ? `${viewingRecord.client_name} (Contract #${viewingRecord.contract_id})` : `Contract #${viewingRecord.contract_id}` }}
+                </p>
+              </div>
+              <div v-if="viewingRecord.ticket_id || viewingRecord.ticket_number" class="col-span-2">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Linked Support Ticket (TS)</p>
+                <p class="text-sm text-slate-700 inline-flex items-center gap-2">
+                  <Ticket class="w-4 h-4 text-indigo-600 shrink-0" aria-hidden="true" />
+                  <span class="font-medium">
+                    {{ viewingRecord.ticket_number ? `Ticket ${viewingRecord.ticket_number}` : `Ticket #${viewingRecord.ticket_id}` }}
+                  </span>
+                  <span v-if="viewingRecord.ticket_id && viewingRecord.ticket_number" class="text-xs text-slate-400">
+                    (ID #{{ viewingRecord.ticket_id }})
+                  </span>
                 </p>
               </div>
               <div v-if="['approved', 'granted'].includes(normalizeStatus(viewingRecord.status)) || viewingRecord.approved_by">

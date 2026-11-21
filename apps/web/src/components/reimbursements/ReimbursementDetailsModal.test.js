@@ -459,4 +459,35 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
       expect(confirmedAudit.text()).toContain("Verified physical BIR receipt.");
     });
   });
+
+  describe("Ticketing System (TS) source tag & linked ticket metadata", () => {
+    it("displays From TS tag, Ticket badge, and reference_no when source_system is ts or ticket_id is set", () => {
+      const wrapper = mount(ReimbursementDetailsModal, {
+        props: {
+          viewingRecord: {
+            id: 42,
+            reference_no: "RMB-2026-00042",
+            source_system: "ts",
+            ticket_id: 77,
+            ticket_number: "TKT-0077",
+            status: "pending",
+            amount: 1850,
+            receipts: [],
+          },
+          modalLoading: false,
+        },
+        global: {
+          stubs: {
+            StatusBadge: true,
+            BaseReceiptImage: true,
+          },
+        },
+      });
+
+      expect(wrapper.text()).toContain("RMB-2026-00042");
+      expect(wrapper.text()).toContain("From TS");
+      expect(wrapper.text()).toContain("Ticket TKT-0077");
+      expect(wrapper.text()).toContain("Linked Support Ticket (TS)");
+    });
+  });
 });

@@ -13,6 +13,7 @@ import GrantPayoutModal from "@/components/reimbursements/GrantPayoutModal.vue";
 import DeleteConfirmModal from "@/components/base/DeleteConfirmModal.vue";
 import ReimbursementsTable from "@/components/reimbursements/ReimbursementsTable.vue";
 import CmsRecurringExpensesPanel from "@/components/reimbursements/CmsRecurringExpensesPanel.vue";
+import TsTicketsPanel from "@/components/reimbursements/TsTicketsPanel.vue";
 import { formatPeso } from "@/utils/formatters";
 import {
   useReimbursementFilters,
@@ -304,9 +305,15 @@ onBeforeUnmount(() => {
         </p>
       </div>
 
-      <div v-if="auth.isAdmin" class="inline-flex rounded-lg border border-slate-200 bg-white p-1 self-start md:self-auto">
+      <div
+        role="tablist"
+        aria-label="Reimbursements sections"
+        class="inline-flex flex-wrap rounded-lg border border-slate-200 bg-white p-1 self-start md:self-auto"
+      >
         <button
           type="button"
+          role="tab"
+          :aria-selected="activeTab === 'all'"
           class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
           :class="activeTab === 'all' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
           @click="activeTab = 'all'"
@@ -315,6 +322,19 @@ onBeforeUnmount(() => {
         </button>
         <button
           type="button"
+          role="tab"
+          :aria-selected="activeTab === 'tickets'"
+          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          :class="activeTab === 'tickets' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
+          @click="activeTab = 'tickets'"
+        >
+          Tickets (TS)
+        </button>
+        <button
+          v-if="auth.isAdmin"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'recurring'"
           class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
           :class="activeTab === 'recurring' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
           @click="activeTab = 'recurring'"
@@ -324,7 +344,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <CmsRecurringExpensesPanel v-if="auth.isAdmin && activeTab === 'recurring'" />
+    <TsTicketsPanel v-if="activeTab === 'tickets'" />
+
+    <CmsRecurringExpensesPanel v-else-if="auth.isAdmin && activeTab === 'recurring'" />
 
     <template v-else>
     <!-- ── KPI Cards ── -->

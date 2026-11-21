@@ -2,6 +2,7 @@
 import { ref, watch } from "vue";
 import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor.vue";
 import CmsContractSelect from "@/components/base/CmsContractSelect.vue";
+import TsTicketSelect from "@/components/base/TsTicketSelect.vue";
 
 const props = defineProps({
   reportFile: {
@@ -40,6 +41,14 @@ const props = defineProps({
     type: String,
     default: "",
   },
+  ticketId: {
+    type: [Number, String, null],
+    default: null,
+  },
+  ticketNumber: {
+    type: String,
+    default: "",
+  },
 });
 
 const emit = defineEmits([
@@ -49,6 +58,8 @@ const emit = defineEmits([
   "update:purpose",
   "update:contractId",
   "update:clientName",
+  "update:ticketId",
+  "update:ticketNumber",
   "update:isManualMode",
 ]);
 
@@ -137,6 +148,16 @@ function onEditorModeUpdate(nextMode) {
         :client-name="clientName"
         @update:contract-id="$emit('update:contractId', $event)"
         @update:client-name="$emit('update:clientName', $event)"
+      />
+    </div>
+
+    <!-- Support Ticket Link (TS, Optional) -->
+    <div class="card p-6 flex flex-col gap-2 md:col-span-2 relative z-10">
+      <TsTicketSelect
+        :ticket-id="ticketId"
+        :ticket-number="ticketNumber"
+        @update:ticket-id="$emit('update:ticketId', $event)"
+        @update:ticket-number="$emit('update:ticketNumber', $event)"
       />
     </div>
 
