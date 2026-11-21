@@ -1,21 +1,42 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mount } from "@vue/test-utils";
-import { nextTick } from "vue";
+import { mount, flushPromises } from "@vue/test-utils";
+import { nextTick, reactive } from "vue";
 import PayoutView from "@/views/PayoutView.vue";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import BaseUtilityToolbar from "@/components/base/BaseUtilityToolbar.vue";
 import PayoutsTable from "@/components/payouts/PayoutsTable.vue";
 import PayoutDetailsModal from "@/components/payouts/PayoutDetailsModal.vue";
+import { useCashAdvanceStore } from "@/stores/cashAdvance";
 import { buildNavLinks } from "@/composables/useNavLinks";
+import {
+  usePayoutFilters,
+  resolvePayoutMethod,
+  isPayoutAcknowledged,
+} from "@/composables/payouts/usePayoutFilters";
 
-const { mockItems, fetchAllMock, acknowledgePayoutMock, authState } = vi.hoisted(() => ({
+const {
+  mockItems,
+  mockCashAdvanceItems,
+  fetchAllMock,
+  acknowledgePayoutMock,
+  cashAdvanceFetchAllMock,
+  cashAdvanceAcknowledgeMock,
+  authState,
+  mockRoute,
+  mockApiFetch,
+} = vi.hoisted(() => ({
   fetchAllMock: vi.fn(),
   acknowledgePayoutMock: vi.fn().mockResolvedValue({ id: 102, status: "granted" }),
+  cashAdvanceFetchAllMock: vi.fn(),
+  cashAdvanceAcknowledgeMock: vi.fn().mockResolvedValue({ id: 201, status: "signed" }),
+  mockRoute: { query: {} },
+  mockApiFetch: vi.fn(),
   authState: {
     isAdmin: false,
     user: { id: "user-1", name: "Employee One" },
   },
+  mockCashAdvanceItems: [],
   mockItems: [
     {
       id: 101,
@@ -125,15 +146,131 @@ vi.mock("@/stores/reimbursement", () => ({
   }),
 }));
 
+vi.mock("@/stores/cashAdvance", () => {
+  let instance = null;
+  return {
+    useCashAdvanceStore: () => {
+      if (!instance) {
+        instance = reactive({
+          items: mockCashAdvanceItems,
+          isLoading: false,
+          fetchAll: cashAdvanceFetchAllMock,
+          acknowledgeRequest: cashAdvanceAcknowledgeMock,
+        });
+      }
+      return instance;
+    },
+  };
+});
+
 vi.mock("@/stores/auth", () => ({
   useAuthStore: () => authState,
 }));
+
+vi.mock("vue-router", () => ({
+  useRoute: () => mockRoute,
+  useRouter: () => ({ replace: vi.fn() }),
+}));
+
+vi.mock("@/utils/apiFetch", () => ({
+  apiFetch: (...args) => mockApiFetch(...args),
+}));
+
+function seedSampleCashAdvances() {
+  mockCashAdvanceItems.push(
+    {
+      id: 201,
+      user_id: "user-1",
+      requester: { id: "user-1", name: "Employee One" },
+      purpose: "Field Audit Travel",
+      amount: "3000.00",
+      currency: "PHP",
+      status: "disbursed",
+      date: "2026-10-14",
+      approved_at: "2026-10-15T09:00:00Z",
+      approved_by: "Approver Boss",
+      disbursement: {
+        disbursement_date: "2026-10-16",
+        created_at: "2026-10-16T11:00:00Z",
+        payout_method: "Other",
+        payout_method_other: "Bank Transfer",
+        granted_by: "Cashier Maya",
+        granter_signature: "data:image/png;base64,caGranter201",
+      },
+      payout: {
+        id: 11,
+        cash_advance_id: 201,
+        request_date: "2026-10-14",
+        approved_at: "2026-10-15T09:00:00Z",
+        granted_at: "2026-10-16T11:00:00Z",
+        approved_by: "Approver Boss",
+        granted_by: "Cashier Maya",
+        payout_method: "Other",
+        payout_method_other: "Bank Transfer",
+        amount: "3000.00",
+        granter_signature: "data:image/png;base64,caGranter201",
+        employee_signature: null,
+        acknowledged_at: null,
+      },
+    },
+    {
+      id: 202,
+      user_id: "user-1",
+      requester: { id: "user-1", name: "Employee One" },
+      purpose: "Site Inspection Cash",
+      amount: "1200.00",
+      currency: "PHP",
+      status: "signed",
+      date: "2026-10-08",
+      approved_at: "2026-10-09T09:00:00Z",
+      approved_by: "Finance Lead",
+      signature: "data:image/png;base64,caEmp202",
+      acknowledged_at: "2026-10-11T15:00:00Z",
+      disbursement: {
+        disbursement_date: "2026-10-11",
+        channel: "E-wallet",
+        disbursed_by: { id: 99, name: "Cashier Leo" },
+      },
+    },
+    {
+      id: 203,
+      user_id: "user-1",
+      requester: { id: "user-1", name: "Employee One" },
+      purpose: "Not Yet Disbursed",
+      amount: "999.00",
+      status: "approved",
+      date: "2026-10-18",
+    },
+    {
+      id: 204,
+      user_id: "user-2",
+      requester: { id: "user-2", name: "Employee Two" },
+      purpose: "Regional Client Visit",
+      amount: "4500.00",
+      currency: "PHP",
+      status: "unliquidated",
+      date: "2026-10-17",
+      disbursement: {
+        created_at: "2026-10-18T10:00:00Z",
+        payout_method: "Visa",
+        granted_by: "Cashier Maya",
+        granter_signature: "data:image/png;base64,caGranter204",
+      },
+      acknowledged_at: null,
+      signature: null,
+    },
+  );
+}
 
 describe("PayoutView (G2-048 to G2-052)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     authState.isAdmin = false;
     authState.user = { id: "user-1", name: "Employee One" };
+    const caStore = useCashAdvanceStore();
+    caStore.items.splice(0, caStore.items.length);
+    caStore.isLoading = false;
+    mockRoute.query = {};
   });
 
   it("includes Payout in the employee sidebar navigation (G2-048 Task 1)", () => {
@@ -367,5 +504,240 @@ describe("PayoutView (G2-048 to G2-052)", () => {
     expect(modal.text()).toContain("Awaiting Acknowledgement");
     expect(modal.text()).toContain("Finance Manager"); // Approved By
     expect(modal.text()).toContain("Cashier Jane"); // Granted By
+  });
+
+  describe("Cash Advance Payout Integration", () => {
+    it("displays both Reimbursement and Cash Advance payouts for employee and excludes non-disbursed/other users", () => {
+      seedSampleCashAdvances();
+      const wrapper = mount(PayoutView);
+
+      expect(fetchAllMock).toHaveBeenCalledOnce();
+      expect(cashAdvanceFetchAllMock).toHaveBeenCalledOnce();
+
+      const table = wrapper.findComponent(PayoutsTable);
+      const rows = table.props("rows");
+      expect(rows).toHaveLength(4);
+      expect(rows.map((r) => r.uid)).toEqual([
+        "cash_advance-201",
+        "reimbursement-102",
+        "cash_advance-202",
+        "reimbursement-101",
+      ]);
+
+      const text = wrapper.text();
+      expect(text).toContain("#201");
+      expect(text).toContain("#202");
+      expect(text).toContain("Field Audit Travel");
+      expect(text).toContain("Bank Transfer");
+      expect(text).not.toContain("#203");
+      expect(text).not.toContain("#204");
+
+      const kpis = wrapper.findComponent(BaseKpiGrid).props("kpis");
+      expect(kpis[0]).toMatchObject({ label: "Total Payouts", value: 4 });
+      expect(kpis[1].value).toContain("8,200.50"); // 1500 + 2500.50 + 3000 + 1200
+      expect(kpis[2]).toMatchObject({ label: "Acknowledged", value: 2 });
+      expect(kpis[3]).toMatchObject({ label: "Awaiting Acknowledgement", value: 2 });
+    });
+
+    it("renders Type column and filters by Type (Reimbursement vs Cash Advance) and search query", async () => {
+      seedSampleCashAdvances();
+      const wrapper = mount(PayoutView);
+
+      const table = wrapper.findComponent(PayoutsTable);
+      const columns = table.props("columns");
+      expect(columns[1]).toMatchObject({
+        key: "typeLabel",
+        sortKey: "typeLabel",
+        label: "Type",
+      });
+      expect(table.text()).toContain("Reimbursement");
+      expect(table.text()).toContain("Cash Advance");
+
+      // Open Filters popover (available to employee as well as admin)
+      const filterBtn = wrapper
+        .findAll("button")
+        .find((btn) => btn.text().includes("Filters"));
+      expect(filterBtn).toBeDefined();
+      await filterBtn.trigger("click");
+      await nextTick();
+
+      const typeSelect = wrapper.find("select#payout-type-filter");
+      expect(typeSelect.exists()).toBe(true);
+
+      await typeSelect.setValue("Cash Advance");
+      await nextTick();
+      expect(wrapper.findComponent(PayoutsTable).props("rows")).toHaveLength(2);
+      expect(
+        wrapper
+          .findComponent(PayoutsTable)
+          .props("rows")
+          .every((r) => r.type === "cash_advance"),
+      ).toBe(true);
+
+      await typeSelect.setValue("Reimbursement");
+      await nextTick();
+      expect(wrapper.findComponent(PayoutsTable).props("rows")).toHaveLength(2);
+      expect(
+        wrapper
+          .findComponent(PayoutsTable)
+          .props("rows")
+          .every((r) => r.type === "reimbursement"),
+      ).toBe(true);
+
+      await typeSelect.setValue("All");
+      const toolbar = wrapper.findComponent(BaseUtilityToolbar);
+      await toolbar.vm.$emit("update:search", "Cash Advance");
+      await nextTick();
+      expect(wrapper.findComponent(PayoutsTable).props("rows")).toHaveLength(2);
+    });
+
+    it("allows employee to acknowledge a Cash Advance payout via cashAdvanceStore.acknowledgeRequest", async () => {
+      seedSampleCashAdvances();
+      const caStore = useCashAdvanceStore();
+      cashAdvanceAcknowledgeMock.mockImplementationOnce(async (id, sig) => {
+        const target = caStore.items.find((i) => i.id === id);
+        if (target) {
+          target.status = "signed";
+          target.signature = sig;
+          target.acknowledged_at = "2026-10-17T12:00:00Z";
+          target.payout.employee_signature = sig;
+          target.payout.acknowledged_at = "2026-10-17T12:00:00Z";
+        }
+        return { id, status: "signed" };
+      });
+
+      const wrapper = mount(PayoutView);
+      const table = wrapper.findComponent(PayoutsTable);
+
+      const caRow201 = table
+        .props("rows")
+        .find((r) => r.id === 201 && r.type === "cash_advance");
+      expect(caRow201).toBeDefined();
+
+      await table.vm.$emit("view-details", caRow201);
+      await nextTick();
+
+      const modal = wrapper.findComponent(PayoutDetailsModal);
+      expect(modal.exists()).toBe(true);
+      expect(modal.text()).toContain("Cash Advance");
+      expect(modal.text()).toContain("Bank Transfer");
+      expect(modal.text()).toContain("Cashier Maya");
+
+      const sigPad = modal.findComponent({ name: "BaseSignaturePad" });
+      expect(sigPad.exists()).toBe(true);
+      await sigPad.vm.$emit("update:modelValue", "data:image/png;base64,caEmpSig201");
+      await nextTick();
+
+      await modal.find('[data-testid="acknowledge-payout-btn"]').trigger("click");
+      await flushPromises();
+
+      expect(cashAdvanceAcknowledgeMock).toHaveBeenCalledWith(
+        201,
+        "data:image/png;base64,caEmpSig201",
+      );
+      expect(acknowledgePayoutMock).not.toHaveBeenCalled();
+      expect(cashAdvanceFetchAllMock).toHaveBeenCalledTimes(2);
+      expect(modal.props("record").acknowledged).toBe(true);
+    });
+
+    it("renders Admin read-only view with all employees' Cash Advance and Reimbursement payouts", async () => {
+      seedSampleCashAdvances();
+      authState.isAdmin = true;
+      authState.user = { id: "admin-1", name: "Admin Manager" };
+
+      const wrapper = mount(PayoutView);
+      const table = wrapper.findComponent(PayoutsTable);
+      const columns = table.props("columns");
+      expect(columns[1]).toMatchObject({ key: "typeLabel", label: "Type" });
+      expect(columns[2]).toMatchObject({ key: "employeeName", label: "Employee" });
+
+      // 3 reimbursements (101, 102, 105) + 3 eligible cash advances (201, 202, 204) = 6
+      const rows = table.props("rows");
+      expect(rows).toHaveLength(6);
+
+      const kpis = wrapper.findComponent(BaseKpiGrid).props("kpis");
+      expect(kpis[0]).toMatchObject({ label: "Total Payouts", value: 6 });
+      expect(kpis[1].value).toContain("17,700.50"); // 9000.50 + 3000 + 1200 + 4500
+      expect(kpis[2]).toMatchObject({ label: "Awaiting Acknowledgement", value: 4 }); // 102, 105, 201, 204
+
+      const row204 = rows.find((r) => r.id === 204 && r.type === "cash_advance");
+      expect(row204).toBeDefined();
+      await table.vm.$emit("view-details", row204);
+      await nextTick();
+
+      const modal = wrapper.findComponent(PayoutDetailsModal);
+      expect(modal.findComponent({ name: "BaseSignaturePad" }).exists()).toBe(false);
+      expect(modal.find('[data-testid="acknowledge-payout-btn"]').exists()).toBe(false);
+      expect(modal.text()).toContain("Cash Advance");
+      expect(modal.text()).toContain("Awaiting Acknowledgement");
+    });
+
+    it("combines loading state from cashAdvanceStore and supports cash_advance deep linking", async () => {
+      seedSampleCashAdvances();
+      const caStore = useCashAdvanceStore();
+      caStore.items.push({
+        id: 101,
+        user_id: "user-1",
+        requester: { id: "user-1", name: "Employee One" },
+        purpose: "Same ID Collision Advance",
+        amount: "750.00",
+        status: "disbursed",
+        date: "2026-10-19",
+      });
+      mockRoute.query = { type: "cash_advance", view: "101" };
+      mockApiFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: { id: 101, purpose: "Same ID Collision Advance" },
+        }),
+      });
+
+      caStore.isLoading = true;
+      const wrapper = mount(PayoutView);
+      expect(wrapper.findComponent(BaseKpiGrid).props("isLoading")).toBe(true);
+      expect(wrapper.findComponent(PayoutsTable).props("isLoading")).toBe(true);
+
+      caStore.isLoading = false;
+      await flushPromises();
+
+      expect(mockApiFetch).toHaveBeenCalledWith("/api/serms/cash-advances/101");
+      const modal = wrapper.findComponent(PayoutDetailsModal);
+      expect(modal.props("record")?.type).toBe("cash_advance");
+      expect(modal.props("record")?.description).toBe("Same ID Collision Advance");
+    });
+
+    it("supports backwards-compatible 2-arg usePayoutFilters and disbursement fallbacks", () => {
+      const store = {
+        items: [
+          {
+            id: 1,
+            user_id: 7,
+            status: "granted",
+            amount: 500,
+            payout: { payout_method: "Other", payout_method_other: "GCash" },
+          },
+        ],
+      };
+      const auth = { isAdmin: false, user: { id: 7 } };
+      const filters = usePayoutFilters(store, auth);
+      expect(filters.tableRows.value).toHaveLength(1);
+      expect(filters.tableRows.value[0].type).toBe("reimbursement");
+      expect(filters.typeOptions).toEqual(["All", "Reimbursement", "Cash Advance"]);
+
+      expect(
+        resolvePayoutMethod({
+          disbursement: { payout_method: "Other", payout_method_other: "Maya" },
+        }),
+      ).toBe("Maya");
+      expect(resolvePayoutMethod({ disbursement: { channel: "E-wallet" } })).toBe(
+        "E-wallet",
+      );
+      expect(isPayoutAcknowledged({ status: "signed" })).toBe(true);
+      expect(isPayoutAcknowledged({ signatureImage: "data:image/png;base64,abc" })).toBe(
+        true,
+      );
+      expect(isPayoutAcknowledged({ status: "disbursed" })).toBe(false);
+    });
   });
 });

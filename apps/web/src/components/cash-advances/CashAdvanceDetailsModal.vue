@@ -9,6 +9,7 @@ import BaseModal from "@/components/base/BaseModal.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import DecisionConfirmationModal from "@/components/base/DecisionConfirmationModal.vue";
+import GrantPayoutModal from "@/components/reimbursements/GrantPayoutModal.vue";
 import UnifiedRoadmapStepper from "@/components/base/UnifiedRoadmapStepper.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
@@ -213,6 +214,7 @@ function handleRoadmapNavigate(payload) {
 const acknowledgementSignature = ref(auth?.user?.signature || "");
 const adminReviewNotes = ref("");
 const confirmationAction = ref("");
+const isDisbursePayoutModalOpen = ref(false);
 const isAdminDecisionSubmitting = ref(false);
 const showAcknowledgeModal = ref(false);
 const isAcknowledging = ref(false);
@@ -290,12 +292,81 @@ const isOwnSubmission = computed(() => {
   );
 });
 
+const payoutMeta = computed(() => props.record?.payout || null);
+const disbursementMeta = computed(() => props.record?.disbursement || null);
+
+const resolvedPayoutMethod = computed(() => {
+  const method =
+    payoutMeta.value?.payout_method ||
+    disbursementMeta.value?.payout_method ||
+    props.record?.payoutMethod ||
+    disbursementMeta.value?.channel ||
+    null;
+  const other =
+    payoutMeta.value?.payout_method_other ||
+    disbursementMeta.value?.payout_method_other ||
+    null;
+  if (method && String(method).toLowerCase() === "other" && other) {
+    return other;
+  }
+  return method;
+});
+
+const resolvedGrantedBy = computed(
+  () =>
+    payoutMeta.value?.granted_by ||
+    disbursementMeta.value?.granted_by ||
+    disbursementMeta.value?.disbursed_by?.name ||
+    props.record?.granted_by ||
+    null,
+);
+
+const resolvedGrantedAt = computed(
+  () =>
+    payoutMeta.value?.granted_at ||
+    disbursementMeta.value?.created_at ||
+    disbursementMeta.value?.disbursement_date ||
+    null,
+);
+
+const resolvedGranterSignature = computed(
+  () =>
+    payoutMeta.value?.granter_signature ||
+    disbursementMeta.value?.granter_signature ||
+    props.record?.granterSignature ||
+    null,
+);
+
+const resolvedEmployeeSignature = computed(
+  () =>
+    payoutMeta.value?.employee_signature ||
+    props.record?.signatureImage ||
+    props.record?.signature ||
+    null,
+);
+
+const resolvedAcknowledgedAt = computed(
+  () =>
+    payoutMeta.value?.acknowledged_at ||
+    props.record?.acknowledgedAt ||
+    props.record?.acknowledged_at ||
+    null,
+);
+
+const hasPayoutMetadata = computed(() =>
+  Boolean(
+    resolvedPayoutMethod.value ||
+    resolvedGrantedBy.value ||
+    resolvedGranterSignature.value,
+  ),
+);
+
 const showSignatureSection = computed(
   () =>
     Boolean(
-      props.record?.signatureImage ||
-      props.record?.signature ||
-      props.record?.acknowledgedAt ||
+      resolvedEmployeeSignature.value ||
+      resolvedAcknowledgedAt.value ||
+      hasPayoutMetadata.value ||
       props.record?.status === "disbursed" ||
       props.record?.status === "signed",
     ) && (isOwnSubmission.value || auth?.isAdmin),
@@ -305,7 +376,8 @@ const canAcknowledgeFromCurrentView = computed(
   () =>
     isOwnSubmission.value &&
     props.record?.status === "disbursed" &&
-    !props.record?.acknowledgedAt,
+    !resolvedAcknowledgedAt.value &&
+    !resolvedEmployeeSignature.value,
 );
 
 watch(
@@ -314,6 +386,7 @@ watch(
     if (newVal) {
       adminReviewNotes.value = "";
       confirmationAction.value = "";
+      isDisbursePayoutModalOpen.value = false;
       showAcknowledgeModal.value = false;
       documentData.value = props.record?.document || null;
       adminPassword.value = "";
@@ -336,6 +409,8 @@ watch(
 );
 
 function closeDetails() {
+  isDisbursePayoutModalOpen.value = false;
+  confirmationAction.value = "";
   emit("close");
 }
 
@@ -443,11 +518,40 @@ function requestConfirmation(action) {
     return;
   }
 
+  if (action === "disburse") {
+    isDisbursePayoutModalOpen.value = true;
+    return;
+  }
+
   confirmationAction.value = action;
 }
 
 function cancelConfirmation() {
   confirmationAction.value = "";
+}
+
+function cancelDisbursePayout() {
+  isDisbursePayoutModalOpen.value = false;
+}
+
+async function handleConfirmDisbursePayout(payoutPayload) {
+  if (!props.record || isAdminDecisionSubmitting.value) return;
+
+  try {
+    isAdminDecisionSubmitting.value = true;
+    await store.disburseRequest(props.record.id, payoutPayload);
+    addToast({
+      message: "Request successfully disbursed",
+      type: "success",
+    });
+    isDisbursePayoutModalOpen.value = false;
+    closeDetails();
+  } catch (error) {
+    // Keep modal open so user can correct password or payout details.
+    addToast({ message: error.message || "Action failed", type: "error" });
+  } finally {
+    isAdminDecisionSubmitting.value = false;
+  }
 }
 
 async function confirmAdminDecision() {
@@ -467,15 +571,6 @@ async function confirmAdminDecision() {
     } else if (confirmationAction.value === "revise" || confirmationAction.value === "reject") {
       const reason = adminReviewNotes.value || (confirmationAction.value === "revise" ? "Revision requested by admin" : "Rejected by admin");
       await store.rejectRequest(id, reason, confirmationAction.value, adminPassword.value);
-    } else if (confirmationAction.value === "disburse") {
-      await store.disburseRequest(
-        id,
-        {
-          channel: "System Disbursement",
-          reference: `REF-${id}-${Date.now()}`,
-        },
-        adminPassword.value,
-      );
     }
 
     addToast({
@@ -635,32 +730,63 @@ async function confirmAcknowledge() {
             <div class="h-4 w-40 animate-pulse rounded bg-slate-200"></div>
           </section>
 
-          <!-- Signature Section -->
+          <!-- Signature & Payout Section -->
           <section v-if="showSignatureSection" class="space-y-3 pt-3 border-t border-slate-100">
-            <div v-if="record.status === 'disbursed' && !record.acknowledgedAt">
+            <div
+              v-if="hasPayoutMetadata"
+              class="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3"
+            >
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div v-if="resolvedPayoutMethod">
+                  <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Payout Method</p>
+                  <p class="text-xs font-semibold text-slate-700 mt-0.5">{{ resolvedPayoutMethod }}</p>
+                </div>
+                <div v-if="resolvedGrantedBy">
+                  <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Granted By</p>
+                  <p class="text-xs font-semibold text-slate-700 mt-0.5">{{ resolvedGrantedBy }}</p>
+                </div>
+                <div v-if="resolvedGrantedAt">
+                  <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Granted Date</p>
+                  <p class="text-xs font-semibold text-slate-700 mt-0.5">{{ formatDate(resolvedGrantedAt) }}</p>
+                </div>
+              </div>
+              <div v-if="resolvedGranterSignature" class="pt-2 border-t border-slate-200/60">
+                <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Granter's Signature</p>
+                <div class="flex h-24 w-full max-w-sm items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  <img
+                    :src="resolvedGranterSignature"
+                    class="max-h-full max-w-full object-contain"
+                    alt="Granter Signature"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div v-if="record.status === 'disbursed' && !resolvedAcknowledgedAt && !resolvedEmployeeSignature">
               <p class="text-sm text-slate-600 mb-3">
                 Employee certifies receipt of
                 <span class="font-semibold text-primary">{{ formatPeso(record.amount) }}</span>.
               </p>
             </div>
-            <div v-else-if="record.acknowledgedAt || record.signatureImage || record.signature">
+            <div v-else-if="resolvedAcknowledgedAt || resolvedEmployeeSignature">
               <p class="text-sm text-slate-600 mb-3">
                 Employee certified receipt of
                 <span class="font-semibold text-primary">{{ formatPeso(record.amount) }}</span>
-                <span v-if="record.acknowledgedAt" class="text-slate-400 text-xs">
-                  on {{ formatDate(record.acknowledgedAt) }}
+                <span v-if="resolvedAcknowledgedAt" class="text-slate-400 text-xs">
+                  on {{ formatDate(resolvedAcknowledgedAt) }}
                 </span>.
               </p>
             </div>
 
-            <div>
+            <div v-if="resolvedAcknowledgedAt || resolvedEmployeeSignature || canAcknowledgeFromCurrentView">
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-2">Signature</p>
               <div
-                v-if="record.acknowledgedAt || record.signatureImage || record.signature"
+                v-if="resolvedAcknowledgedAt || resolvedEmployeeSignature"
                 class="relative flex h-32 w-full max-w-lg mx-auto items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white"
               >
                 <img
-                  :src="record.signatureImage || record.signature"
+                  v-if="resolvedEmployeeSignature"
+                  :src="resolvedEmployeeSignature"
                   class="max-h-full max-w-full object-contain"
                   alt="Signature"
                 />
@@ -888,31 +1014,62 @@ async function confirmAcknowledge() {
             <p class="text-sm text-slate-700">{{ record.adminNotes }}</p>
           </div>
 
-          <!-- Signature Section -->
+          <!-- Signature & Payout Section -->
           <section
-            v-if="record.status === 'disbursed' || record.status === 'signed' || record.acknowledgedAt || record.signatureImage || record.signature"
+            v-if="record.status === 'disbursed' || record.status === 'signed' || resolvedAcknowledgedAt || resolvedEmployeeSignature || hasPayoutMetadata"
             class="space-y-3 pt-3 border-t border-slate-100"
           >
-            <p v-if="record.status === 'disbursed' && !record.acknowledgedAt" class="text-sm text-slate-600">
+            <div
+              v-if="hasPayoutMetadata"
+              class="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3"
+            >
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div v-if="resolvedPayoutMethod">
+                  <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Payout Method</p>
+                  <p class="text-xs font-semibold text-slate-700 mt-0.5">{{ resolvedPayoutMethod }}</p>
+                </div>
+                <div v-if="resolvedGrantedBy">
+                  <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Granted By</p>
+                  <p class="text-xs font-semibold text-slate-700 mt-0.5">{{ resolvedGrantedBy }}</p>
+                </div>
+                <div v-if="resolvedGrantedAt">
+                  <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Granted Date</p>
+                  <p class="text-xs font-semibold text-slate-700 mt-0.5">{{ formatDate(resolvedGrantedAt) }}</p>
+                </div>
+              </div>
+              <div v-if="resolvedGranterSignature" class="pt-2 border-t border-slate-200/60">
+                <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Granter's Signature</p>
+                <div class="flex h-24 w-full max-w-sm items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  <img
+                    :src="resolvedGranterSignature"
+                    class="max-h-full max-w-full object-contain"
+                    alt="Granter Signature"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <p v-if="record.status === 'disbursed' && !resolvedAcknowledgedAt && !resolvedEmployeeSignature" class="text-sm text-slate-600">
               I certify that I received the cash advance of
               <span class="font-semibold text-primary">{{ formatPeso(record.amount) }}</span>.
             </p>
-            <p v-else-if="record.acknowledgedAt || record.signatureImage || record.signature" class="text-sm text-slate-600">
+            <p v-else-if="resolvedAcknowledgedAt || resolvedEmployeeSignature" class="text-sm text-slate-600">
               Acknowledged and certified receipt of
               <span class="font-semibold text-primary">{{ formatPeso(record.amount) }}</span>
-              <span v-if="record.acknowledgedAt" class="text-slate-400 text-xs">
-                on {{ formatDate(record.acknowledgedAt) }}
+              <span v-if="resolvedAcknowledgedAt" class="text-slate-400 text-xs">
+                on {{ formatDate(resolvedAcknowledgedAt) }}
               </span>.
             </p>
 
-            <div>
+            <div v-if="resolvedAcknowledgedAt || resolvedEmployeeSignature || record.status === 'disbursed'">
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-2">Signature</p>
               <div
-                v-if="record.acknowledgedAt || record.signatureImage || record.signature"
+                v-if="resolvedAcknowledgedAt || resolvedEmployeeSignature"
                 class="relative flex h-32 w-full max-w-lg mx-auto items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white"
               >
                 <img
-                  :src="record.signatureImage || record.signature"
+                  v-if="resolvedEmployeeSignature"
+                  :src="resolvedEmployeeSignature"
                   class="max-h-full max-w-full object-contain"
                   alt="Signature"
                 />
@@ -921,7 +1078,7 @@ async function confirmAcknowledge() {
                 </span>
               </div>
               <div
-                v-else
+                v-else-if="record.status === 'disbursed'"
                 class="space-y-2 flex flex-col items-center"
               >
                 <BaseSignaturePad
@@ -929,7 +1086,7 @@ async function confirmAcknowledge() {
                   label=""
                   placeholder="Draw your signature here to acknowledge receipt"
                 />
-                <div v-if="!record.acknowledgedAt" class="mt-2 flex w-full max-w-lg justify-end gap-2">
+                <div v-if="!resolvedAcknowledgedAt" class="mt-2 flex w-full max-w-lg justify-end gap-2">
                   <button
                     class="px-4 py-1.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
                     type="button"
@@ -1029,6 +1186,20 @@ async function confirmAcknowledge() {
       v-model:comment="adminReviewNotes"
       @close="cancelConfirmation"
       @confirm="confirmAdminDecision"
+    />
+
+    <!-- Cash Advance Disbursement Payout Modal -->
+    <GrantPayoutModal
+      :is-open="isDisbursePayoutModalOpen"
+      :record="record"
+      :default-granted-by="auth?.user?.name || ''"
+      :is-submitting="isAdminDecisionSubmitting"
+      title="Disburse Cash Advance"
+      confirm-title="Confirm Cash Advance Handover"
+      submit-label="Submit Disbursement"
+      confirm-label="Confirm & Disburse"
+      @close="cancelDisbursePayout"
+      @confirm="handleConfirmDisbursePayout"
     />
 
     <!-- SBSI Report Preview Modal -->

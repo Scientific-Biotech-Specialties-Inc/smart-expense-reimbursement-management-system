@@ -29,6 +29,19 @@ class SignatureTestingSeederTest extends TestCase
         $this->assertNotEmpty($admin->signature);
         $this->assertStringStartsWith('data:image/png;base64,', $admin->signature);
 
+        // 1b. Pending & Approved Cash Advances ready for Approve -> Disbursement Payout Modal
+        $pendingAdvance = CashAdvance::where('user_id', $employee->id)
+            ->where('status', 'pending')
+            ->first();
+        $this->assertNotNull($pendingAdvance);
+
+        $approvedAdvance = CashAdvance::where('user_id', $employee->id)
+            ->where('status', 'approved')
+            ->first();
+        $this->assertNotNull($approvedAdvance);
+        $this->assertNull($approvedAdvance->disbursement);
+        $this->assertTrue($approvedAdvance->approvalActions()->where('action', 'approved')->exists());
+
         // 2. Disbursed Cash Advance ready for employee signature acknowledgement
         $disbursedAdvance = CashAdvance::where('user_id', $employee->id)
             ->where('status', 'disbursed')
@@ -38,6 +51,9 @@ class SignatureTestingSeederTest extends TestCase
         $this->assertNull($disbursedAdvance->signature);
         $this->assertNull($disbursedAdvance->acknowledged_at);
         $this->assertNotNull($disbursedAdvance->disbursement);
+        $this->assertSame('E-wallet', $disbursedAdvance->disbursement->payout_method);
+        $this->assertSame($admin->name, $disbursedAdvance->disbursement->granted_by);
+        $this->assertNotEmpty($disbursedAdvance->disbursement->granter_signature);
 
         // 3. Signed Cash Advance ready for liquidation testing
         $signedAdvance = CashAdvance::where('user_id', $employee->id)
@@ -47,6 +63,9 @@ class SignatureTestingSeederTest extends TestCase
         $this->assertNotNull($signedAdvance);
         $this->assertNotNull($signedAdvance->signature);
         $this->assertNotNull($signedAdvance->acknowledged_at);
+        $this->assertNotNull($signedAdvance->disbursement);
+        $this->assertSame('Cash', $signedAdvance->disbursement->payout_method);
+        $this->assertNotEmpty($signedAdvance->disbursement->granter_signature);
 
         // 4. Approved Reimbursement ready for Admin Payout Grant with Granter Signature
         $approvedReimbursement = Reimbursement::where('user_id', $employee->id)
@@ -74,6 +93,16 @@ class SignatureTestingSeederTest extends TestCase
         $this->seed(SignatureTestingSeeder::class);
 
         $employee = User::where('email', SignatureTestingSeeder::EMPLOYEE_EMAIL)->first();
+
+        $pendingCount = CashAdvance::where('user_id', $employee->id)
+            ->where('status', 'pending')
+            ->count();
+        $this->assertSame(1, $pendingCount);
+
+        $approvedCount = CashAdvance::where('user_id', $employee->id)
+            ->where('status', 'approved')
+            ->count();
+        $this->assertSame(1, $approvedCount);
 
         $disbursedCount = CashAdvance::where('user_id', $employee->id)
             ->where('status', 'disbursed')

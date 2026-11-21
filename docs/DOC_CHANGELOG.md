@@ -25,6 +25,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased] - Nov 21, 2026
 
 ### Added
+- **Cash Advance Disbursement via `GrantPayoutModal` & Unified Payout Integration (`docs/SERMS.md`, `apps/api`, `apps/web`):**
+  - Updated `docs/SERMS.md` (§4.2, §6.1, §6.4) to specify Cash Advance disbursement through the shared `GrantPayoutModal` (`granted_by`, `payout_method`, `payout_method_other`, `granter_signature`, password verification, and legacy `{ channel, reference, password }` backwards compatibility), unified `payout` enrichment via `CashAdvanceEnrichmentService`, `CASH_ADVANCE_DISBURSED` audit trail fields, and unified `PayoutView.vue` tracking & employee acknowledgement.
+  - **Backend (`apps/api`):** Added `2026_11_21_000001_add_payout_fields_to_cash_advance_disbursements_table.php`, updated `CashAdvanceDisbursement`, `DisburseCashAdvanceRequest`, `CashAdvanceController`, `CashAdvanceService`, `CashAdvanceEnrichmentService`, and `AuditLogService`, and added `CashAdvancePayoutDisbursementTest.php`.
+  - **Frontend (`apps/web`):** Reused `GrantPayoutModal.vue` in `CashAdvanceDetailsModal.vue` (`stores/cashAdvance.js`) and integrated Cash Advance payouts into `usePayoutFilters.js`, `PayoutView.vue`, `PayoutsTable.vue`, and `PayoutDetailsModal.vue`.
 - **Smart Multi-Receipt Auto-Split & Per-Card Isolation (`docs/SERMS.md`, `apps/web`):**
   - Documented the Multi-Receipt Auto-Split workflow and `split_receipts` / `segment_indices` cross-service contract in `docs/SERMS.md` (§4.2 and §6.3) and `docs/CHANGELOG.md`.
   - **Shared Utilities (`receiptUtils.js`):** Extracted `hasSplitReceipts()`, `formatSplitReceiptsToastMessage()`, `resolveSplitSegmentIndices()`, and `isDuplicateOcrResponse()`.
