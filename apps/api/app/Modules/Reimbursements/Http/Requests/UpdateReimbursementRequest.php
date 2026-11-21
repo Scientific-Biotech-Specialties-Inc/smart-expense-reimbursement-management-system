@@ -41,6 +41,8 @@ class UpdateReimbursementRequest extends FormRequest
             'description' => 'sometimes|string|max:500',
             'user_comment' => 'nullable|string|max:1000',
             'expense_category_id' => 'nullable|integer|exists:expense_categories,id',
+            'contract_id' => 'nullable|integer|min:1',
+            'client_name' => 'nullable|string|max:255',
             'event_type' => 'nullable|string|max:100',
             'amount' => 'sometimes|numeric|min:0.01',
             'date' => 'sometimes|date',

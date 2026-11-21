@@ -209,6 +209,8 @@ async function saveNewReceipt() {
       // Skip receipts that never got a real backend id (e.g. failed uploads).
       if (String(receipt.id).startsWith("temp-")) continue;
       const payload = buildUpdatePayload(receipt);
+      // Commit My Expense draft so it becomes visible in the My Expenses grid.
+      payload.is_draft = false;
       await receiptsStore.updateReceipt(receipt.dbId ?? receipt.id, payload);
     }
     notify("Receipt saved.", "success");

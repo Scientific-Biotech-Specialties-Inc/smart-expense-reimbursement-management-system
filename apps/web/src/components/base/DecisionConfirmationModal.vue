@@ -42,11 +42,33 @@ const props = defineProps({
     type: Number,
     default: 255,
   },
+  fastTrackEligible: {
+    type: Boolean,
+    default: false,
+  },
+  requiresSecondaryAudit: {
+    type: Boolean,
+    default: false,
+  },
+  unverifiedVendors: {
+    type: Array,
+    default: () => [],
+  },
+  secondaryAuditConfirmed: {
+    type: Boolean,
+    default: false,
+  },
+  secondaryAuditNote: {
+    type: String,
+    default: "",
+  },
 });
 
 const emit = defineEmits([
   "update:password",
   "update:comment",
+  "update:secondaryAuditConfirmed",
+  "update:secondaryAuditNote",
   "close",
   "confirm",
 ]);
@@ -85,7 +107,11 @@ const isRejectNextDisabled = computed(() => {
 });
 
 const isProceedDisabled = computed(() => {
-  return !localPassword.value?.trim() || props.isSubmitting;
+  const missingSecondaryAudit =
+    props.mode === "approve" &&
+    props.requiresSecondaryAudit &&
+    !props.secondaryAuditConfirmed;
+  return !localPassword.value?.trim() || missingSecondaryAudit || props.isSubmitting;
 });
 
 const config = computed(() => {
@@ -338,6 +364,52 @@ function handleFinalConfirm() {
 
       <!-- APPROVE or DISBURSE: Direct Confirmation Popup + Password -->
       <template v-else>
+        <div
+          v-if="mode === 'approve' && fastTrackEligible"
+          class="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3 text-xs font-medium text-emerald-800"
+        >
+          <span class="font-bold">[Fast-Track Eligible]</span> All receipts on this claim are from Accredited SBSI Vendors with clean OCR and duplicate checks.
+        </div>
+
+        <div
+          v-if="mode === 'approve' && requiresSecondaryAudit"
+          class="rounded-xl border border-amber-200 bg-amber-50/80 p-3.5 space-y-2.5"
+        >
+          <div class="space-y-1">
+            <p class="text-xs font-bold text-amber-900">
+              Secondary Accounting Audit Required
+            </p>
+            <p class="text-xs text-amber-800 leading-relaxed">
+              This claim includes unverified or flagged vendor receipts that require manual verification before approval:
+            </p>
+            <ul v-if="unverifiedVendors.length" class="list-disc pl-4 text-xs font-medium text-amber-900">
+              <li v-for="vendor in unverifiedVendors" :key="vendor">{{ vendor }}</li>
+            </ul>
+          </div>
+
+          <label class="flex items-start gap-2 cursor-pointer text-xs font-semibold text-slate-800">
+            <input
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-amber-400 text-primary focus:ring-primary"
+              :checked="secondaryAuditConfirmed"
+              @change="emit('update:secondaryAuditConfirmed', $event.target.checked)"
+            />
+            <span>Secondary Accounting Audit Completed <span class="text-danger">*</span></span>
+          </label>
+
+          <div class="input-wrapper">
+            <label class="input-label mb-1 block">Secondary Audit Note (Optional)</label>
+            <textarea
+              :value="secondaryAuditNote"
+              rows="2"
+              maxlength="500"
+              class="input !font-sans text-xs resize-none"
+              placeholder="Document verification details or accounting audit reference..."
+              @input="emit('update:secondaryAuditNote', $event.target.value)"
+            />
+          </div>
+        </div>
+
         <div class="rounded-xl border border-slate-200 bg-slate-50/70 p-4 space-y-2">
           <p class="text-sm font-medium text-slate-700 leading-relaxed">
             {{ config.promptMessage }}

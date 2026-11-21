@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
+use App\Modules\Shared\Services\CmsVendorVerificationService;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
 use App\Modules\Ai\Contracts\AsyncOcrEngineInterface;
 
@@ -244,6 +245,15 @@ class ReceiptService
             }
             $updateData = $updateData->toArray();
 
+            if (array_key_exists('is_draft', $updateData)) {
+                $isDraft = filter_var($updateData['is_draft'], FILTER_VALIDATE_BOOLEAN);
+                if (!$isDraft || ($canManage && !$receipt->reimbursements()->exists())) {
+                    $updateData['is_draft'] = $isDraft;
+                } else {
+                    unset($updateData['is_draft']);
+                }
+            }
+
             // Normalize vat_classification to lowercase when present.
             if (array_key_exists('vat_classification', $updateData)) {
                 $updateData['vat_classification'] = strtolower((string) $updateData['vat_classification']);
@@ -260,6 +270,11 @@ class ReceiptService
                 if (!empty($data['items'])) {
                     $receipt->items()->createMany($data['items']);
                 }
+            }
+
+            if ((array_key_exists('vendor_name', $updateData) || array_key_exists('tin', $updateData))
+                && ($receipt->vendor_name || $receipt->tin)) {
+                app(CmsVendorVerificationService::class)->verifyAndTagReceipt($receipt);
             }
 
             // Audit Log (required by AGENTS.md for every DB mutation).
@@ -377,6 +392,11 @@ class ReceiptService
                 if (!empty($data['items'])) {
                     $receipt->items()->createMany($data['items']);
                 }
+            }
+
+            if ((array_key_exists('vendor_name', $updateData) || array_key_exists('tin', $updateData))
+                && ($receipt->vendor_name || $receipt->tin)) {
+                app(CmsVendorVerificationService::class)->verifyAndTagReceipt($receipt);
             }
 
             AuditLogService::log(

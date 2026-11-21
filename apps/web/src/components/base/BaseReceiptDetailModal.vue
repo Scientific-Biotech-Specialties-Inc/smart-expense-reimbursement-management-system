@@ -139,6 +139,20 @@ const subtotal = computed(() => {
           <div class="mb-4">
             <span class="text-[11px] text-slate-400 uppercase tracking-wide">Vendor</span>
             <p class="text-base font-medium text-slate-800 mt-0.5">{{ receipt.vendor || "Unknown Vendor" }}</p>
+            <div v-if="receipt.vendorStatusTag" class="mt-1.5 flex flex-wrap items-center gap-2">
+              <span
+                class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border"
+                :class="
+                  receipt.vendorAccredited && !receipt.vendorAuditRequired
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : receipt.vendorFlagged
+                      ? 'bg-red-50 text-red-700 border-red-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+                "
+              >
+                {{ receipt.vendorStatusTag }}
+              </span>
+            </div>
           </div>
 
           <!-- Details Grid -->

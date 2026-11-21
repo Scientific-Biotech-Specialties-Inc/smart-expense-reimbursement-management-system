@@ -68,5 +68,22 @@ return [
         'ocr_queue_connection' => env('AI_SERVICE_OCR_QUEUE_CONNECTION', 'sync'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | CMS (Contract & Vendor Management System) Integration
+    |--------------------------------------------------------------------------
+    |
+    | Outbound base URLs and shared internal secret for bi-directional
+    | integration with CMS over Docker (shared-capstone-network) or tunnels.
+    |
+    */
+
+    'cms' => [
+        'contract_url'    => env('CMS_CONTRACT_URL', 'http://contract-management:8000/api'),
+        'vendor_url'      => env('CMS_VENDOR_URL', 'http://vendor-management:8000/api'),
+        'internal_secret' => env('INTERNAL_SERVICE_SECRET'),
+        'timeout'         => (int) env('CMS_SERVICE_TIMEOUT', 5),
+    ],
+
 ];
 

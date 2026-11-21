@@ -199,6 +199,23 @@ const tableMinWidth = computed(() =>
                   class="block truncate font-medium text-slate-800"
                   :title="row.reportDescription"
                 >{{ row.reportDescription }}</span>
+                <div
+                  v-if="row.displayStatus === 'pending' && (row.fastTrackEligible || row.vendorAuditRequired)"
+                  class="mt-1 flex flex-wrap items-center gap-1"
+                >
+                  <span
+                    v-if="row.fastTrackEligible"
+                    class="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700"
+                  >
+                    Fast-Track Eligible
+                  </span>
+                  <span
+                    v-else-if="row.vendorAuditRequired"
+                    class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800"
+                  >
+                    Secondary Audit Required
+                  </span>
+                </div>
                 <span
                   v-if="row.user_comment"
                   class="block truncate text-xs text-slate-400 mt-0.5"

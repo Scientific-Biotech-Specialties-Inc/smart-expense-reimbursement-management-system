@@ -75,6 +75,8 @@ const reportTemplateData = ref(
 );
 const isManualMode = ref(false);
 const userComment = ref("");
+const contractId = ref(null);
+const clientName = ref("");
 const fetching = ref(false);
 const existingStatus = ref("");
 const adminNotes = ref("");
@@ -231,6 +233,8 @@ const {
     reportTemplateData: serializeTemplateData(reportTemplateData.value),
     userComment: userComment.value,
     isManualMode: effectiveManualMode.value,
+    contractId: contractId.value,
+    clientName: clientName.value,
   }),
 });
 
@@ -299,6 +303,8 @@ async function handleSubmit() {
         reportTemplateData: reportTemplateData.value,
         totalAmount: totalAmount.value,
         userComment: userComment.value,
+        contractId: contractId.value,
+        clientName: clientName.value,
       });
     } else {
       success = await submitReimbursement({
@@ -307,6 +313,8 @@ async function handleSubmit() {
         reportTemplateData: reportTemplateData.value,
         totalAmount: totalAmount.value,
         userComment: userComment.value,
+        contractId: contractId.value,
+        clientName: clientName.value,
       });
     }
     if (!success) {
@@ -377,6 +385,8 @@ onMounted(async () => {
         );
       }
       userComment.value = data.user_comment || "";
+      contractId.value = data.contract_id ?? null;
+      clientName.value = data.client_name || "";
       existingStatus.value = data.status || "";
       adminNotes.value = data.admin_notes || data.rejection_comment || "";
       revisionCount.value = data.revision_count || 1;
@@ -637,6 +647,8 @@ function dismiss() {
           v-model:report-file="reportFile"
           v-model:report-template-data="reportTemplateData"
           v-model:user-comment="userComment"
+          v-model:contract-id="contractId"
+          v-model:client-name="clientName"
           :receipts="receipts"
           :total-amount="totalAmount"
           :record-id="props.id"

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch } from "vue";
 import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor.vue";
+import CmsContractSelect from "@/components/base/CmsContractSelect.vue";
 
 const props = defineProps({
   reportFile: {
@@ -31,6 +32,14 @@ const props = defineProps({
     type: [Number, String],
     default: null,
   },
+  contractId: {
+    type: [Number, String, null],
+    default: null,
+  },
+  clientName: {
+    type: String,
+    default: "",
+  },
 });
 
 const emit = defineEmits([
@@ -38,6 +47,8 @@ const emit = defineEmits([
   "update:reportTemplateData",
   "update:userComment",
   "update:purpose",
+  "update:contractId",
+  "update:clientName",
   "update:isManualMode",
 ]);
 
@@ -118,6 +129,16 @@ function onEditorModeUpdate(nextMode) {
         />
       </div>
     </section>
+
+    <!-- CMS Contract Link (Optional) -->
+    <div class="card p-6 flex flex-col gap-2 md:col-span-2 relative z-10">
+      <CmsContractSelect
+        :contract-id="contractId"
+        :client-name="clientName"
+        @update:contract-id="$emit('update:contractId', $event)"
+        @update:client-name="$emit('update:clientName', $event)"
+      />
+    </div>
 
     <!-- Comments / Notes (Optional) -->
     <section class="card p-6 flex flex-col gap-2 md:col-span-2 relative z-10">

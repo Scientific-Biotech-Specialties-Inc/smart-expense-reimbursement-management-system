@@ -108,6 +108,51 @@ class ReimbursementLogicTest extends TestCase
         ]);
     }
 
+    public function test_draft_receipt_is_committed_and_listed_when_updated_with_is_draft_false(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+
+        $uploadRes = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->post('/api/reimbursements/receipts', [
+                'file' => UploadedFile::fake()->create('draft-receipt.png', 100, 'image/png'),
+                'is_draft' => '1',
+            ]);
+
+        $uploadRes->assertStatus(201);
+        $receiptId = $uploadRes->json('data.id');
+
+        // Draft receipt stays hidden from My Expenses listing
+        $listBefore = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->getJson('/api/reimbursements/receipts');
+
+        $listBefore->assertOk();
+        $this->assertFalse(collect($listBefore->json('data'))->contains('id', $receiptId));
+
+        // Saving the receipt with is_draft=false commits it into My Expenses
+        $saveRes = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->patchJson("/api/reimbursements/receipts/{$receiptId}", [
+                'vendor_name' => 'Ma & Pa Bake Shop',
+                'is_draft' => false,
+            ]);
+
+        $saveRes->assertOk()
+            ->assertJsonPath('data.is_draft', false);
+
+        $listAfter = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->getJson('/api/reimbursements/receipts');
+
+        $listAfter->assertOk();
+        $this->assertTrue(collect($listAfter->json('data'))->contains('id', $receiptId));
+    }
+
     public function test_categories_endpoint_seeds_defaults_when_empty(): void
     {
         $response = $this

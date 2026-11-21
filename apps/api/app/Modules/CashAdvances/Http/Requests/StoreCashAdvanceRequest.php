@@ -32,6 +32,8 @@ class StoreCashAdvanceRequest extends FormRequest
         return [
             ...self::reportTemplateDataRules(),
             'purpose' => 'required|string|max:255',
+            'contract_id' => 'nullable|integer|min:1',
+            'client_name' => 'nullable|string|max:255',
             'amount' => 'required|numeric|min:0.01',
             'expected_disbursement_date' => 'required|date|after_or_equal:today',
             'expected_liquidation_date' => 'required|date|after:expected_disbursement_date',

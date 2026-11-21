@@ -145,9 +145,23 @@ function categoryName(record) {
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">
                 Reimbursement Ref #{{ viewingRecord.id }}
               </p>
-              <h2 class="text-2xl font-bold text-slate-800">
-                {{ formatAmount(viewingRecord.amount || 0, viewingRecord.currency || 'PHP') }}
-              </h2>
+              <div class="flex flex-wrap items-center gap-2.5">
+                <h2 class="text-2xl font-bold text-slate-800">
+                  {{ formatAmount(viewingRecord.amount || 0, viewingRecord.currency || 'PHP') }}
+                </h2>
+                <span
+                  v-if="viewingRecord.fast_track_eligible"
+                  class="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700"
+                >
+                  [Fast-Track Eligible]
+                </span>
+                <span
+                  v-else-if="viewingRecord.vendor_audit_required && !viewingRecord.secondary_audit_confirmed_at"
+                  class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800"
+                >
+                  Secondary Audit Required
+                </span>
+              </div>
             </div>
             <StatusBadge :status="viewingRecord.status" />
           </div>
@@ -298,12 +312,46 @@ function categoryName(record) {
                 <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Type of Event</p>
                 <p class="text-sm text-slate-700">{{ viewingRecord.event_type }}</p>
               </div>
+              <div v-if="viewingRecord.contract_id" class="col-span-2">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Linked CMS Contract</p>
+                <p class="text-sm text-slate-700">
+                  {{ viewingRecord.client_name ? `${viewingRecord.client_name} (Contract #${viewingRecord.contract_id})` : `Contract #${viewingRecord.contract_id}` }}
+                </p>
+              </div>
               <div v-if="['approved', 'granted'].includes(normalizeStatus(viewingRecord.status)) || viewingRecord.approved_by">
                 <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Approved By</p>
                 <p class="text-sm text-slate-700">
                   {{ viewingRecord.approved_by || "Approver" }}
                   <span v-if="viewingRecord.approved_at" class="text-xs text-slate-400">
                     &bull; {{ formatDate(viewingRecord.approved_at) }}
+                  </span>
+                </p>
+              </div>
+              <div
+                v-if="viewingRecord.secondary_audit_confirmed_at"
+                class="col-span-2 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3"
+              >
+                <p class="text-[11px] font-bold uppercase tracking-wide text-emerald-800 mb-0.5">
+                  Secondary Accounting Audit Completed
+                </p>
+                <p class="text-xs text-emerald-900">
+                  Verified by {{ viewingRecord.secondary_audit_by || "Accounting" }} &bull; {{ formatDate(viewingRecord.secondary_audit_confirmed_at) }}
+                </p>
+                <p v-if="viewingRecord.secondary_audit_note" class="mt-1 text-xs text-emerald-800 italic">
+                  "{{ viewingRecord.secondary_audit_note }}"
+                </p>
+              </div>
+              <div
+                v-else-if="viewingRecord.vendor_audit_required"
+                class="col-span-2 rounded-lg border border-amber-200 bg-amber-50/80 p-3"
+              >
+                <p class="text-[11px] font-bold uppercase tracking-wide text-amber-900 mb-0.5">
+                  [Unverified Vendor — Secondary Accounting Audit Required]
+                </p>
+                <p class="text-xs text-amber-800">
+                  Manual vendor/TIN verification must be confirmed before this claim can be approved.
+                  <span v-if="Array.isArray(viewingRecord.unverified_vendors) && viewingRecord.unverified_vendors.length">
+                    Flagged: {{ viewingRecord.unverified_vendors.join(", ") }}
                   </span>
                 </p>
               </div>

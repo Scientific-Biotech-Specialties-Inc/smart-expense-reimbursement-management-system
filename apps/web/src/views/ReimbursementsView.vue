@@ -12,6 +12,7 @@ import DecisionConfirmationModal from "@/components/base/DecisionConfirmationMod
 import GrantPayoutModal from "@/components/reimbursements/GrantPayoutModal.vue";
 import DeleteConfirmModal from "@/components/base/DeleteConfirmModal.vue";
 import ReimbursementsTable from "@/components/reimbursements/ReimbursementsTable.vue";
+import CmsRecurringExpensesPanel from "@/components/reimbursements/CmsRecurringExpensesPanel.vue";
 import { formatPeso } from "@/utils/formatters";
 import {
   useReimbursementFilters,
@@ -36,6 +37,7 @@ const store = useReimbursementStore();
 const auth = useAuthStore();
 const router = useRouter();
 const { addToast } = useToast();
+const activeTab = ref("all");
 
 const statusFilters = computed(() =>
   auth.isAdmin
@@ -70,11 +72,13 @@ const {
   searchQuery,
   activeStatus,
   activeCategory,
+  activeVendorFilter,
   sortKey,
   sortDirection,
   pageSize,
   currentPage,
   categoryFilters,
+  vendorFilters,
   paginatedTableRows,
   sortedTableRows,
   toggleSort,
@@ -156,6 +160,8 @@ const {
   revisionAction,
   rejectionComment,
   confirmPassword,
+  secondaryAuditConfirmed,
+  secondaryAuditNote,
   isReviewSubmitting,
   openApproveModal,
   cancelApprove,
@@ -167,6 +173,14 @@ const {
   cancelGrant,
   confirmGrant,
 } = useReimbursementDecisions(store, addToast, viewingRecord);
+
+const approvingRecord = computed(() => {
+  if (!approvingId.value) return null;
+  if (viewingRecord.value && String(viewingRecord.value.id) === String(approvingId.value)) {
+    return viewingRecord.value;
+  }
+  return store.items.find((item) => String(item.id) === String(approvingId.value)) || null;
+});
 
 const isDeleteModalOpen = ref(false);
 const deletingRequestId = ref(null);
@@ -289,8 +303,30 @@ onBeforeUnmount(() => {
           Manage and track all submitted expense claims.
         </p>
       </div>
+
+      <div v-if="auth.isAdmin" class="inline-flex rounded-lg border border-slate-200 bg-white p-1 self-start md:self-auto">
+        <button
+          type="button"
+          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          :class="activeTab === 'all' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
+          @click="activeTab = 'all'"
+        >
+          Reimbursement Requests
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          :class="activeTab === 'recurring' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
+          @click="activeTab = 'recurring'"
+        >
+          Recurring Expenses (CMS)
+        </button>
+      </div>
     </div>
 
+    <CmsRecurringExpensesPanel v-if="auth.isAdmin && activeTab === 'recurring'" />
+
+    <template v-else>
     <!-- ── KPI Cards ── -->
     <BaseKpiGrid
       :kpis="reimbursementKpis"
@@ -305,6 +341,23 @@ onBeforeUnmount(() => {
       :statuses="statusFilters"
       :categories="categoryFilters"
     >
+      <template #extra-filters>
+        <div class="space-y-1.5 rounded-lg bg-slate-50/70 p-2">
+          <p class="input-label !mb-1">Vendor Review</p>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="vf in vendorFilters"
+              :key="`vendor-filter-${vf}`"
+              type="button"
+              class="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+              :class="activeVendorFilter === vf ? 'bg-primary text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-accent-50 hover:text-accent'"
+              @click="activeVendorFilter = vf"
+            >
+              {{ vf }}
+            </button>
+          </div>
+        </div>
+      </template>
       <template #actions>
         <div ref="dropdownRef" class="relative inline-block text-left w-full sm:w-auto" @click.stop>
           <button
@@ -372,6 +425,7 @@ onBeforeUnmount(() => {
       @edit-request="handleEdit"
       @delete-request="handleDelete"
     />
+    </template>
 
     <!-- ── Record Detail Panel (Modal) ── -->
     <ReimbursementDetailsModal
@@ -409,8 +463,13 @@ onBeforeUnmount(() => {
       :is-open="!!approvingId || !!rejectingId"
       :mode="approvingId ? 'approve' : (revisionAction || 'revise')"
       :is-submitting="isReviewSubmitting"
+      :fast-track-eligible="Boolean(approvingRecord?.fast_track_eligible)"
+      :requires-secondary-audit="Boolean(approvingRecord?.vendor_audit_required)"
+      :unverified-vendors="approvingRecord?.unverified_vendors || []"
       v-model:password="confirmPassword"
       v-model:comment="rejectionComment"
+      v-model:secondary-audit-confirmed="secondaryAuditConfirmed"
+      v-model:secondary-audit-note="secondaryAuditNote"
       @close="approvingId ? cancelApprove() : cancelReject()"
       @confirm="approvingId ? confirmApprove() : confirmReject()"
     />

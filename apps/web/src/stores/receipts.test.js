@@ -301,6 +301,7 @@ describe("useReceiptStore", () => {
     await store.updateReceipt(7, {
       vendor_name: "Updated Vendor",
       status: "processed",
+      is_draft: false,
     });
 
     expect(apiFetch).toHaveBeenCalledTimes(1);
@@ -309,6 +310,7 @@ describe("useReceiptStore", () => {
     expect(opts.body).toBeInstanceOf(FormData);
     expect(opts.body.get("status")).toBe("processed");
     expect(opts.body.get("vendor_name")).toBe("Updated Vendor");
+    expect(opts.body.get("is_draft")).toBe("0");
   });
 
   it("orders visibleReceipts newest-uploaded-first (created_at desc)", async () => {

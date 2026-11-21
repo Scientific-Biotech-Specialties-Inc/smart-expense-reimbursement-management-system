@@ -25,6 +25,8 @@ class CashAdvanceService
             $advance = CashAdvance::create([
                 'user_id' => $user->id,
                 'purpose' => $data['purpose'],
+                'contract_id' => $data['contract_id'] ?? null,
+                'client_name' => $data['client_name'] ?? null,
                 'amount' => $data['amount'],
                 'expected_disbursement_date' => $data['expected_disbursement_date'],
                 'expected_liquidation_date' => $data['expected_liquidation_date'],
@@ -382,6 +384,14 @@ class CashAdvanceService
                 'expected_disbursement_date' => $data['expected_disbursement_date'] ?? null,
                 'expected_liquidation_date' => $data['expected_liquidation_date'] ?? null,
             ], fn($v) => $v !== null);
+
+            if (array_key_exists('contract_id', $data)) {
+                $updatePayload['contract_id'] = $data['contract_id'];
+            }
+
+            if (array_key_exists('client_name', $data)) {
+                $updatePayload['client_name'] = $data['client_name'];
+            }
 
             if (array_key_exists('report_template_data', $data)) {
                 $updatePayload['report_template_data'] = $data['report_template_data'];
