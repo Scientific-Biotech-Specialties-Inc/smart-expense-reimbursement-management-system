@@ -49,10 +49,376 @@ function esc(text) {
 
 const n = (v) => Number(v.toFixed(2));
 
+const LEN_BASE = [3,4,5,6,7,8,9,10,11,13,15,17,19,23,27,31,35,43,51,59,67,83,99,115,131,163,195,227,258];
+const LEN_EXTRA = [0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0];
+const DIST_BASE = [1,2,3,4,5,7,9,13,17,25,33,49,65,97,129,193,257,385,513,769,1025,1537,2049,3073,4097,6145,8193,12289,16385,24577];
+const DIST_EXTRA = [0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13];
+const CL_ORDER = [16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15];
+
+function buildHuffmanTree(lengths) {
+  const blCount = new Int32Array(16);
+  for (let i = 0; i < lengths.length; i++) {
+    if (lengths[i] > 0) blCount[lengths[i]]++;
+  }
+  const nextCode = new Int32Array(16);
+  let code = 0;
+  for (let bits = 1; bits <= 15; bits++) {
+    code = (code + blCount[bits - 1]) << 1;
+    nextCode[bits] = code;
+  }
+  const root = {};
+  for (let sym = 0; sym < lengths.length; sym++) {
+    const len = lengths[sym];
+    if (!len) continue;
+    const c = nextCode[len]++;
+    let node = root;
+    for (let b = len - 1; b >= 0; b--) {
+      const bit = (c >> b) & 1;
+      if (!node[bit]) node[bit] = {};
+      node = node[bit];
+    }
+    node.sym = sym;
+  }
+  return root;
+}
+
+const FIXED_LIT_TREE = (() => {
+  const lens = new Uint8Array(288);
+  for (let i = 0; i <= 143; i++) lens[i] = 8;
+  for (let i = 144; i <= 255; i++) lens[i] = 9;
+  for (let i = 256; i <= 279; i++) lens[i] = 7;
+  for (let i = 280; i <= 287; i++) lens[i] = 8;
+  return buildHuffmanTree(lens);
+})();
+
+const FIXED_DIST_TREE = (() => {
+  const lens = new Uint8Array(32);
+  lens.fill(5);
+  return buildHuffmanTree(lens);
+})();
+
+function inflateZlib(src) {
+  if (src.length < 6) throw new Error("Zlib stream too short");
+  const cmf = src[0];
+  const flg = src[1];
+  if ((cmf & 0x0f) !== 8 || ((cmf << 8) | flg) % 31 !== 0) {
+    throw new Error("Invalid zlib header");
+  }
+  let bytePos = flg & 0x20 ? 6 : 2;
+  let bitPos = 0;
+  const readBit = () => {
+    if (bytePos >= src.length) throw new Error("Unexpected end of zlib stream");
+    const bit = (src[bytePos] >> bitPos) & 1;
+    bitPos++;
+    if (bitPos === 8) {
+      bitPos = 0;
+      bytePos++;
+    }
+    return bit;
+  };
+  const readBits = (count) => {
+    let val = 0;
+    for (let i = 0; i < count; i++) val |= readBit() << i;
+    return val;
+  };
+  const decodeSym = (tree) => {
+    let node = tree;
+    while (node.sym === undefined) {
+      node = node[readBit()];
+      if (!node) throw new Error("Invalid Huffman code");
+    }
+    return node.sym;
+  };
+
+  const out = [];
+  let bfinal = 0;
+  while (!bfinal) {
+    bfinal = readBit();
+    const btype = readBits(2);
+    if (btype === 0) {
+      if (bitPos > 0) {
+        bitPos = 0;
+        bytePos++;
+      }
+      if (bytePos + 4 > src.length) throw new Error("Truncated stored block");
+      const len = src[bytePos] | (src[bytePos + 1] << 8);
+      const nlen = src[bytePos + 2] | (src[bytePos + 3] << 8);
+      if ((len ^ 0xffff) !== nlen) throw new Error("Corrupt stored block");
+      bytePos += 4;
+      if (bytePos + len > src.length) throw new Error("Truncated stored payload");
+      for (let i = 0; i < len; i++) out.push(src[bytePos + i]);
+      bytePos += len;
+      continue;
+    }
+
+    let litTree;
+    let distTree;
+    if (btype === 1) {
+      litTree = FIXED_LIT_TREE;
+      distTree = FIXED_DIST_TREE;
+    } else if (btype === 2) {
+      const hlit = readBits(5) + 257;
+      const hdist = readBits(5) + 1;
+      const hclen = readBits(4) + 4;
+      const clLens = new Uint8Array(19);
+      for (let i = 0; i < hclen; i++) clLens[CL_ORDER[i]] = readBits(3);
+      const clTree = buildHuffmanTree(clLens);
+      const lens = new Uint8Array(hlit + hdist);
+      let idx = 0;
+      while (idx < lens.length) {
+        const sym = decodeSym(clTree);
+        if (sym < 16) {
+          lens[idx++] = sym;
+        } else {
+          const rep = sym === 16 ? 3 + readBits(2) : sym === 17 ? 3 + readBits(3) : 11 + readBits(7);
+          const val = sym === 16 ? lens[idx - 1] || 0 : 0;
+          for (let r = 0; r < rep && idx < lens.length; r++) lens[idx++] = val;
+        }
+      }
+      litTree = buildHuffmanTree(lens.subarray(0, hlit));
+      distTree = buildHuffmanTree(lens.subarray(hlit));
+    } else {
+      throw new Error("Unsupported deflate block type");
+    }
+
+    while (true) {
+      const sym = decodeSym(litTree);
+      if (sym < 256) {
+        out.push(sym);
+      } else if (sym === 256) {
+        break;
+      } else {
+        const li = sym - 257;
+        if (li < 0 || li >= LEN_BASE.length) {
+          throw new Error(`Invalid deflate length symbol: ${sym}`);
+        }
+        const len = LEN_BASE[li] + (LEN_EXTRA[li] ? readBits(LEN_EXTRA[li]) : 0);
+        const di = decodeSym(distTree);
+        if (di < 0 || di >= DIST_BASE.length) {
+          throw new Error(`Invalid deflate distance symbol: ${di}`);
+        }
+        const dist = DIST_BASE[di] + (DIST_EXTRA[di] ? readBits(DIST_EXTRA[di]) : 0);
+        if (dist <= 0 || dist > out.length) {
+          throw new Error(`Invalid deflate back-reference distance: ${dist}`);
+        }
+        for (let k = 0; k < len; k++) {
+          out.push(out[out.length - dist]);
+        }
+      }
+    }
+  }
+  return new Uint8Array(out);
+}
+
+function paethPredictor(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  return pb <= pc ? b : c;
+}
+
+function rleEncode(bytes) {
+  const out = [];
+  let i = 0;
+  while (i < bytes.length) {
+    if (i + 1 < bytes.length && bytes[i] === bytes[i + 1]) {
+      const val = bytes[i];
+      let run = 2;
+      while (run < 128 && i + run < bytes.length && bytes[i + run] === val) run++;
+      out.push(257 - run, val);
+      i += run;
+    } else {
+      const start = i;
+      let lit = 1;
+      while (
+        lit < 128 &&
+        i + lit < bytes.length &&
+        !(i + lit + 1 < bytes.length && bytes[i + lit] === bytes[i + lit + 1])
+      ) {
+        lit++;
+      }
+      out.push(lit - 1);
+      for (let k = 0; k < lit; k++) out.push(bytes[start + k]);
+      i += lit;
+    }
+  }
+  out.push(128);
+  return new Uint8Array(out);
+}
+
+function bytesToLatin1(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 8192) {
+    out += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  }
+  return out;
+}
+
+/** Decode a `data:image/png;base64,...` signature into a PDF-ready RGB RunLengthDecode payload. */
+function decodePngDataUrlToPdfRgbRle(dataUrl) {
+  if (typeof dataUrl !== "string") return null;
+  const match = /^data:image\/png;base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl.trim());
+  if (!match) return null;
+
+  try {
+    const binStr = atob(match[1].replace(/\s+/g, ""));
+    const png = new Uint8Array(binStr.length);
+    for (let i = 0; i < binStr.length; i++) png[i] = binStr.charCodeAt(i);
+
+    const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    if (png.length < 33 || sig.some((b, idx) => png[idx] !== b)) return null;
+
+    const u32 = (off) => ((png[off] << 24) | (png[off + 1] << 16) | (png[off + 2] << 8) | png[off + 3]) >>> 0;
+    let width = 0;
+    let height = 0;
+    let bitDepth = 0;
+    let colorType = 0;
+    let plte = null;
+    let trns = null;
+    const idatChunks = [];
+
+    let pos = 8;
+    while (pos + 12 <= png.length) {
+      const len = u32(pos);
+      const type = String.fromCharCode(png[pos + 4], png[pos + 5], png[pos + 6], png[pos + 7]);
+      const dataStart = pos + 8;
+      if (dataStart + len + 4 > png.length) break;
+      const chunk = png.subarray(dataStart, dataStart + len);
+
+      if (type === "IHDR" && len >= 13) {
+        width = u32(dataStart);
+        height = u32(dataStart + 4);
+        bitDepth = png[dataStart + 8];
+        colorType = png[dataStart + 9];
+        const compression = png[dataStart + 10];
+        const filter = png[dataStart + 11];
+        const interlace = png[dataStart + 12];
+        if (!width || !height || width * height > 16_000_000 || bitDepth !== 8 || compression || filter || interlace) {
+          return null;
+        }
+      } else if (type === "PLTE") {
+        plte = chunk;
+      } else if (type === "tRNS") {
+        trns = chunk;
+      } else if (type === "IDAT") {
+        idatChunks.push(chunk);
+      } else if (type === "IEND") {
+        break;
+      }
+      pos = dataStart + len + 4;
+    }
+
+    const bppMap = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
+    const bpp = bppMap[colorType];
+    if (!width || !height || !bpp || !idatChunks.length) return null;
+    if (colorType === 3 && !plte) return null;
+
+    const totalIdat = idatChunks.reduce((s, c) => s + c.length, 0);
+    const idat = new Uint8Array(totalIdat);
+    let offset = 0;
+    for (const c of idatChunks) {
+      idat.set(c, offset);
+      offset += c.length;
+    }
+
+    const raw = inflateZlib(idat);
+    const stride = width * bpp;
+    if (raw.length < height * (1 + stride)) return null;
+
+    const rgb = new Uint8Array(width * height * 3);
+    let prevRow = new Uint8Array(stride);
+    let curRow = new Uint8Array(stride);
+
+    for (let y = 0; y < height; y++) {
+      const rowBase = y * (1 + stride);
+      const filterType = raw[rowBase];
+      for (let i = 0; i < stride; i++) {
+        const x = raw[rowBase + 1 + i];
+        const a = i >= bpp ? curRow[i - bpp] : 0;
+        const b = prevRow[i];
+        const c = i >= bpp ? prevRow[i - bpp] : 0;
+        if (filterType === 0) curRow[i] = x;
+        else if (filterType === 1) curRow[i] = (x + a) & 0xff;
+        else if (filterType === 2) curRow[i] = (x + b) & 0xff;
+        else if (filterType === 3) curRow[i] = (x + ((a + b) >> 1)) & 0xff;
+        else if (filterType === 4) curRow[i] = (x + paethPredictor(a, b, c)) & 0xff;
+        else return null;
+      }
+
+      for (let x = 0; x < width; x++) {
+        const dst = (y * width + x) * 3;
+        const srcIdx = x * bpp;
+        let r = 255;
+        let g = 255;
+        let bl = 255;
+        let a = 255;
+
+        if (colorType === 6) {
+          r = curRow[srcIdx];
+          g = curRow[srcIdx + 1];
+          bl = curRow[srcIdx + 2];
+          a = curRow[srcIdx + 3];
+        } else if (colorType === 2) {
+          r = curRow[srcIdx];
+          g = curRow[srcIdx + 1];
+          bl = curRow[srcIdx + 2];
+          if (trns && trns.length >= 6) {
+            const tr = (trns[0] << 8) | trns[1];
+            const tg = (trns[2] << 8) | trns[3];
+            const tb = (trns[4] << 8) | trns[5];
+            if (r === tr && g === tg && bl === tb) a = 0;
+          }
+        } else if (colorType === 4) {
+          r = g = bl = curRow[srcIdx];
+          a = curRow[srcIdx + 1];
+        } else if (colorType === 0) {
+          r = g = bl = curRow[srcIdx];
+          if (trns && trns.length >= 2 && r === ((trns[0] << 8) | trns[1])) a = 0;
+        } else if (colorType === 3 && plte) {
+          const pi = curRow[srcIdx];
+          if (pi * 3 + 2 < plte.length) {
+            r = plte[pi * 3];
+            g = plte[pi * 3 + 1];
+            bl = plte[pi * 3 + 2];
+          }
+          if (trns && pi < trns.length) a = trns[pi];
+        }
+
+        if (a === 255) {
+          rgb[dst] = r;
+          rgb[dst + 1] = g;
+          rgb[dst + 2] = bl;
+        } else if (a === 0) {
+          rgb[dst] = 255;
+          rgb[dst + 1] = 255;
+          rgb[dst + 2] = 255;
+        } else {
+          const inv = 255 - a;
+          rgb[dst] = ((r * a + 255 * inv + 127) / 255) | 0;
+          rgb[dst + 1] = ((g * a + 255 * inv + 127) / 255) | 0;
+          rgb[dst + 2] = ((bl * a + 255 * inv + 127) / 255) | 0;
+        }
+      }
+
+      const tmp = prevRow;
+      prevRow = curRow;
+      curRow = tmp;
+    }
+
+    return { width, height, rleBytes: rleEncode(rgb) };
+  } catch (error) {
+    console.warn("sbsiPdfGenerator: failed to decode signatory signature PNG:", error);
+    return null;
+  }
+}
+
 /** Accumulates content-stream operators for one page. */
 class Page {
   constructor() {
     this.ops = [];
+    this.images = [];
   }
   fill(rgb, path) {
     this.ops.push(`${rgb} rg ${path} f`);
@@ -67,6 +433,11 @@ class Page {
   text(str, x, y, { size = 10.5, bold = false, italic = false, rgb = "0.1 0.1 0.1" } = {}) {
     const font = bold ? "F1" : italic ? "F3" : "F2";
     this.ops.push(`BT /${font} ${size} Tf ${rgb} rg ${n(x)} ${n(y)} Td (${esc(str)}) Tj ET`);
+  }
+  image(imgData, x, y, drawW, drawH) {
+    const name = `Im${this.images.length + 1}`;
+    this.images.push({ name, ...imgData });
+    this.ops.push(`q\n${n(drawW)} 0 0 ${n(drawH)} ${n(x)} ${n(y)} cm\n/${name} Do\nQ`);
   }
 }
 
@@ -282,7 +653,17 @@ function buildPages(data) {
   ensure(120);
   y -= 6;
   page.text("Respectfully yours,", L, y);
-  y -= 46;
+  const sigLineY = y - 46;
+  if (data.signatorySignature) {
+    const img = decodePngDataUrlToPdfRgbRle(data.signatorySignature);
+    if (img) {
+      const maxW = 140;
+      const maxH = 36;
+      const scale = Math.min(maxW / img.width, maxH / img.height);
+      page.image(img, L, sigLineY + 3, img.width * scale, img.height * scale);
+    }
+  }
+  y = sigLineY;
   page.text("_______________________", L, y);
   y -= LEAD;
   page.text(data.signatoryName || "", L, y, { bold: true });
@@ -304,10 +685,19 @@ function compile(pages) {
   );
   const kids = [];
   for (const p of pages) {
+    const xObjectEntries = [];
+    for (const img of p.images) {
+      const imgStream = bytesToLatin1(img.rleBytes);
+      const imgId = add(
+        `<< /Type /XObject /Subtype /Image /Width ${img.width} /Height ${img.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /RunLengthDecode /Length ${imgStream.length} >>\nstream\n${imgStream}\nendstream`,
+      );
+      xObjectEntries.push(`/${img.name} ${imgId} 0 R`);
+    }
+    const xObjectRes = xObjectEntries.length ? ` /XObject << ${xObjectEntries.join(" ")} >>` : "";
     const stream = p.ops.join("\n");
     const contentId = add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
     const pageId = add(
-      `<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 ${fonts[0]} 0 R /F2 ${fonts[1]} 0 R /F3 ${fonts[2]} 0 R >> >> /Contents ${contentId} 0 R >>`,
+      `<< /Type /Page /Parent ${pagesObj} 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 ${fonts[0]} 0 R /F2 ${fonts[1]} 0 R /F3 ${fonts[2]} 0 R >>${xObjectRes} >> /Contents ${contentId} 0 R >>`,
     );
     kids.push(`${pageId} 0 R`);
   }

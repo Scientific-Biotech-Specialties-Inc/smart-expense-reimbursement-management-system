@@ -3,6 +3,7 @@
 namespace App\Modules\CashAdvances\Database\Seeders;
 
 use App\Modules\CashAdvances\Models\CashAdvance;
+use App\Modules\CashAdvances\Models\CashAdvanceApprovalAction;
 use App\Modules\Reimbursements\Models\ExpenseCategory;
 use App\Modules\Reimbursements\Models\Payout;
 use App\Modules\Reimbursements\Models\Reimbursement;
@@ -65,10 +66,125 @@ class SignatureTestingSeeder extends Seeder
         ExpenseCategory::ensureDefaults();
         $category = ExpenseCategory::first() ?? ExpenseCategory::create(['name' => 'Meals']);
 
+        $this->seedPendingCashAdvance($employee);
+        $this->seedApprovedCashAdvance($employee, $admin);
         $this->seedDisbursedCashAdvance($employee, $admin);
         $this->seedSignedCashAdvance($employee, $admin);
         $this->seedApprovedReimbursement($employee, $admin, $category);
         $this->seedGrantedPayoutReimbursement($employee, $admin, $category);
+    }
+
+    /**
+     * Cash Advance in pending status so admins can test Approve -> Disburse (GrantPayoutModal) end-to-end.
+     */
+    private function seedPendingCashAdvance(User $employee): void
+    {
+        $purpose = 'Clinical Lab Calibration & Reagent Transport — Pending (Ready for Approval & Disbursement)';
+        $advance = CashAdvance::where('user_id', $employee->id)->where('purpose', $purpose)->first();
+        $submittedAt = Carbon::now()->subDays(1);
+
+        if (! $advance) {
+            $advance = CashAdvance::create([
+                'user_id' => $employee->id,
+                'purpose' => $purpose,
+                'amount' => 6400.00,
+                'outstanding_balance' => null,
+                'expected_disbursement_date' => Carbon::today()->addDays(2),
+                'expected_liquidation_date' => Carbon::today()->addDays(16),
+                'status' => 'pending',
+                'signature' => null,
+                'acknowledged_at' => null,
+            ]);
+
+            $advance->submitted_at = $submittedAt;
+            $advance->save();
+
+            $advance->statusHistory()->create([
+                'from_status' => null,
+                'to_status' => 'pending',
+                'changed_by' => $employee->id,
+                'changed_at' => $submittedAt,
+            ]);
+
+            $this->info("Created Pending Cash Advance #{$advance->id} ready for approval & payout disbursement.");
+        } else {
+            $advance->forceFill([
+                'status' => 'pending',
+                'outstanding_balance' => null,
+                'signature' => null,
+                'acknowledged_at' => null,
+            ])->save();
+            $advance->disbursement()?->delete();
+            $advance->approvalActions()->delete();
+
+            $this->info("Reset Pending Cash Advance #{$advance->id} ready for approval & payout disbursement.");
+        }
+    }
+
+    /**
+     * Cash Advance in approved status ready for Admin Disbursement via GrantPayoutModal.
+     */
+    private function seedApprovedCashAdvance(User $employee, User $admin): void
+    {
+        $purpose = 'Diagnostic Equipment Field Servicing — Approved (Ready for Disbursement Payout Modal)';
+        $advance = CashAdvance::where('user_id', $employee->id)->where('purpose', $purpose)->first();
+        $submittedAt = Carbon::now()->subDays(2);
+        $approvedAt = Carbon::now()->subDay();
+
+        if (! $advance) {
+            $advance = CashAdvance::create([
+                'user_id' => $employee->id,
+                'purpose' => $purpose,
+                'amount' => 8200.00,
+                'outstanding_balance' => null,
+                'expected_disbursement_date' => Carbon::today()->addDay(),
+                'expected_liquidation_date' => Carbon::today()->addDays(14),
+                'status' => 'approved',
+                'signature' => null,
+                'acknowledged_at' => null,
+            ]);
+
+            $advance->submitted_at = $submittedAt;
+            $advance->save();
+
+            $advance->statusHistory()->create([
+                'from_status' => null,
+                'to_status' => 'pending',
+                'changed_by' => $employee->id,
+                'changed_at' => $submittedAt,
+            ]);
+
+            $advance->statusHistory()->create([
+                'from_status' => 'pending',
+                'to_status' => 'approved',
+                'changed_by' => $admin->id,
+                'changed_at' => $approvedAt,
+            ]);
+
+            $this->info("Created Approved Cash Advance #{$advance->id} ready for Disbursement Payout Modal.");
+        } else {
+            $advance->forceFill([
+                'status' => 'approved',
+                'outstanding_balance' => null,
+                'signature' => null,
+                'acknowledged_at' => null,
+            ])->save();
+            $advance->disbursement()?->delete();
+
+            $this->info("Reset Approved Cash Advance #{$advance->id} ready for Disbursement Payout Modal.");
+        }
+
+        CashAdvanceApprovalAction::updateOrCreate(
+            [
+                'cash_advance_id' => $advance->id,
+                'action' => 'approved',
+            ],
+            [
+                'approver_id' => $admin->id,
+                'comment' => 'Approved for disbursement QA testing.',
+                'actioned_at' => $approvedAt,
+            ]
+        );
     }
 
     /**
@@ -78,11 +194,10 @@ class SignatureTestingSeeder extends Seeder
     {
         $purpose = 'Regional Field Equipment & Logistics — Disbursed (Ready for Signature)';
         $advance = CashAdvance::where('user_id', $employee->id)->where('purpose', $purpose)->first();
+        $submittedAt = Carbon::now()->subDays(3);
+        $disbursedAt = Carbon::now()->subDays(1);
 
         if (! $advance) {
-            $submittedAt = Carbon::now()->subDays(3);
-            $disbursedAt = Carbon::now()->subDays(1);
-
             $advance = CashAdvance::create([
                 'user_id' => $employee->id,
                 'purpose' => $purpose,
@@ -97,13 +212,6 @@ class SignatureTestingSeeder extends Seeder
 
             $advance->submitted_at = $submittedAt;
             $advance->save();
-
-            $advance->disbursement()->create([
-                'disbursed_by_id' => $admin->id,
-                'disbursement_date' => $disbursedAt,
-                'channel' => 'bank-transfer',
-                'reference_number' => 'SEED-SIG-DISB-001',
-            ]);
 
             $advance->statusHistory()->create([
                 'from_status' => null,
@@ -130,11 +238,38 @@ class SignatureTestingSeeder extends Seeder
         } else {
             $advance->forceFill([
                 'status' => 'disbursed',
+                'outstanding_balance' => 7500.00,
                 'signature' => null,
                 'acknowledged_at' => null,
             ])->save();
             $this->info("Reset Disbursed Cash Advance #{$advance->id} to awaiting signature.");
         }
+
+        CashAdvanceApprovalAction::updateOrCreate(
+            [
+                'cash_advance_id' => $advance->id,
+                'action' => 'approved',
+            ],
+            [
+                'approver_id' => $admin->id,
+                'comment' => 'Approved for disbursement.',
+                'actioned_at' => $disbursedAt->copy()->subDay(),
+            ]
+        );
+
+        $advance->disbursement()->updateOrCreate(
+            ['cash_advance_id' => $advance->id],
+            [
+                'disbursed_by_id' => $admin->id,
+                'granted_by' => $admin->name,
+                'disbursement_date' => $disbursedAt,
+                'channel' => 'E-wallet',
+                'payout_method' => 'E-wallet',
+                'payout_method_other' => null,
+                'reference_number' => 'SEED-SIG-DISB-001',
+                'granter_signature' => self::DEMO_SIGNATURE_ADMIN,
+            ]
+        );
     }
 
     /**
@@ -144,12 +279,11 @@ class SignatureTestingSeeder extends Seeder
     {
         $purpose = 'Quarterly Logistics & Client Outreach — Signed (Ready for Liquidation)';
         $advance = CashAdvance::where('user_id', $employee->id)->where('purpose', $purpose)->first();
+        $submittedAt = Carbon::now()->subDays(6);
+        $disbursedAt = Carbon::now()->subDays(4);
+        $signedAt = Carbon::now()->subDays(3);
 
         if (! $advance) {
-            $submittedAt = Carbon::now()->subDays(6);
-            $disbursedAt = Carbon::now()->subDays(4);
-            $signedAt = Carbon::now()->subDays(3);
-
             $advance = CashAdvance::create([
                 'user_id' => $employee->id,
                 'purpose' => $purpose,
@@ -165,13 +299,6 @@ class SignatureTestingSeeder extends Seeder
             $advance->submitted_at = $submittedAt;
             $advance->save();
 
-            $advance->disbursement()->create([
-                'disbursed_by_id' => $admin->id,
-                'disbursement_date' => $disbursedAt,
-                'channel' => 'bank-transfer',
-                'reference_number' => 'SEED-SIG-SIGNED-002',
-            ]);
-
             $this->info("Created Signed Cash Advance #{$advance->id} ready for liquidation testing.");
         } else {
             $advance->forceFill([
@@ -181,6 +308,32 @@ class SignatureTestingSeeder extends Seeder
             ])->save();
             $this->info("Refreshed Signed Cash Advance #{$advance->id}.");
         }
+
+        CashAdvanceApprovalAction::updateOrCreate(
+            [
+                'cash_advance_id' => $advance->id,
+                'action' => 'approved',
+            ],
+            [
+                'approver_id' => $admin->id,
+                'comment' => 'Approved for disbursement.',
+                'actioned_at' => $disbursedAt->copy()->subDay(),
+            ]
+        );
+
+        $advance->disbursement()->updateOrCreate(
+            ['cash_advance_id' => $advance->id],
+            [
+                'disbursed_by_id' => $admin->id,
+                'granted_by' => $admin->name,
+                'disbursement_date' => $disbursedAt,
+                'channel' => 'Cash',
+                'payout_method' => 'Cash',
+                'payout_method_other' => null,
+                'reference_number' => 'SEED-SIG-SIGNED-002',
+                'granter_signature' => self::DEMO_SIGNATURE_ADMIN,
+            ]
+        );
     }
 
     /**

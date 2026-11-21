@@ -96,4 +96,88 @@ describe("GrantPayoutModal (G2-043 to G2-046)", () => {
       password: "secret123",
     });
   });
+
+  it("renders default Reimbursement labels when optional label props are omitted", async () => {
+    const wrapper = mount(GrantPayoutModal, {
+      props: {
+        isOpen: true,
+        record: sampleApprovedRecord,
+        defaultGrantedBy: "Admin John",
+      },
+    });
+
+    expect(wrapper.text()).toContain("Grant Reimbursement Payout");
+    expect(wrapper.find('[data-testid="submit-payout-btn"]').text()).toBe("Submit Payout");
+
+    await wrapper.findComponent({ name: "BaseSignaturePad" }).vm.$emit("update:modelValue", "data:image/png;base64,sig");
+    await nextTick();
+    await wrapper.find('[data-testid="submit-payout-btn"]').trigger("click");
+    await nextTick();
+
+    expect(wrapper.text()).toContain("Confirm Payout Handover");
+    expect(wrapper.find('[data-testid="final-grant-proceed-btn"]').text()).toBe("Confirm & Grant");
+  });
+
+  it("supports custom Cash Advance title/button props and Cash Advance record date/approver shapes", async () => {
+    const cashAdvanceRecord = {
+      id: 77,
+      amount: "12500.00",
+      currency: "PHP",
+      requested: "2026-10-10",
+      approvedAt: "2026-10-12T14:30:00Z",
+      approvedBy: "Manager Maria",
+      status: "approved",
+    };
+
+    const wrapper = mount(GrantPayoutModal, {
+      props: {
+        isOpen: true,
+        record: cashAdvanceRecord,
+        defaultGrantedBy: "Finance Admin",
+        title: "Disburse Cash Advance",
+        confirmTitle: "Confirm Cash Advance Handover",
+        submitLabel: "Submit Disbursement",
+        confirmLabel: "Confirm & Disburse",
+      },
+    });
+
+    const text = wrapper.text();
+    expect(text).toContain("Disburse Cash Advance");
+    expect(text).toContain("12,500.00");
+    expect(text).toContain("Oct 10, 2026");
+    expect(text).toContain("Oct 12, 2026");
+    expect(text).toContain("Manager Maria");
+    expect(wrapper.find('[data-testid="submit-payout-btn"]').text()).toBe("Submit Disbursement");
+
+    await wrapper.findComponent({ name: "BaseSignaturePad" }).vm.$emit("update:modelValue", "data:image/png;base64,caSig");
+    await nextTick();
+    await wrapper.find('[data-testid="submit-payout-btn"]').trigger("click");
+    await nextTick();
+
+    expect(wrapper.text()).toContain("Confirm Cash Advance Handover");
+    expect(wrapper.find('[data-testid="final-grant-proceed-btn"]').text()).toBe("Confirm & Disburse");
+  });
+
+  it("falls back to nested payout approved_at and approved_by when top-level approval fields are absent", () => {
+    const wrapper = mount(GrantPayoutModal, {
+      props: {
+        isOpen: true,
+        record: {
+          id: 88,
+          amount: "3000.00",
+          created_at: "2026-11-01T08:00:00Z",
+          payout: {
+            approved_at: "2026-11-03T11:00:00Z",
+            approved_by: "Nested Approver",
+          },
+        },
+        defaultGrantedBy: "Cashier",
+      },
+    });
+
+    const text = wrapper.text();
+    expect(text).toContain("Nov 1, 2026");
+    expect(text).toContain("Nov 3, 2026");
+    expect(text).toContain("Nested Approver");
+  });
 });

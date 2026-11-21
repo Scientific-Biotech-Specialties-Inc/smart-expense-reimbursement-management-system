@@ -151,4 +151,23 @@ describe("MyExpenseView — Receipt Deletion Error Handling (422 linked to reimb
     });
     expect(wrapper.vm.deleteModalOpen).toBe(false);
   });
+
+  it("blocks editing rejected and automatic-rejected receipts while allowing deletion", async () => {
+    const wrapper = mountView();
+
+    wrapper.vm.openEditReceipt({ id: "RCPT-2026-002", status: "rejected" });
+    expect(wrapper.vm.uploadModalOpen).toBe(false);
+    expect(mockAddToast).toHaveBeenCalledWith({
+      message: "This receipt's current status does not allow editing.",
+      type: "error",
+    });
+
+    mockAddToast.mockClear();
+    wrapper.vm.openEditReceipt({ id: "RCPT-2026-003", status: "automatic-rejected" });
+    expect(wrapper.vm.uploadModalOpen).toBe(false);
+    expect(mockAddToast).toHaveBeenCalledWith({
+      message: "This receipt's current status does not allow editing.",
+      type: "error",
+    });
+  });
 });

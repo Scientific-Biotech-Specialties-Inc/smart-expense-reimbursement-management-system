@@ -9,6 +9,13 @@ import CmsContractSelect from "@/components/base/CmsContractSelect.vue";
 import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor.vue";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import {
+  useRevisionGuard,
+  isManualReportTemplate,
+  isRevisionStatus,
+  serializeFileAttachment,
+  serializeTemplateData,
+} from "@/composables/useRevisionGuard";
+import {
   createDefaultTemplateData,
   validateTemplateData,
 } from "@/utils/sbsiReportTemplateUtils";
@@ -34,6 +41,8 @@ const { addToast } = useToast();
 const submitting = ref(false);
 const isEditMode = computed(() => !!props.id);
 const loadingRequest = ref(isEditMode.value);
+const existingStatus = ref("");
+const isReviseMode = computed(() => isRevisionStatus(existingStatus.value));
 
 const form = reactive({
   purpose: "",
@@ -45,7 +54,6 @@ const form = reactive({
   documents: [],
 });
 
-const reportEditorRef = ref(null);
 const manualReportFile = ref(null);
 const isManualMode = ref(false);
 const reportTemplateData = ref(
@@ -60,13 +68,13 @@ const reportTemplateData = ref(
       }),
 );
 
-function syncEditorMode() {
-  nextTick(() => {
-    const manualBtn = reportEditorRef.value?.$el?.querySelector('[data-testid="mode-manual"]');
-    if (manualBtn) {
-      isManualMode.value = manualBtn.getAttribute("aria-pressed") === "true";
-    }
-  });
+function handleEditorModeUpdate(nextMode) {
+  const manual = nextMode === "manual";
+  isManualMode.value = manual;
+  if (!manual) {
+    manualReportFile.value = null;
+    form.documents = [];
+  }
 }
 
 function handleReportFileUpdate(file) {
@@ -74,8 +82,6 @@ function handleReportFileUpdate(file) {
   form.documents = file ? [file] : [];
   if (file) {
     isManualMode.value = true;
-  } else {
-    syncEditorMode();
   }
 }
 
@@ -106,8 +112,34 @@ function handleTemplateLiquidationUpdate(val) {
 
 const isTemplateValid = computed(() => validateTemplateData(reportTemplateData.value).valid);
 const hasValidAttachment = computed(() =>
-  isManualMode.value ? form.documents.length > 0 : isTemplateValid.value,
+  isManualMode.value
+    ? Boolean(manualReportFile.value) && form.documents.length > 0
+    : isTemplateValid.value,
 );
+
+const {
+  isRevisionUnchanged,
+  captureBaseline: captureRevisionBaseline,
+} = useRevisionGuard({
+  isRevise: isReviseMode,
+  getSnapshot: () => ({
+    purpose: form.purpose,
+    contract_id: form.contract_id,
+    client_name: form.client_name,
+    amount:
+      form.amount === "" || form.amount === null || form.amount === undefined
+        ? ""
+        : Number.isFinite(Number(form.amount))
+          ? Number(form.amount)
+          : String(form.amount),
+    expected_disbursement_date: form.expected_disbursement_date,
+    expected_liquidation_date: form.expected_liquidation_date,
+    isManualMode: isManualMode.value,
+    documents: serializeFileAttachment(form.documents),
+    manualReportFile: serializeFileAttachment(manualReportFile.value),
+    reportTemplateData: serializeTemplateData(reportTemplateData.value),
+  }),
+});
 const todayDate = computed(() => formatDateInputValue(new Date()));
 const liquidationMinDate = computed(() => {
   if (!form.expected_disbursement_date) {
@@ -127,6 +159,17 @@ const liquidationMinDate = computed(() => {
     : todayDate.value;
 });
 
+const dateRangeError = computed(() => {
+  if (
+    form.expected_disbursement_date &&
+    form.expected_liquidation_date &&
+    form.expected_disbursement_date >= form.expected_liquidation_date
+  ) {
+    return "Liquidation deadline must be after the disbursement date.";
+  }
+  return "";
+});
+
 const isDirty = computed(() => {
   return (
     form.purpose !== "" ||
@@ -138,6 +181,7 @@ const isDirty = computed(() => {
 });
 
 const isSubmitted = ref(false);
+const showSubmitConfirmModal = ref(false);
 
 const {
   showConfirmModal,
@@ -170,9 +214,11 @@ function addDays(date, days) {
 onMounted(async () => {
   if (isEditMode.value) {
     loadingRequest.value = true;
+    let hydrated = false;
     try {
       const data = await store.fetchRequest(props.id);
       if (data) {
+        existingStatus.value = data.status || "";
         form.purpose = data.purpose || "";
         form.contract_id = data.contract_id ?? null;
         form.client_name = data.client_name || "";
@@ -183,17 +229,34 @@ onMounted(async () => {
         if (data.expected_liquidation_date) {
           form.expected_liquidation_date = new Date(data.expected_liquidation_date).toISOString().split("T")[0];
         }
-        const doc = data.document;
-        if (doc) {
-          const rawDocPath = Array.isArray(doc.file_path) ? doc.file_path[0] : doc.file_path;
-          const docPathStr = typeof rawDocPath === "string" ? rawDocPath : rawDocPath ? String(rawDocPath) : "";
-          form.documents.push({
-            name: doc.file_name || (docPathStr ? docPathStr.split("/").pop() : "document.pdf"),
-            isExisting: true,
-            file_path: doc.file_path,
-          });
-        }
-        if (data.report_template_data) {
+        const existingDoc = (() => {
+          const doc = data.document;
+          if (doc) {
+            const rawDocPath = Array.isArray(doc.file_path) ? doc.file_path[0] : doc.file_path;
+            const docPathStr = typeof rawDocPath === "string" ? rawDocPath : rawDocPath ? String(rawDocPath) : "";
+            return {
+              name: doc.file_name || (docPathStr ? docPathStr.split("/").pop() : "document.pdf"),
+              isExisting: true,
+              file_path: doc.file_path,
+            };
+          }
+          if (data.report_file_path) {
+            const rawPath = Array.isArray(data.report_file_path)
+              ? data.report_file_path[0]
+              : String(data.report_file_path);
+            return {
+              name: rawPath ? rawPath.split("/").pop() : "document.pdf",
+              isExisting: true,
+              file_path: rawPath,
+            };
+          }
+          return null;
+        })();
+
+        if (
+          data.report_template_data &&
+          !isManualReportTemplate(data.report_template_data)
+        ) {
           reportTemplateData.value = createDefaultTemplateData("cash-advance", {
             user: auth.user,
             purpose: form.purpose,
@@ -202,11 +265,19 @@ onMounted(async () => {
             liquidationDeadline: form.expected_liquidation_date,
             existingData: data.report_template_data,
           });
+          // Template mode regenerates the PDF on submit; keep manual attachment state empty.
+          form.documents = [];
           manualReportFile.value = null;
           isManualMode.value = false;
-        } else if (form.documents.length > 0) {
+        } else if (existingDoc) {
+          form.documents = [existingDoc];
           reportTemplateData.value = null;
-          manualReportFile.value = form.documents[0];
+          manualReportFile.value = existingDoc;
+          isManualMode.value = true;
+        } else if (isManualReportTemplate(data.report_template_data)) {
+          form.documents = [];
+          reportTemplateData.value = { mode: "manual" };
+          manualReportFile.value = null;
           isManualMode.value = true;
         } else {
           reportTemplateData.value = createDefaultTemplateData("cash-advance", {
@@ -216,9 +287,11 @@ onMounted(async () => {
             disbursementDate: form.expected_disbursement_date,
             liquidationDeadline: form.expected_liquidation_date,
           });
+          form.documents = [];
           manualReportFile.value = null;
           isManualMode.value = false;
         }
+        hydrated = true;
       }
     } catch (error) {
       addToast({
@@ -229,26 +302,31 @@ onMounted(async () => {
     } finally {
       loadingRequest.value = false;
     }
+    if (hydrated) {
+      await nextTick();
+      await nextTick();
+      captureRevisionBaseline();
+    }
   }
 });
 
-async function handleRequest() {
-  if (submitting.value) return;
+function validateRequestForm() {
   if (
     !form.purpose ||
     !form.amount ||
     !form.expected_disbursement_date ||
     !form.expected_liquidation_date ||
     !hasValidAttachment.value
-  )
-    return;
+  ) {
+    return false;
+  }
 
   if (form.purpose.length > 255) {
     addToast({
       message: "Purpose must not exceed 255 characters.",
       type: "error",
     });
-    return;
+    return false;
   }
 
   const today = todayDate.value;
@@ -257,7 +335,7 @@ async function handleRequest() {
       message: "Disbursement date must be today or a future date.",
       type: "error",
     });
-    return;
+    return false;
   }
 
   if (form.expected_liquidation_date < today) {
@@ -265,7 +343,7 @@ async function handleRequest() {
       message: "Liquidation Deadline must be today or a future date.",
       type: "error",
     });
-    return;
+    return false;
   }
 
   if (form.expected_disbursement_date >= form.expected_liquidation_date) {
@@ -274,8 +352,28 @@ async function handleRequest() {
         "Disbursement date cannot be greater than or equal to the liquidation date.",
       type: "error",
     });
-    return;
+    return false;
   }
+
+  return true;
+}
+
+function promptSubmit() {
+  if (submitting.value || isRevisionUnchanged.value || !validateRequestForm()) return;
+  showSubmitConfirmModal.value = true;
+}
+
+function handleConfirmSubmit() {
+  showSubmitConfirmModal.value = false;
+  handleRequest();
+}
+
+function handleCancelSubmit() {
+  showSubmitConfirmModal.value = false;
+}
+
+async function handleRequest() {
+  if (submitting.value || isRevisionUnchanged.value || !validateRequestForm()) return;
 
   submitting.value = true;
 
@@ -379,7 +477,7 @@ function goBack() {
           <form
             id="cashAdvanceForm"
             class="space-y-6"
-            @submit.prevent="handleRequest"
+            @submit.prevent="promptSubmit"
           >
             <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
               <div class="input-wrapper">
@@ -431,6 +529,14 @@ function goBack() {
                     type="date"
                   />
                 </div>
+                <p
+                  v-if="dateRangeError"
+                  data-testid="ca-date-range-error"
+                  class="mt-1 text-xs font-medium text-danger"
+                  role="alert"
+                >
+                  {{ dateRangeError }}
+                </p>
               </div>
             </div>
 
@@ -464,14 +570,13 @@ function goBack() {
               </div>
             </div>
 
-            <div class="input-wrapper" @click="syncEditorMode">
+            <div class="input-wrapper">
               <label class="input-label"
                 >Request Report Document
                 <span class="text-danger">*</span></label
               >
               <SbsiReportDocumentEditor
                 v-if="!loadingRequest"
-                ref="reportEditorRef"
                 type="cash-advance"
                 :model-value="reportTemplateData"
                 :report-file="manualReportFile"
@@ -482,6 +587,7 @@ function goBack() {
                 :record-id="props.id"
                 @update:model-value="reportTemplateData = $event"
                 @update:report-file="handleReportFileUpdate"
+                @update:mode="handleEditorModeUpdate"
                 @update:purpose="handleTemplatePurposeUpdate"
                 @update:total-amount="handleTemplateTotalUpdate"
                 @update:disbursement-date="handleTemplateDisbursementUpdate"
@@ -515,6 +621,7 @@ function goBack() {
             class="btn btn-primary min-h-[42px] w-full sm:w-fit disabled:opacity-60 disabled:cursor-not-allowed"
             :disabled="
               submitting ||
+              isRevisionUnchanged ||
               !form.purpose ||
               !form.amount ||
               !form.expected_disbursement_date ||
@@ -535,6 +642,18 @@ function goBack() {
         </footer>
       </div>
     </main>
+
+    <ConfirmModal
+      :is-open="showSubmitConfirmModal"
+      title="Submit Request"
+      message="Are you sure do you want to submit this request?"
+      confirm-text="Done"
+      cancel-text="Cancel"
+      :danger="false"
+      :loading="submitting"
+      @confirm="handleConfirmSubmit"
+      @close="handleCancelSubmit"
+    />
 
     <ConfirmModal
       :is-open="showConfirmModal"

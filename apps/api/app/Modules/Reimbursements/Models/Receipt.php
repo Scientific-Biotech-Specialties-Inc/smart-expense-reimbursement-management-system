@@ -10,6 +10,21 @@ class Receipt extends Model
 {
     use SoftDeletes;
 
+    public const REJECTED_STATUSES = [
+        'rejected',
+        'automatic-rejected',
+    ];
+
+    public const DEFAULT_UNREADABLE_REASON = 'The receipt is damaged, incomplete, or too unreadable to extract critical details accurately. Please upload a clearer photo of the receipt.';
+
+    /**
+     * Determine whether the receipt is in a rejected state locked against edits or promotion.
+     */
+    public function isRejectedStatus(): bool
+    {
+        return in_array(strtolower((string) $this->status), self::REJECTED_STATUSES, true);
+    }
+
     protected $fillable = [
         'uploaded_by',
         'file_path',

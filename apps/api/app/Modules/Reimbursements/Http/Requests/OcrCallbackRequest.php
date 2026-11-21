@@ -13,32 +13,49 @@ class OcrCallbackRequest extends FormRequest
 
     public function rules(): array
     {
+        return array_merge(
+            [
+                'receipt_id'                   => ['required', 'integer', 'exists:receipts,id'],
+                'split_receipts'               => ['nullable', 'array'],
+                'split_receipts.*.receipt_id'  => ['nullable', 'integer'],
+            ],
+            $this->receiptFieldRules(),
+            $this->receiptFieldRules('split_receipts.*.')
+        );
+    }
+
+    /**
+     * Shared validation rules for a single OCR receipt payload (top-level or split child).
+     */
+    private function receiptFieldRules(string $prefix = ''): array
+    {
         return [
-            'receipt_id'          => ['required', 'integer', 'exists:receipts,id'],
-            'vendor_name'         => ['nullable', 'string', 'max:255'],
-            'transaction_date'    => ['nullable', 'date'],
-            'total_amount'        => ['nullable', 'numeric', 'min:0'],
-            'subtotal'            => ['nullable', 'numeric', 'min:0'],
-            'vat_amount'          => ['nullable', 'numeric', 'min:0'],
-            'discount_amount'     => ['nullable', 'numeric', 'min:0'],
-            'discount_type'       => ['nullable', 'string', 'in:none,senior,pwd,student,promo,employee,other'],
-            'tin'                 => ['nullable', 'string', 'max:255'],
-            'invoice_number'      => ['nullable', 'string', 'max:255'],
-            'ocr_confidence_score'=> ['nullable', 'numeric', 'min:0', 'max:1'],
-            'expense_category'    => ['nullable', 'string', 'max:255'],
-            'vat_classification'  => ['nullable', 'string', 'in:vat,non-vat'],
-            'currency'            => ['nullable', 'string', 'size:3'],
-            'location'            => ['nullable', 'string', 'max:255'],
-            'status'              => ['nullable', 'string', 'max:50'],
-            'error'               => ['nullable', 'string'],
-            'rejection_code'      => ['nullable', 'string', 'max:50'],
-            'rejection_reason'    => ['nullable', 'string'],
-            'items'               => ['nullable', 'array'],
-            'items.*.name'        => ['required_with:items', 'string', 'max:255'],
-            'items.*.quantity'    => ['required_with:items', 'integer', 'min:1'],
-            'items.*.price'       => ['required_with:items', 'numeric', 'min:0'],
-            'is_duplicate'         => ['nullable', 'boolean'],
-            'duplicate_similarity' => ['nullable', 'numeric'],
+            "{$prefix}segment_indices"      => ['nullable', 'array'],
+            "{$prefix}segment_indices.*"    => ['integer', 'min:0'],
+            "{$prefix}vendor_name"          => ['nullable', 'string', 'max:255'],
+            "{$prefix}transaction_date"     => ['nullable', 'date'],
+            "{$prefix}total_amount"         => ['nullable', 'numeric', 'min:0'],
+            "{$prefix}subtotal"             => ['nullable', 'numeric', 'min:0'],
+            "{$prefix}vat_amount"           => ['nullable', 'numeric', 'min:0'],
+            "{$prefix}discount_amount"      => ['nullable', 'numeric', 'min:0'],
+            "{$prefix}discount_type"        => ['nullable', 'string', 'in:none,senior,pwd,student,promo,employee,other'],
+            "{$prefix}tin"                  => ['nullable', 'string', 'max:255'],
+            "{$prefix}invoice_number"       => ['nullable', 'string', 'max:255'],
+            "{$prefix}ocr_confidence_score" => ['nullable', 'numeric', 'min:0', 'max:1'],
+            "{$prefix}expense_category"     => ['nullable', 'string', 'max:255'],
+            "{$prefix}vat_classification"   => ['nullable', 'string', 'in:vat,non-vat'],
+            "{$prefix}currency"             => ['nullable', 'string', 'size:3'],
+            "{$prefix}location"             => ['nullable', 'string', 'max:255'],
+            "{$prefix}status"               => ['nullable', 'string', 'max:50'],
+            "{$prefix}error"                => ['nullable', 'string'],
+            "{$prefix}rejection_code"       => ['nullable', 'string', 'max:50'],
+            "{$prefix}rejection_reason"     => ['nullable', 'string'],
+            "{$prefix}items"                => ['nullable', 'array'],
+            "{$prefix}items.*.name"         => ['required', 'string', 'max:255'],
+            "{$prefix}items.*.quantity"     => ['required', 'integer', 'min:1'],
+            "{$prefix}items.*.price"        => ['required', 'numeric', 'min:0'],
+            "{$prefix}is_duplicate"         => ['nullable', 'boolean'],
+            "{$prefix}duplicate_similarity" => ['nullable', 'numeric'],
         ];
     }
 

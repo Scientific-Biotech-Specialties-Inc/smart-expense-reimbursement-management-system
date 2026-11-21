@@ -324,34 +324,76 @@ class ReceiptOwnerUpdateTest extends TestCase
     }
 
     /**
-     * A non-admin owner can also resubmit a `rejected` (duplicate/blurry) receipt.
+     * A non-admin owner must NOT be able to resubmit a `rejected` or
+     * `automatic-rejected` receipt back to `processed`.
      */
-    public function test_owner_can_resubmit_rejected_receipt(): void
+    public function test_owner_cannot_resubmit_rejected_or_automatic_rejected_receipt(): void
     {
-        $receipt = Receipt::create([
-            'uploaded_by' => $this->employee->id,
-            'file_path' => ['receipts/owner_resubmit_rejected.png'],
-            'file_hash' => [str_repeat('i', 64)],
-            'file_type' => ['png'],
-            'file_size_bytes' => [1024],
-            'vendor_name' => 'Rejected Vendor',
-            'status' => 'rejected',
-            'ocr_flagged' => true,
-        ]);
+        foreach (['rejected', 'automatic-rejected'] as $status) {
+            $receipt = Receipt::create([
+                'uploaded_by' => $this->employee->id,
+                'file_path' => ["receipts/owner_resubmit_{$status}.png"],
+                'file_hash' => [hash('sha256', "owner_resubmit_{$status}")],
+                'file_type' => ['png'],
+                'file_size_bytes' => [1024],
+                'vendor_name' => 'Rejected Vendor',
+                'status' => $status,
+                'ocr_flagged' => true,
+                'rejection_code' => 'unreadable',
+                'rejection_reason' => 'Receipt is too unreadable.',
+            ]);
 
-        $response = $this->resubmitAs($this->employee, $receipt->id, [
-            'vendor_name' => 'Rejected Corrected Vendor',
-        ]);
+            $response = $this->resubmitAs($this->employee, $receipt->id, [
+                'vendor_name' => 'Rejected Corrected Vendor',
+            ]);
 
-        $response->assertStatus(200);
-        $response->assertJsonPath('data.status', 'processed');
-        $response->assertJsonPath('data.ocr_flagged', false);
+            $response->assertStatus(422);
+            $response->assertJsonValidationErrors(['status']);
 
-        $this->assertDatabaseHas('receipts', [
-            'id' => $receipt->id,
-            'status' => 'processed',
-            'ocr_flagged' => false,
-        ]);
+            $this->assertDatabaseHas('receipts', [
+                'id' => $receipt->id,
+                'status' => $status,
+                'ocr_flagged' => true,
+                'vendor_name' => 'Rejected Vendor',
+            ]);
+        }
+    }
+
+    /**
+     * A non-admin owner must NOT be able to edit or promote a `rejected` or
+     * `automatic-rejected` receipt via PATCH update.
+     */
+    public function test_owner_cannot_update_or_promote_rejected_or_automatic_rejected_receipt(): void
+    {
+        foreach (['rejected', 'automatic-rejected'] as $status) {
+            $receipt = Receipt::create([
+                'uploaded_by' => $this->employee->id,
+                'file_path' => ["receipts/owner_patch_{$status}.png"],
+                'file_hash' => [hash('sha256', "owner_patch_{$status}")],
+                'file_type' => ['png'],
+                'file_size_bytes' => [1024],
+                'vendor_name' => 'Rejected Patch Vendor',
+                'status' => $status,
+                'ocr_flagged' => true,
+                'rejection_code' => 'faded',
+                'rejection_reason' => 'Too faded.',
+            ]);
+
+            $response = $this->patchAs($this->employee, $receipt->id, [
+                'status' => 'processed',
+                'vendor_name' => 'Should Not Save',
+            ]);
+
+            $response->assertStatus(422);
+            $response->assertJsonValidationErrors(['status']);
+
+            $this->assertDatabaseHas('receipts', [
+                'id' => $receipt->id,
+                'status' => $status,
+                'ocr_flagged' => true,
+                'vendor_name' => 'Rejected Patch Vendor',
+            ]);
+        }
     }
 
     public function test_unrelated_employee_cannot_update_receipt(): void

@@ -279,18 +279,21 @@ export function firstFilePathField(value) {
  * Statuses for which a receipt may NOT be edited by its owner on the
  * "My Expense" page. This is the single source of truth for edit gating.
  * Any status not in this list is editable (e.g. processing, processed,
- * flagged, rejected, failed, automatic-rejected).
+ * flagged, failed).
  */
 export const EDIT_FORBIDDEN_STATUSES = [
   "approved",
   "pending",
   "pending-admin-re-review",
   "final-rejected",
+  "rejected",
+  "automatic-rejected",
 ];
 
-// Delete reuses the edit list but also allows "final-rejected" receipts.
+// Delete reuses the edit list but allows deleting rejected receipt statuses.
 export const DELETE_FORBIDDEN_STATUSES = EDIT_FORBIDDEN_STATUSES.filter(
-  (status) => status !== "final-rejected",
+  (status) =>
+    !["final-rejected", "rejected", "automatic-rejected"].includes(status),
 );
 
 /**
@@ -317,9 +320,10 @@ export function canEditReceipt(receipt) {
 /**
  * Returns true when a receipt's delete option should be available.
  *
- * Delete availability mirrors edit, except "final-rejected" receipts ARE
- * deletable (unlike edit). It reuses EDIT_FORBIDDEN_STATUSES via
- * DELETE_FORBIDDEN_STATUSES so the two gates stay aligned by construction.
+ * Delete availability mirrors edit, except "final-rejected", "rejected",
+ * and "automatic-rejected" receipts ARE deletable (unlike edit). It reuses
+ * EDIT_FORBIDDEN_STATUSES via DELETE_FORBIDDEN_STATUSES so the two gates
+ * stay aligned by construction.
  *
  * @param {object|null|undefined} receipt
  * @returns {boolean}
@@ -389,4 +393,112 @@ export function getMissingReceiptFields(receipt) {
   return REQUIRED_RECEIPT_FIELDS.filter(({ key }) =>
     isMissingFieldValue(receipt, key),
   );
+}
+
+/**
+ * Marks a receipt as having received OCR output and returns a warning message
+ * listing any missing required fields, or null when all required fields exist.
+ *
+ * @param {object|null|undefined} receipt
+ * @returns {string|null}
+ */
+export function markOcrReturnedAndGetMissingWarning(receipt) {
+  if (!receipt) return null;
+  receipt.hasOcrReturned = true;
+  const missing = getMissingReceiptFields(receipt);
+  if (missing.length === 0) return null;
+  return `Missing required field(s): ${missing.map((f) => f.label).join(", ")}`;
+}
+
+/**
+ * Returns true when an OCR polling payload contains one or more auto-split sibling receipts.
+ *
+ * @param {object|null|undefined} data
+ * @returns {boolean}
+ */
+export function hasSplitReceipts(data) {
+  return Array.isArray(data?.split_receipts) && data.split_receipts.length > 0;
+}
+
+/**
+ * Formats the user-facing info toast message when a multi-receipt upload is auto-split.
+ *
+ * @param {number} count
+ * @returns {string}
+ */
+export function formatSplitReceiptsToastMessage(count) {
+  return `Detected ${count} separate receipts — split into individual receipt cards.`;
+}
+
+/**
+ * Resolves 0-based uploaded file indices for each payload in a split OCR batch,
+ * preferring explicit `segment_indices` and falling back to sequential slices.
+ *
+ * @param {Array<object>} payloads
+ * @param {number} [totalFiles=0]
+ * @returns {number[][]}
+ */
+export function resolveSplitSegmentIndices(payloads = [], totalFiles = 0) {
+  let seqCursor = 0;
+  return payloads.map((payload) => {
+    const explicit = Array.isArray(payload?.segment_indices)
+      ? payload.segment_indices.filter(
+          (idx) =>
+            Number.isInteger(idx) &&
+            idx >= 0 &&
+            (totalFiles <= 0 || idx < totalFiles),
+        )
+      : [];
+    if (explicit.length > 0) {
+      seqCursor = Math.max(seqCursor, Math.max(...explicit) + 1);
+      return explicit;
+    }
+
+    const count =
+      Array.isArray(payload?.file_path) && payload.file_path.length > 0
+        ? payload.file_path.length
+        : Array.isArray(payload?.file_url) && payload.file_url.length > 0
+          ? payload.file_url.length
+          : 1;
+
+    const indices = [];
+    for (let k = 0; k < count; k++) {
+      if (totalFiles <= 0 || seqCursor < totalFiles) {
+        indices.push(seqCursor);
+      }
+      seqCursor += 1;
+    }
+    return indices;
+  });
+}
+
+/**
+ * Determines whether an OCR or API response payload represents a duplicate receipt.
+ *
+ * @param {object|null|undefined} data
+ * @returns {boolean}
+ */
+export function isDuplicateOcrResponse(data) {
+  if (!data) return false;
+  if (
+    data.rejection_code === "duplicate" ||
+    data.rejectionCode === "duplicate" ||
+    data.is_duplicate === true ||
+    data.isDuplicate === true
+  ) {
+    return true;
+  }
+  const reason = String(
+    data.rejection_reason ||
+      data.rejectionReason ||
+      data.message ||
+      data.error ||
+      "",
+  ).toLowerCase();
+  if (reason.includes("duplicate")) return true;
+  if (data.errors) {
+    const errStr = JSON.stringify(data.errors).toLowerCase();
+    if (errStr.includes("duplicate")) return true;
+  }
+  return false;
 }

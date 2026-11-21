@@ -522,11 +522,12 @@ const kpis = computed(() => [
               {{ automaticRejectedReceipts.length }} receipt{{
                 automaticRejectedReceipts.length === 1 ? "" : "s"
               }}
-              need correction
+              automatically rejected
             </p>
             <p class="mt-1 text-sm text-slate-600">
-              System validation automatically rejected these receipts. Edit and
-              resubmit them for admin re-review.
+              System validation automatically rejected these receipts. Rejected
+              receipts cannot be edited — please delete them and upload clearer
+              copies.
             </p>
           </div>
         </div>

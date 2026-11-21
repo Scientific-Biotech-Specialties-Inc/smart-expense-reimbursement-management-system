@@ -22,9 +22,22 @@ import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor
 import { useLiquidationStore } from "@/stores/liquidation";
 import { useReportExport } from "@/composables/useReportExport";
 import { formatPeso, formatDate } from "@/utils/formatters";
+import {
+  sumPenaltyRecords,
+  resolveAdvanceBalance,
+  isExpenseBelowBalance,
+} from "@/utils/liquidationPenalties";
 import { apiFetch } from "@/utils/apiFetch";
 import { getFileUrl } from "@/utils/fileUtils";
 import { validateTemplateData } from "@/utils/sbsiReportTemplateUtils";
+import {
+  useRevisionGuard,
+  isRevisionStatus,
+  isManualReportTemplate,
+  serializeFileAttachment,
+  serializeReceiptList,
+  serializeTemplateData,
+} from "@/composables/useRevisionGuard";
 
 const props = defineProps({
   auditTrail: {
@@ -95,6 +108,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  hasChanges: {
+    type: Boolean,
+    default: undefined,
+  },
   disabled: {
     type: Boolean,
     default: false,
@@ -115,9 +132,26 @@ const emit = defineEmits([
   "submit-liquidation",
 ]);
 
-const reportEditorRef = ref(null);
 const localTemplateData = ref(props.reportTemplateData);
 const localManualMode = ref(props.isManualMode);
+const localManualAttachment = ref(null);
+
+watch(
+  [() => props.reportAttachment, () => props.existingLiquidation?.id],
+  ([nextFile]) => {
+    if (!nextFile) {
+      localManualAttachment.value = null;
+      return;
+    }
+    const isFileInstance = typeof File !== "undefined" && nextFile instanceof File;
+    const isManualContext =
+      Boolean(props.isManualMode) ||
+      !props.reportTemplateData ||
+      isManualReportTemplate(props.reportTemplateData);
+    localManualAttachment.value = isFileInstance || isManualContext ? nextFile : null;
+  },
+  { immediate: true },
+);
 
 watch(
   () => props.reportTemplateData,
@@ -136,7 +170,7 @@ watch(
 );
 
 const effectiveTemplateData = computed(() => props.reportTemplateData ?? localTemplateData.value);
-const effectiveManualMode = computed(() => props.isManualMode || localManualMode.value);
+const effectiveManualMode = computed(() => localManualMode.value);
 const isTemplateValid = computed(() => validateTemplateData(effectiveTemplateData.value).valid);
 
 const disbursementDateValue = computed(() => {
@@ -152,15 +186,19 @@ const disbursementDateValue = computed(() => {
   return raw ? String(raw).slice(0, 10) : "";
 });
 
-function syncEditorMode() {
-  nextTick(() => {
-    const manualBtn = reportEditorRef.value?.$el?.querySelector('[data-testid="mode-manual"]');
-    if (manualBtn) {
-      const next = manualBtn.getAttribute("aria-pressed") === "true";
-      localManualMode.value = next;
-      emit("update:isManualMode", next);
+function handleEditorModeUpdate(nextMode) {
+  const next = nextMode === "manual";
+  const wasManual = localManualMode.value || props.isManualMode;
+  localManualMode.value = next;
+  emit("update:isManualMode", next);
+  if (!next) {
+    const hadAttachment = Boolean(localManualAttachment.value);
+    localManualAttachment.value = null;
+    if (wasManual && hadAttachment) {
+      emit("update:reportAttachment", null);
+      emit("file-cleared");
     }
-  });
+  }
 }
 
 function handleTemplateModelUpdate(val) {
@@ -169,13 +207,13 @@ function handleTemplateModelUpdate(val) {
 }
 
 function handleReportFileUpdate(file) {
+  localManualAttachment.value = file || null;
   emit("update:reportAttachment", file);
   if (file) {
     localManualMode.value = true;
     emit("update:isManualMode", true);
   } else {
     emit("file-cleared");
-    syncEditorMode();
   }
 }
 
@@ -196,6 +234,56 @@ const normalizeStatus = (val) =>
     .toLowerCase()
     .trim()
     .replace(/[\s/_-]+/g, "-");
+
+const isLiquidationReviseMode = computed(() =>
+  isRevisionStatus(props.existingLiquidation?.status),
+);
+
+const {
+  isRevisionUnchanged: internalRevisionUnchanged,
+  captureBaseline: captureInternalRevisionBaseline,
+  clearBaseline: clearInternalRevisionBaseline,
+} = useRevisionGuard({
+  isRevise: isLiquidationReviseMode,
+  getSnapshot: () => ({
+    receipts: serializeReceiptList(props.receipts),
+    reportAttachment: serializeFileAttachment(localManualAttachment.value),
+    reportTemplateData: serializeTemplateData(
+      localTemplateData.value ?? props.reportTemplateData,
+    ),
+    isManualMode: Boolean(effectiveManualMode.value),
+    shortfallExplanation: props.shortfallExplanation || "",
+  }),
+});
+
+let internalBaselineToken = 0;
+watch(
+  [
+    () => props.existingLiquidation?.id ?? null,
+    () => props.existingLiquidation?.status ?? "",
+    () => props.selectedAdvance?.id ?? null,
+    () => props.hasChanges,
+  ],
+  async () => {
+    if (props.hasChanges !== undefined) return;
+    const token = ++internalBaselineToken;
+    clearInternalRevisionBaseline();
+    await nextTick();
+    await nextTick();
+    if (token === internalBaselineToken) {
+      captureInternalRevisionBaseline();
+    }
+  },
+  { immediate: true },
+);
+
+const isUnchangedRevision = computed(() => {
+  if (!isLiquidationReviseMode.value) return false;
+  if (props.hasChanges !== undefined) {
+    return !props.hasChanges;
+  }
+  return internalRevisionUnchanged.value;
+});
 
 const resolvedAuditTrail = computed(() => {
   if (props.existingLiquidation?.audit_trail?.length) {
@@ -330,6 +418,47 @@ const roadmapAging = computed(() => {
   } catch {
     return null;
   }
+});
+
+const requestedAdvanceAmount = computed(() =>
+  Number(props.selectedAdvance?.amount ?? props.selectedAdvance?.balance ?? 0),
+);
+
+const totalPenaltyAmount = computed(() => {
+  const sa = props.selectedAdvance;
+  if (!sa) return 0;
+  const fromRecords = sumPenaltyRecords(sa.penalties);
+  if (fromRecords > 0) return fromRecords;
+  if (sa.penalties_total !== undefined && sa.penalties_total !== null) {
+    return Number(sa.penalties_total) || 0;
+  }
+  return Number(roadmapAging.value?.penalty || 0);
+});
+
+const penaltyDaysCount = computed(() => {
+  const sa = props.selectedAdvance;
+  if (Array.isArray(sa?.penalties) && sa.penalties.length > 0) {
+    return sa.penalties.length;
+  }
+  return totalPenaltyAmount.value > 0
+    ? Math.round(totalPenaltyAmount.value / 50)
+    : 0;
+});
+
+const totalAdvanceBalance = computed(() =>
+  resolveAdvanceBalance(props.selectedAdvance),
+);
+
+const isBelowBalance = computed(
+  () =>
+    Boolean(props.selectedAdvance) &&
+    isExpenseBelowBalance(props.totalExpenseAmount, totalAdvanceBalance.value),
+);
+
+const shortfallAmount = computed(() => {
+  const expenseCents = Math.round(Number(props.totalExpenseAmount || 0) * 100);
+  const balanceCents = Math.round(totalAdvanceBalance.value * 100);
+  return Math.max(0, (balanceCents - expenseCents) / 100);
 });
 
 async function handleRemoveReceipt(receiptToRemove) {
@@ -470,7 +599,13 @@ const normalizedViewReceipt = computed(() => {
           Outstanding Balance
         </p>
         <p class="text-xl font-bold text-primary">
-          {{ formatPeso(selectedAdvance.balance || 0) }}
+          {{ formatPeso(totalAdvanceBalance) }}
+        </p>
+        <p
+          v-if="totalPenaltyAmount > 0"
+          class="text-[11px] font-medium text-danger mt-0.5"
+        >
+          Includes {{ formatPeso(totalPenaltyAmount) }} overdue penalty
         </p>
       </div>
     </div>
@@ -658,7 +793,6 @@ const normalizedViewReceipt = computed(() => {
     <section
       class="p-5 sm:p-6 bg-white border rounded-2xl border-slate-200/90 shadow-sm space-y-4"
       data-testid="liquidation-report-attachment-card"
-      @click="syncEditorMode"
     >
       <div class="flex items-center justify-between">
         <label class="input-label !mb-0">
@@ -668,10 +802,9 @@ const normalizedViewReceipt = computed(() => {
       </div>
 
       <SbsiReportDocumentEditor
-        ref="reportEditorRef"
         type="liquidation"
         :model-value="effectiveTemplateData"
-        :report-file="reportAttachment"
+        :report-file="localManualAttachment"
         :receipts="receipts"
         :allocated-amount="selectedAdvance?.amount ?? selectedAdvance?.balance ?? 0"
         :utilized-amount="totalExpenseAmount"
@@ -683,14 +816,14 @@ const normalizedViewReceipt = computed(() => {
         :readonly="isFormDisabled"
         @update:model-value="handleTemplateModelUpdate"
         @update:report-file="handleReportFileUpdate"
+        @update:mode="handleEditorModeUpdate"
       />
 
       <div class="pt-2 border-t border-slate-100 space-y-2">
         <div class="flex items-center justify-between">
           <label class="input-label !mb-0">
             Reviewer Note / Explanation
-            <span v-if="effectiveManualMode && variance > 0" class="text-danger ml-0.5">*</span>
-            <span v-else class="text-xs font-normal text-slate-400 ml-1">(Optional)</span>
+            <span class="text-xs font-normal text-slate-400 ml-1">(Optional)</span>
           </label>
         </div>
 
@@ -718,11 +851,7 @@ const normalizedViewReceipt = computed(() => {
               'pointer-events-none select-none cursor-not-allowed':
                 isFormDisabled,
             }"
-            :placeholder="
-              variance > 0
-                ? 'Optional reviewer note (auto-generated from the SBSI report if left blank)...'
-                : 'Provide an optional note for this liquidation...'
-            "
+            placeholder="Provide an optional note for this liquidation..."
           />
           <div
             class="flex items-center justify-end px-4 pb-3 pt-1 text-xs font-medium text-slate-400 select-none"
@@ -743,17 +872,37 @@ const normalizedViewReceipt = computed(() => {
       </p>
     </section>
 
-    <div class="p-4 mt-2 border border-slate-200 bg-clinical/20 sm:p-5">
+    <div
+      data-testid="liquidation-settlement-summary"
+      class="p-4 mt-2 border border-slate-200 bg-clinical/20 sm:p-5"
+    >
       <h4 class="text-sm font-semibold text-slate-700 mb-4">
         Settlement Summary
       </h4>
 
       <div class="flex">
         <div class="w-full space-y-4">
+          <template v-if="totalPenaltyAmount > 0">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-sm text-slate-600">Requested Amount</span>
+              <span class="font-semibold text-slate-700">{{
+                formatPeso(requestedAdvanceAmount)
+              }}</span>
+            </div>
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-sm text-slate-600">
+                Overdue Penalty ({{ penaltyDaysCount }}
+                {{ penaltyDaysCount === 1 ? "day" : "days" }} &times; ₱50.00)
+              </span>
+              <span class="font-semibold text-danger"
+                >+{{ formatPeso(totalPenaltyAmount) }}</span
+              >
+            </div>
+          </template>
           <div class="flex items-center justify-between gap-3">
             <span class="text-sm text-slate-600">Total Balance</span>
             <span class="font-bold text-primary">{{
-              formatPeso(selectedAdvance.balance ?? selectedAdvance.amount ?? 0)
+              formatPeso(totalAdvanceBalance)
             }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
@@ -838,6 +987,23 @@ const normalizedViewReceipt = computed(() => {
       class="mt-4"
     />
 
+    <div
+      v-if="!isFormDisabled && receipts.length > 0 && isBelowBalance"
+      data-testid="liquidation-balance-error"
+      role="alert"
+      class="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3.5 text-sm text-red-700"
+    >
+      <AlertCircle class="h-4 w-4 shrink-0 mt-0.5 text-red-600" />
+      <div>
+        <p class="font-semibold">
+          Total expenses must be equal to or greater than the outstanding balance.
+        </p>
+        <p class="mt-0.5 text-xs text-red-600">
+          Current receipts total {{ formatPeso(totalExpenseAmount) }}, which is {{ formatPeso(shortfallAmount) }} short of the {{ formatPeso(totalAdvanceBalance) }} balance. Please attach additional receipts covering at least {{ formatPeso(totalAdvanceBalance) }} before submitting.
+        </p>
+      </div>
+    </div>
+
     <div class="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
       <BaseButton
         v-if="existingLiquidation && existingLiquidation.status === 'pending'"
@@ -856,14 +1022,14 @@ const normalizedViewReceipt = computed(() => {
         class="h-[42px] w-full sm:w-auto sm:min-w-[120px]"
         :disabled="
           isFormDisabled ||
+          isUnchangedRevision ||
           receipts.length === 0 ||
           hasIncompleteReceiptFields ||
           receipts.some((r) => r.ocrStatus === 'processing') ||
           totalExpenseAmount === 0 ||
+          isBelowBalance ||
           submitting ||
-          (effectiveManualMode
-            ? !reportAttachment || (variance > 0 && !shortfallExplanation.trim())
-            : !isTemplateValid)
+          (effectiveManualMode ? !localManualAttachment : !isTemplateValid)
         "
         @click="$emit('submit-liquidation')"
       >

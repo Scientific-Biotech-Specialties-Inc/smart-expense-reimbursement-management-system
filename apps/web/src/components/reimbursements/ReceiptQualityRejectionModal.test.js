@@ -3,67 +3,176 @@ import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import ReceiptQualityRejectionModal from "./ReceiptQualityRejectionModal.vue";
 
+const baseModalStub = {
+  name: "BaseModal",
+  props: ["isOpen", "title", "description"],
+  emits: ["close"],
+  template: `<div class="base-modal-stub"><slot /></div>`,
+};
+
+function mountModal(props = {}) {
+  return mount(ReceiptQualityRejectionModal, {
+    props: {
+      isOpen: true,
+      rejectionReason: "Quality check failed.",
+      ...props,
+    },
+    global: {
+      stubs: {
+        BaseModal: baseModalStub,
+      },
+    },
+  });
+}
+
 describe("ReceiptQualityRejectionModal", () => {
-  it("renders distinct copy and manual entry override for not_a_receipt", async () => {
-    const wrapper = mount(ReceiptQualityRejectionModal, {
-      props: {
-        isOpen: true,
-        rejectionCode: "not_a_receipt",
-        rejectionReason: "The uploaded image does not appear to be a valid receipt or invoice.",
+  it.each([
+    ["blurry", "Blurry Receipt Image Detected", "Blurry Image"],
+    ["faded", "Faded Receipt Image Detected", "Faded Receipt"],
+    ["unreadable", "Unreadable or Damaged Receipt", "Unreadable Receipt"],
+    ["too_dark", "Receipt Image Quality Issue", "Too Dark"],
+    ["too_small", "Receipt Image Quality Issue", "Resolution Too Low"],
+    ["not_a_receipt", "Unrecognized Receipt Image", "Not a Receipt"],
+    ["duplicate", "Duplicate Receipt Detected", "Duplicate Receipt"],
+  ])(
+    "never renders a 'Continue Anyway' button for %s rejection code",
+    (code, expectedTitle, expectedBadge) => {
+      const wrapper = mountModal({
+        rejectionCode: code,
+        rejectionReason: `Reason for ${code}`,
         showSegmentedOption: true,
-      },
-      global: {
-        stubs: {
-          BaseModal: {
-            template: `<div class="base-modal-stub"><slot /></div>`,
-          },
-        },
-      },
+      });
+
+      expect(wrapper.text()).toContain(expectedTitle);
+      expect(wrapper.text()).toContain(expectedBadge);
+      expect(wrapper.text()).toContain(`Reason for ${code}`);
+      expect(wrapper.text()).not.toContain("Continue Anyway");
+      expect(wrapper.text()).toContain("cannot be overridden");
+
+      const buttons = wrapper.findAll("button");
+      expect(buttons.some((b) => b.text().toLowerCase().includes("continue"))).toBe(false);
+    },
+  );
+
+  it("renders unreadable badge, title, subtitle, reason, and damaged-receipt tips without segmented option", () => {
+    const reason =
+      "The receipt is damaged, incomplete, or too unreadable to extract critical details (Total Amount, Transaction Date). Please upload a clearer photo of the receipt.";
+    const wrapper = mountModal({
+      rejectionCode: "unreadable",
+      rejectionReason: reason,
+      showSegmentedOption: true,
     });
 
-    expect(wrapper.text()).toContain("Unrecognized Receipt Image");
-    expect(wrapper.text()).toContain("Not a Receipt");
-    expect(wrapper.text()).toContain("Continue Anyway (Enter Manually)");
-    // Should NOT show upload in segments for not_a_receipt
+    expect(wrapper.text()).toContain("Unreadable or Damaged Receipt");
+    expect(wrapper.text()).toContain(
+      "Critical receipt details could not be read from this image",
+    );
+    expect(wrapper.text()).toContain("Unreadable Receipt");
+    expect(wrapper.text()).toContain(reason);
+    expect(wrapper.text()).toContain("merchant name, date, items, and total");
+    expect(wrapper.text()).toContain("creases");
     expect(wrapper.text()).not.toContain("Upload in Segments");
     expect(wrapper.text()).not.toContain("Long Receipt?");
-
-    const overrideBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("Continue Anyway (Enter Manually)"));
-    expect(overrideBtn).toBeDefined();
-
-    await overrideBtn.trigger("click");
-    expect(wrapper.emitted("continue-anyway")).toHaveLength(1);
+    expect(wrapper.text()).not.toContain("Continue Anyway");
   });
 
-  it("renders distinct copy and override warning for blurry receipts", async () => {
-    const wrapper = mount(ReceiptQualityRejectionModal, {
-      props: {
-        isOpen: true,
-        rejectionCode: "blurry",
-        rejectionReason: "The receipt image is out of focus and cannot be read accurately.",
-        showSegmentedOption: false,
-      },
-      global: {
-        stubs: {
-          BaseModal: {
-            template: `<div class="base-modal-stub"><slot /></div>`,
-          },
-        },
-      },
+  it("renders 'Upload in Segments' only when showSegmentedOption is true and rejectionCode is too_small", async () => {
+    const tooSmallWrapper = mountModal({
+      rejectionCode: "too_small",
+      rejectionReason: "Image resolution is too small.",
+      showSegmentedOption: true,
+    });
+    expect(tooSmallWrapper.text()).toContain("Upload in Segments");
+    expect(tooSmallWrapper.text()).toContain("Long Receipt?");
+
+    const segBtn = tooSmallWrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Upload in Segments"));
+    await segBtn.trigger("click");
+    expect(tooSmallWrapper.emitted("upload-segmented")).toHaveLength(1);
+
+    const hiddenWrapper = mountModal({
+      rejectionCode: "too_small",
+      rejectionReason: "Image resolution is too small.",
+      showSegmentedOption: false,
+    });
+    expect(hiddenWrapper.text()).not.toContain("Upload in Segments");
+    expect(hiddenWrapper.text()).not.toContain("Long Receipt?");
+  });
+
+  it("renders a Close button and emits 'close' from both button click and BaseModal close", async () => {
+    const wrapper = mountModal({
+      rejectionCode: "unreadable",
+      rejectionReason: "Cannot read critical fields.",
     });
 
-    expect(wrapper.text()).toContain("Blurry Receipt Image Detected");
-    expect(wrapper.text()).toContain("Blurry Image");
-    expect(wrapper.text()).toContain("Continue Anyway (Override Warning)");
-
-    const overrideBtn = wrapper
+    const closeBtn = wrapper
       .findAll("button")
-      .find((b) => b.text().includes("Continue Anyway (Override Warning)"));
-    expect(overrideBtn).toBeDefined();
+      .find((b) => b.text().trim() === "Close");
+    expect(closeBtn).toBeDefined();
 
-    await overrideBtn.trigger("click");
-    expect(wrapper.emitted("continue-anyway")).toHaveLength(1);
+    await closeBtn.trigger("click");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+
+    wrapper.findComponent({ name: "BaseModal" }).vm.$emit("close");
+    expect(wrapper.emitted("close")).toHaveLength(2);
+  });
+
+  it("portals above an open parent BaseModal at z-[100] and handles Upload New Receipt and Close clicks", async () => {
+    const { default: BaseModal } = await import("@/components/base/BaseModal.vue");
+    const wrapper = mount(
+      {
+        components: { BaseModal, ReceiptQualityRejectionModal },
+        data() {
+          return { parentOpen: true, qualityOpen: true, retakeCount: 0 };
+        },
+        template: `
+          <BaseModal :is-open="parentOpen" title="Settle Cash Advance">
+            <ReceiptQualityRejectionModal
+              :is-open="qualityOpen"
+              rejection-code="unreadable"
+              rejection-reason="Unreadable image"
+              @retake="retakeCount++; qualityOpen = false"
+              @close="qualityOpen = false"
+            />
+          </BaseModal>
+        `,
+      },
+      { attachTo: document.body },
+    );
+    await wrapper.vm.$nextTick();
+
+    const dialogs = Array.from(document.body.querySelectorAll('[role="dialog"]'));
+    expect(dialogs).toHaveLength(2);
+    const qualityDialog = dialogs[1];
+    expect(qualityDialog.classList.contains("z-[100]")).toBe(true);
+    expect(qualityDialog.textContent).not.toContain("Continue Anyway");
+
+    const retakeBtn = Array.from(qualityDialog.querySelectorAll("button")).find(
+      (b) => b.textContent.includes("Upload New Receipt"),
+    );
+    expect(retakeBtn).toBeDefined();
+    retakeBtn.click();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.vm.qualityOpen).toBe(false);
+    expect(wrapper.vm.retakeCount).toBe(1);
+    expect(wrapper.vm.parentOpen).toBe(true);
+
+    // Re-open and test Close button
+    wrapper.vm.qualityOpen = true;
+    await wrapper.vm.$nextTick();
+    const reopenedDialog = Array.from(document.body.querySelectorAll('[role="dialog"]'))[1];
+    const closeBtn = Array.from(reopenedDialog.querySelectorAll("button")).find(
+      (b) => b.textContent.trim() === "Close",
+    );
+    expect(closeBtn).toBeDefined();
+    closeBtn.click();
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.vm.qualityOpen).toBe(false);
+    expect(wrapper.vm.retakeCount).toBe(1);
+    wrapper.unmount();
+    document.body.innerHTML = "";
   });
 });

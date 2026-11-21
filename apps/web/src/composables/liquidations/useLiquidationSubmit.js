@@ -4,7 +4,6 @@ import { useLiquidationStore } from "@/stores/liquidation";
 import { useCashAdvanceStore } from "@/stores/cashAdvance";
 import { numberOrZero } from "@/utils/numbers";
 import { createSbsiReportPdfFile } from "@/utils/sbsiPdfGenerator";
-import { buildTemplateParagraphs, formatPhp } from "@/utils/sbsiReportTemplateUtils";
 
 export function useLiquidationSubmit() {
   const liqStore = useLiquidationStore();
@@ -36,16 +35,7 @@ export function useLiquidationSubmit() {
         resolvedTemplateData = reportTemplateData;
       }
 
-      let resolvedShortfall = (shortfallExplanation || "").trim();
-      if (!isManualMode && numberOrZero(variance) > 0 && !resolvedShortfall) {
-        const p3 = resolvedTemplateData
-          ? buildTemplateParagraphs(resolvedTemplateData).paragraphs?.[2]?.text
-          : "";
-        resolvedShortfall = (
-          p3 ||
-          `The excess unexpended cash balance of ${formatPhp(variance)} is being returned and remitted to Treasury/Finance alongside this submission.`
-        ).slice(0, 255);
-      }
+      const resolvedShortfall = (shortfallExplanation || "").trim();
 
       const payload = {
         items: receipts.map((receipt, index) => ({

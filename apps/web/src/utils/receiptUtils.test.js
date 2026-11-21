@@ -12,23 +12,23 @@ describe("canEditReceipt (My Expense edit gating)", () => {
     "pending",
     "pending-admin-re-review",
     "final-rejected",
+    "rejected",
+    "automatic-rejected",
   ];
   const editable = [
     "processing",
     "processed",
     "flagged",
-    "rejected",
     "failed",
-    "automatic-rejected",
   ];
 
-  it("blocks the four forbidden statuses", () => {
+  it("blocks all forbidden statuses including rejected and automatic-rejected", () => {
     for (const status of forbidden) {
       expect(canEditReceipt({ status })).toBe(false);
     }
   });
 
-  it("allows processing, processed, rejected, failed, and other non-forbidden statuses", () => {
+  it("allows processing, processed, flagged, failed, and other non-forbidden statuses", () => {
     for (const status of editable) {
       expect(canEditReceipt({ status })).toBe(true);
     }
@@ -38,12 +38,16 @@ describe("canEditReceipt (My Expense edit gating)", () => {
     expect(canEditReceipt({ status: "APPROVED" })).toBe(false);
     expect(canEditReceipt({ status: "Processing" })).toBe(true);
     expect(canEditReceipt({ status: "PENDING-ADMIN-RE-REVIEW" })).toBe(false);
+    expect(canEditReceipt({ status: "REJECTED" })).toBe(false);
+    expect(canEditReceipt({ status: "AUTOMATIC-REJECTED" })).toBe(false);
   });
 
   it("falls back to complianceStatus when status is missing", () => {
     expect(canEditReceipt({ complianceStatus: "pending" })).toBe(false);
     expect(canEditReceipt({ complianceStatus: "processed" })).toBe(true);
     expect(canEditReceipt({ complianceStatus: "final-rejected" })).toBe(false);
+    expect(canEditReceipt({ complianceStatus: "rejected" })).toBe(false);
+    expect(canEditReceipt({ complianceStatus: "automatic-rejected" })).toBe(false);
   });
 
   it("returns false for null/undefined/empty receipt", () => {
@@ -58,11 +62,13 @@ describe("canEditReceipt (My Expense edit gating)", () => {
       "pending",
       "pending-admin-re-review",
       "final-rejected",
+      "rejected",
+      "automatic-rejected",
     ]);
   });
 });
 
-describe("canDeleteReceipt (delete gating, allows final-rejected)", () => {
+describe("canDeleteReceipt (delete gating, allows rejected statuses)", () => {
   const forbidden = [
     "approved",
     "pending",
@@ -90,20 +96,20 @@ describe("canDeleteReceipt (delete gating, allows final-rejected)", () => {
     }
   });
 
-  it("allows final-rejected even though edit does not", () => {
-    expect(canDeleteReceipt({ status: "final-rejected" })).toBe(true);
-    expect(canEditReceipt({ status: "final-rejected" })).toBe(false);
+  it("allows final-rejected, rejected, and automatic-rejected even though edit does not", () => {
+    for (const status of ["final-rejected", "rejected", "automatic-rejected"]) {
+      expect(canDeleteReceipt({ status })).toBe(true);
+      expect(canEditReceipt({ status })).toBe(false);
+    }
   });
 
-  it("matches canEditReceipt for all statuses except final-rejected", () => {
+  it("matches canEditReceipt for all non-rejected statuses", () => {
     const others = [
       ...forbidden,
       "processing",
       "processed",
       "flagged",
-      "rejected",
       "failed",
-      "automatic-rejected",
     ];
     for (const status of others) {
       expect(canDeleteReceipt({ status })).toBe(canEditReceipt({ status }));
@@ -114,12 +120,16 @@ describe("canDeleteReceipt (delete gating, allows final-rejected)", () => {
     expect(canDeleteReceipt({ status: "APPROVED" })).toBe(false);
     expect(canDeleteReceipt({ status: "Processing" })).toBe(true);
     expect(canDeleteReceipt({ status: "PENDING-ADMIN-RE-REVIEW" })).toBe(false);
+    expect(canDeleteReceipt({ status: "REJECTED" })).toBe(true);
+    expect(canDeleteReceipt({ status: "AUTOMATIC-REJECTED" })).toBe(true);
   });
 
   it("falls back to complianceStatus when status is missing", () => {
     expect(canDeleteReceipt({ complianceStatus: "pending" })).toBe(false);
     expect(canDeleteReceipt({ complianceStatus: "processed" })).toBe(true);
     expect(canDeleteReceipt({ complianceStatus: "final-rejected" })).toBe(true);
+    expect(canDeleteReceipt({ complianceStatus: "rejected" })).toBe(true);
+    expect(canDeleteReceipt({ complianceStatus: "automatic-rejected" })).toBe(true);
   });
 
   it("returns false for null/undefined/empty receipt", () => {
@@ -189,6 +199,25 @@ describe("getMissingReceiptFields and isReceiptFieldMissing", () => {
       hasOcrReturned: true,
     };
     expect(isReceiptFieldMissing(receipt, "invoiceNumber")).toBe(true);
+  });
+
+  it("markOcrReturnedAndGetMissingWarning sets hasOcrReturned and formats missing field labels", async () => {
+    const { markOcrReturnedAndGetMissingWarning } = await import("./receiptUtils");
+    const incomplete = {
+      ...completeReceipt,
+      invoiceNumber: "",
+      tin: "",
+      hasOcrReturned: false,
+    };
+    const warning = markOcrReturnedAndGetMissingWarning(incomplete);
+    expect(incomplete.hasOcrReturned).toBe(true);
+    expect(warning).toContain("Missing required field(s):");
+    expect(warning).toContain("Invoice Number");
+    expect(warning).toContain("TIN Number");
+
+    const full = { ...completeReceipt, hasOcrReturned: false };
+    expect(markOcrReturnedAndGetMissingWarning(full)).toBeNull();
+    expect(full.hasOcrReturned).toBe(true);
   });
 });
 
@@ -381,5 +410,51 @@ describe("getMissingReceiptFields edge cases", () => {
     ]);
   });
 });
+
+describe("split receipt utilities", () => {
+  it("hasSplitReceipts and formatSplitReceiptsToastMessage detect non-empty split_receipts", async () => {
+    const { hasSplitReceipts, formatSplitReceiptsToastMessage } = await import("./receiptUtils");
+    expect(hasSplitReceipts(null)).toBe(false);
+    expect(hasSplitReceipts({})).toBe(false);
+    expect(hasSplitReceipts({ split_receipts: [] })).toBe(false);
+    expect(hasSplitReceipts({ split_receipts: [{ id: 2 }] })).toBe(true);
+    expect(formatSplitReceiptsToastMessage(3)).toBe(
+      "Detected 3 separate receipts — split into individual receipt cards.",
+    );
+  });
+
+  it("resolveSplitSegmentIndices prefers explicit segment_indices and falls back to sequential file counts", async () => {
+    const { resolveSplitSegmentIndices } = await import("./receiptUtils");
+    expect(
+      resolveSplitSegmentIndices(
+        [
+          { segment_indices: [0, 2], file_path: ["a.jpg", "c.jpg"] },
+          { segment_indices: [1], file_path: ["b.jpg"] },
+        ],
+        3,
+      ),
+    ).toEqual([[0, 2], [1]]);
+
+    expect(
+      resolveSplitSegmentIndices(
+        [
+          { file_path: ["a.jpg", "b.jpg"] },
+          { file_url: ["https://cdn/c.jpg"] },
+          {},
+        ],
+        4,
+      ),
+    ).toEqual([[0, 1], [2], [3]]);
+  });
+
+  it("isDuplicateOcrResponse identifies duplicate codes, flags, and messages", async () => {
+    const { isDuplicateOcrResponse } = await import("./receiptUtils");
+    expect(isDuplicateOcrResponse({ rejection_code: "duplicate" })).toBe(true);
+    expect(isDuplicateOcrResponse({ is_duplicate: true })).toBe(true);
+    expect(isDuplicateOcrResponse({ rejection_reason: "Duplicate receipt detected." })).toBe(true);
+    expect(isDuplicateOcrResponse({ rejection_code: "blurry", rejection_reason: "Too blurry" })).toBe(false);
+  });
+});
+
 
 

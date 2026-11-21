@@ -222,5 +222,174 @@ class OcrCallbackServiceTest extends TestCase
             'discount_type' => 'senior',
         ]);
     }
+
+    public function test_unreadable_ocr_callback_persists_exact_fields_audit_log_and_notification(): void
+    {
+        $receipt = $this->makeProcessingReceipt();
+        $reason = 'The receipt is damaged, incomplete, or too unreadable to extract critical details accurately (missing Total Amount, Transaction Date). Please upload a clearer photo of the receipt.';
+
+        $response = $this->postCallback($receipt, [
+            'receipt_id' => $receipt->id,
+            'status' => 'rejected',
+            'rejection_code' => 'unreadable',
+            'rejection_reason' => $reason,
+            'ocr_confidence_score' => 0.91,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.status', 'rejected');
+        $response->assertJsonPath('data.ocr_flagged', true);
+        $response->assertJsonPath('data.rejection_code', 'unreadable');
+        $response->assertJsonPath('data.rejection_reason', $reason);
+
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receipt->id,
+            'status' => 'rejected',
+            'ocr_flagged' => true,
+            'rejection_code' => 'unreadable',
+            'rejection_reason' => $reason,
+        ]);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'action_type' => 'RECEIPT_OCR_REJECTED',
+            'entity_type' => 'receipt',
+            'entity_id' => $receipt->id,
+        ]);
+
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $this->employee->id,
+            'type' => 'receipt_auto_rejected',
+            'record_type' => 'receipt',
+            'record_id' => $receipt->id,
+        ]);
+    }
+
+    public function test_faded_ocr_callback_persists_exact_fields_audit_log_and_notification(): void
+    {
+        $receipt = $this->makeProcessingReceipt();
+        $reason = 'The receipt text is too faded or washed out to read critical details (Total Amount, Merchant Name). Please upload a clearer photo with better contrast or request a clearer copy of the receipt.';
+
+        $response = $this->postCallback($receipt, [
+            'receipt_id' => $receipt->id,
+            'status' => 'rejected',
+            'rejection_code' => 'faded',
+            'rejection_reason' => $reason,
+            'ocr_confidence_score' => 0.35,
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.status', 'rejected');
+        $response->assertJsonPath('data.ocr_flagged', true);
+        $response->assertJsonPath('data.rejection_code', 'faded');
+        $response->assertJsonPath('data.rejection_reason', $reason);
+
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receipt->id,
+            'status' => 'rejected',
+            'ocr_flagged' => true,
+            'rejection_code' => 'faded',
+            'rejection_reason' => $reason,
+        ]);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'action_type' => 'RECEIPT_OCR_REJECTED',
+            'entity_type' => 'receipt',
+            'entity_id' => $receipt->id,
+        ]);
+
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $this->employee->id,
+            'type' => 'receipt_auto_rejected',
+            'record_type' => 'receipt',
+            'record_id' => $receipt->id,
+        ]);
+    }
+
+    public function test_rejected_ocr_callback_preserves_too_dark_and_too_small_codes(): void
+    {
+        foreach (['too_dark' => 'Image is too dark.', 'too_small' => 'Image resolution is too small.'] as $code => $reason) {
+            $receipt = $this->makeProcessingReceipt();
+
+            $response = $this->postCallback($receipt, [
+                'receipt_id' => $receipt->id,
+                'status' => 'rejected',
+                'rejection_code' => $code,
+                'rejection_reason' => $reason,
+            ]);
+
+            $response->assertStatus(200);
+            $response->assertJsonPath('data.status', 'rejected');
+            $response->assertJsonPath('data.ocr_flagged', true);
+            $response->assertJsonPath('data.rejection_code', $code);
+            $response->assertJsonPath('data.rejection_reason', $reason);
+
+            $this->assertDatabaseHas('receipts', [
+                'id' => $receipt->id,
+                'status' => 'rejected',
+                'ocr_flagged' => true,
+                'rejection_code' => $code,
+                'rejection_reason' => $reason,
+            ]);
+        }
+    }
+
+    public function test_rejected_ocr_callback_defaults_missing_rejection_code_to_unreadable(): void
+    {
+        $receipt = $this->makeProcessingReceipt();
+
+        $response = $this->postCallback($receipt, [
+            'receipt_id' => $receipt->id,
+            'status' => 'rejected',
+            'rejection_code' => '',
+            'error' => 'Receipt text cannot be parsed.',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.status', 'rejected');
+        $response->assertJsonPath('data.ocr_flagged', true);
+        $response->assertJsonPath('data.rejection_code', 'unreadable');
+        $response->assertJsonPath('data.rejection_reason', 'Receipt text cannot be parsed.');
+
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receipt->id,
+            'status' => 'rejected',
+            'ocr_flagged' => true,
+            'rejection_code' => 'unreadable',
+            'rejection_reason' => 'Receipt text cannot be parsed.',
+        ]);
+    }
+
+    public function test_already_rejected_receipt_is_skipped_on_replay(): void
+    {
+        $receipt = Receipt::create([
+            'uploaded_by' => $this->employee->id,
+            'file_path' => 'receipts/already_rejected.png',
+            'file_hash' => hash('sha256', 'ocr_rejected_replay_' . uniqid()),
+            'file_type' => 'png',
+            'file_size_bytes' => 1024,
+            'vendor_name' => 'Rejected Vendor',
+            'status' => 'rejected',
+            'ocr_flagged' => true,
+            'rejection_code' => 'faded',
+            'rejection_reason' => 'Too faded to read.',
+        ]);
+
+        $response = $this->postCallback($receipt, [
+            'receipt_id' => $receipt->id,
+            'vendor_name' => 'Promoted Vendor',
+            'total_amount' => 500.00,
+            'ocr_confidence_score' => 0.99,
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receipt->id,
+            'status' => 'rejected',
+            'ocr_flagged' => true,
+            'rejection_code' => 'faded',
+            'rejection_reason' => 'Too faded to read.',
+            'vendor_name' => 'Rejected Vendor',
+        ]);
+    }
 }
 

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useAuthStore } from "@/stores/auth";
 import { PenTool, RotateCcw, Sparkles, CheckCircle2 } from "lucide-vue-next";
 
@@ -51,6 +51,11 @@ const emit = defineEmits(["update:modelValue"]);
 const signatureCanvas = ref(null);
 const isSigning = ref(false);
 const hasSignature = ref(Boolean(props.modelValue));
+const hasUserInteracted = ref(false);
+const lastEmittedDataUrl = ref(null);
+const strokeHasInk = ref(false);
+const clearedSavedOnDown = ref(false);
+let resizeObserver = null;
 
 const availableSavedSignature = computed(() => {
   if (!props.allowProfileSignature) return "";
@@ -126,8 +131,8 @@ function renderDataUrlOnCanvas(dataUrl) {
       const naturalH = img.naturalHeight || img.height || height;
 
       // Keep signature proportional without horizontal/vertical stretching (object-fit: contain)
-      // Provide 16px inner padding so the stroke doesn't bump the border
-      const padding = 16;
+      // Provide compact inner padding so small pads (e.g. h-24) retain readable strokes without touching the border
+      const padding = Math.min(6, Math.floor(Math.min(width, height) * 0.08));
       const availW = Math.max(width - padding * 2, 50);
       const availH = Math.max(height - padding * 2, 50);
 
@@ -160,8 +165,13 @@ watch(
     if (newVal !== oldVal) {
       if (newVal) {
         hasSignature.value = true;
+        if (newVal === lastEmittedDataUrl.value) {
+          return;
+        }
+        lastEmittedDataUrl.value = null;
         nextTick(() => renderDataUrlOnCanvas(newVal));
       } else {
+        lastEmittedDataUrl.value = null;
         hasSignature.value = false;
         const canvas = signatureCanvas.value;
         if (canvas) {
@@ -189,6 +199,15 @@ function startStroke(e) {
   const ctx = prepareCanvas();
   if (!ctx) return;
 
+  hasUserInteracted.value = true;
+  strokeHasInk.value = false;
+  clearedSavedOnDown.value = Boolean(isUsingSavedSignature.value);
+  if (clearedSavedOnDown.value) {
+    // Clear pre-filled profile image before starting a clean free-draw stroke.
+    const rect = signatureCanvas.value.getBoundingClientRect();
+    ctx.clearRect(0, 0, rect.width || 400, rect.height || 128);
+  }
+
   isSigning.value = true;
   hasSignature.value = true;
   signatureCanvas.value.setPointerCapture?.(e.pointerId);
@@ -203,6 +222,7 @@ function drawStroke(e) {
   const ctx = prepareCanvas();
   if (!ctx) return;
 
+  strokeHasInk.value = true;
   const p = getPoint(e);
   ctx.lineTo(p.x, p.y);
   ctx.stroke();
@@ -211,14 +231,30 @@ function drawStroke(e) {
 function endStroke() {
   if (!isSigning.value) return;
   isSigning.value = false;
+
+  if (!strokeHasInk.value) {
+    if (clearedSavedOnDown.value && props.modelValue) {
+      renderDataUrlOnCanvas(props.modelValue);
+    }
+    clearedSavedOnDown.value = false;
+    hasSignature.value = Boolean(props.modelValue);
+    return;
+  }
+
+  clearedSavedOnDown.value = false;
   if (signatureCanvas.value) {
     const dataUrl = signatureCanvas.value.toDataURL("image/png");
+    lastEmittedDataUrl.value = dataUrl;
     emit("update:modelValue", dataUrl);
   }
 }
 
 function clearSignature() {
   if (props.disabled) return;
+  hasUserInteracted.value = true;
+  lastEmittedDataUrl.value = null;
+  clearedSavedOnDown.value = false;
+  strokeHasInk.value = false;
   const canvas = signatureCanvas.value;
   if (canvas) {
     const ctx = canvas.getContext("2d");
@@ -235,6 +271,7 @@ function useSavedSignature() {
   if (props.disabled) return;
   const saved = availableSavedSignature.value;
   if (!saved) return;
+  lastEmittedDataUrl.value = saved;
   hasSignature.value = true;
   emit("update:modelValue", saved);
   nextTick(() => {
@@ -242,13 +279,52 @@ function useSavedSignature() {
   });
 }
 
+function handleCanvasResize() {
+  const canvas = signatureCanvas.value;
+  if (!canvas || isSigning.value) return;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+  const targetW = Math.round(rect.width * dpr);
+  const targetH = Math.round(rect.height * dpr);
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    prepareCanvas();
+    if (props.modelValue) {
+      renderDataUrlOnCanvas(props.modelValue);
+    }
+  }
+}
+
+watch(availableSavedSignature, (newSaved) => {
+  if (!props.modelValue && !hasUserInteracted.value && props.allowProfileSignature && newSaved) {
+    lastEmittedDataUrl.value = newSaved;
+    emit("update:modelValue", newSaved);
+    nextTick(() => renderDataUrlOnCanvas(newSaved));
+  }
+});
+
 onMounted(() => {
   prepareCanvas();
   if (props.modelValue) {
     renderDataUrlOnCanvas(props.modelValue);
   } else if (props.allowProfileSignature && availableSavedSignature.value) {
+    lastEmittedDataUrl.value = availableSavedSignature.value;
     emit("update:modelValue", availableSavedSignature.value);
     renderDataUrlOnCanvas(availableSavedSignature.value);
+  }
+
+  if (typeof ResizeObserver !== "undefined" && signatureCanvas.value) {
+    resizeObserver = new ResizeObserver(() => {
+      handleCanvasResize();
+    });
+    resizeObserver.observe(signatureCanvas.value);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
   }
 });
 </script>

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import {
   AlertTriangle,
   RefreshCw,
@@ -7,6 +7,7 @@ import {
   Camera,
   AlertCircle,
 } from "lucide-vue-next";
+import BaseModal from "@/components/base/BaseModal.vue";
 
 const props = defineProps({
   isOpen: {
@@ -19,7 +20,7 @@ const props = defineProps({
   },
   rejectionCode: {
     type: String,
-    default: "blurry", // "blurry" | "too_dark" | "too_small"
+    default: "blurry", // "blurry" | "too_dark" | "faded" | "too_small" | "unreadable" | "not_a_receipt" | "duplicate"
   },
   rejectionReason: {
     type: String,
@@ -34,17 +35,25 @@ const props = defineProps({
 const emit = defineEmits([
   "retake",
   "upload-segmented",
-  "continue-anyway",
+  "close",
 ]);
 
 const previewUrl = ref("");
 
+function revokePreviewUrl() {
+  if (
+    previewUrl.value &&
+    previewUrl.value.startsWith("blob:") &&
+    typeof URL.revokeObjectURL === "function"
+  ) {
+    URL.revokeObjectURL(previewUrl.value);
+  }
+}
+
 watch(
   () => props.rejectedFile,
   (file) => {
-    if (previewUrl.value && previewUrl.value.startsWith("blob:")) {
-      URL.revokeObjectURL(previewUrl.value);
-    }
+    revokePreviewUrl();
     if (file && file instanceof File && file.type.startsWith("image/")) {
       previewUrl.value = URL.createObjectURL(file);
     } else {
@@ -54,13 +63,22 @@ watch(
   { immediate: true },
 );
 
+onBeforeUnmount(revokePreviewUrl);
+
 const isDuplicate = computed(() => props.rejectionCode === "duplicate");
 const isNotReceipt = computed(() => props.rejectionCode === "not_a_receipt");
+const isFaded = computed(() => props.rejectionCode === "faded");
+const isUnreadable = computed(() => props.rejectionCode === "unreadable");
 const isBlurry = computed(() => props.rejectionCode === "blurry");
+const canUploadSegmented = computed(
+  () => props.showSegmentedOption && props.rejectionCode === "too_small",
+);
 
 const headerTitle = computed(() => {
   if (isDuplicate.value) return "Duplicate Receipt Detected";
   if (isNotReceipt.value) return "Unrecognized Receipt Image";
+  if (isFaded.value) return "Faded Receipt Image Detected";
+  if (isUnreadable.value) return "Unreadable or Damaged Receipt";
   if (isBlurry.value) return "Blurry Receipt Image Detected";
   return "Receipt Image Quality Issue";
 });
@@ -68,6 +86,8 @@ const headerTitle = computed(() => {
 const headerSubtitle = computed(() => {
   if (isDuplicate.value) return "This receipt has already been submitted to the system";
   if (isNotReceipt.value) return "The uploaded image does not appear to be a valid receipt or invoice";
+  if (isFaded.value) return "The receipt ink is too faded or washed out to read accurately";
+  if (isUnreadable.value) return "Critical receipt details could not be read from this image";
   if (isBlurry.value) return "The receipt image is out of focus and cannot be read accurately";
   return "Action required to ensure accurate OCR data extraction";
 });
@@ -76,6 +96,10 @@ const badgeLabel = computed(() => {
   switch (props.rejectionCode) {
     case "not_a_receipt":
       return "Not a Receipt";
+    case "faded":
+      return "Faded Receipt";
+    case "unreadable":
+      return "Unreadable Receipt";
     case "blurry":
       return "Blurry Image";
     case "too_dark":
@@ -89,10 +113,17 @@ const badgeLabel = computed(() => {
   }
 });
 
-const overrideButtonLabel = computed(() => {
-  if (isNotReceipt.value) return "Continue Anyway (Enter Manually)";
-  if (isBlurry.value) return "Continue Anyway (Override Warning)";
-  return "Continue Anyway (Override Quality)";
+const footerNotice = computed(() => {
+  if (isDuplicate.value) {
+    return "Duplicate receipts cannot be overridden. Please upload a new receipt.";
+  }
+  if (isFaded.value) {
+    return "Faded receipts cannot be overridden. Please upload a clearer receipt.";
+  }
+  if (isUnreadable.value) {
+    return "Unreadable receipts cannot be overridden. Please upload a clearer receipt.";
+  }
+  return "Rejected receipts cannot be overridden. Please upload a clearer receipt.";
 });
 
 const tips = computed(() => {
@@ -102,6 +133,18 @@ const tips = computed(() => {
         "Ensure you are uploading an official receipt, sales invoice, or billing statement",
         "Make sure the merchant name, date, and total amount are clearly visible",
         "Avoid uploading selfies, random photos, or unrelated screenshots",
+      ];
+    case "faded":
+      return [
+        "Place the receipt on a dark, non-reflective surface to improve contrast",
+        "Avoid direct flash glare or harsh overhead lighting on thermal paper",
+        "Upload a clearer scan or request a re-printed receipt if the ink has faded",
+      ];
+    case "unreadable":
+      return [
+        "Ensure the full receipt—including merchant name, date, items, and total—is clearly visible",
+        "Flatten any creases or folds and avoid shadows, glare, or cropped edges",
+        "Request a clearer copy or re-printed receipt if the ink is missing or badly damaged",
       ];
     case "blurry":
       return [
@@ -137,14 +180,18 @@ const tips = computed(() => {
 </script>
 
 <template>
-  <Transition name="modal">
+  <BaseModal
+    :is-open="isOpen"
+    z-index-class="z-[100]"
+    max-width-class="max-w-2xl"
+    content-class="border border-red-100"
+    :title="headerTitle"
+    :description="headerSubtitle"
+    @close="emit('close')"
+  >
     <div
-      v-if="isOpen"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+      class="flex max-h-[90vh] w-full flex-col overflow-hidden bg-white"
     >
-      <div
-        class="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-red-100 bg-white shadow-2xl animate-fade-up"
-      >
         <!-- Modal Header -->
         <header
           class="flex items-center justify-between border-b border-red-100 bg-red-50/70 px-6 py-4 text-red-950"
@@ -241,7 +288,7 @@ const tips = computed(() => {
 
               <!-- Segment suggestion banner if resolution is low/long receipt -->
               <div
-                v-if="(rejectionCode === 'too_small' || showSegmentedOption) && !isDuplicate && !isNotReceipt"
+                v-if="canUploadSegmented"
                 class="rounded-xl border border-accent/20 bg-accent-50 p-3 flex items-start gap-3"
               >
                 <Layers class="h-5 w-5 text-accent shrink-0 mt-0.5" />
@@ -261,23 +308,23 @@ const tips = computed(() => {
         <footer
           class="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"
         >
-          <button
-            v-if="!isDuplicate"
-            type="button"
-            class="text-xs font-semibold text-slate-500 hover:text-slate-800 underline underline-offset-4 transition-colors"
-            @click="emit('continue-anyway')"
-          >
-            {{ overrideButtonLabel }}
-          </button>
-          <div v-else class="text-xs text-slate-400 font-medium">
-            Duplicate receipts cannot be overridden.
+          <div class="text-xs text-slate-500 font-medium">
+            {{ footerNotice }}
           </div>
 
           <div
             class="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto"
           >
             <button
-              v-if="showSegmentedOption && !isDuplicate && !isNotReceipt"
+              type="button"
+              class="inline-flex h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-100 transition-colors"
+              @click="emit('close')"
+            >
+              Close
+            </button>
+
+            <button
+              v-if="canUploadSegmented"
               type="button"
               class="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-accent/30 bg-white px-3.5 text-xs font-bold text-accent shadow-sm hover:bg-accent-50 transition-colors"
               @click="emit('upload-segmented')"
@@ -297,8 +344,7 @@ const tips = computed(() => {
           </div>
         </footer>
       </div>
-    </div>
-  </Transition>
+  </BaseModal>
 </template>
 
 <style scoped>

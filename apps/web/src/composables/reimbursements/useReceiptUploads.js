@@ -3,7 +3,11 @@ import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
 import {
   buildPrefilledReceiptDraft,
-  getMissingReceiptFields,
+  formatSplitReceiptsToastMessage,
+  hasSplitReceipts,
+  isDuplicateOcrResponse,
+  markOcrReturnedAndGetMissingWarning,
+  resolveSplitSegmentIndices,
 } from "@/utils/receiptUtils";
 import { isOcrOfflineFailure } from "@/utils/ocrErrors";
 
@@ -54,13 +58,10 @@ export function useReceiptUploads(options = {}) {
   const { addToast } = useToast();
 
   function checkAndNotifyMissingFields(receipt) {
-    if (!receipt) return;
-    receipt.hasOcrReturned = true;
-    const missing = getMissingReceiptFields(receipt);
-    if (missing.length > 0) {
-      const fieldNames = missing.map((f) => f.label).join(", ");
+    const warning = markOcrReturnedAndGetMissingWarning(receipt);
+    if (warning) {
       addToast({
-        message: `Missing required field(s): ${fieldNames}`,
+        message: warning,
         type: "warning",
       });
     }
@@ -68,34 +69,291 @@ export function useReceiptUploads(options = {}) {
 
   const pollTimers = {};
 
-  function checkIsDuplicateResponse(data) {
-    if (!data) return false;
+  function isBlobUrlInUseElsewhere(url, targetReceipt) {
+    if (!url) return false;
+    return localReceipts.value.some((other) => {
+      if (other === targetReceipt) return false;
+      if (targetReceipt?.id != null && String(other.id) === String(targetReceipt.id)) {
+        return false;
+      }
+      if (other.thumbnail === url) return true;
+      return (
+        Array.isArray(other.images) &&
+        other.images.some((img) => (typeof img === "string" ? img : img?.url) === url)
+      );
+    });
+  }
+
+  function cleanupReceiptResources(receipt) {
+    if (!receipt) return;
     if (
-      data.rejection_code === "duplicate" ||
-      data.rejectionCode === "duplicate" ||
-      data.is_duplicate ||
-      data.isDuplicate
+      receipt.thumbnail?.startsWith("blob:") &&
+      typeof URL.revokeObjectURL === "function" &&
+      !isBlobUrlInUseElsewhere(receipt.thumbnail, receipt)
     ) {
-      return true;
+      URL.revokeObjectURL(receipt.thumbnail);
     }
-    const reason = (
-      data.rejection_reason ||
-      data.rejectionReason ||
-      data.message ||
-      data.error ||
-      ""
-    ).toLowerCase();
-    if (reason.includes("duplicate")) return true;
-    if (data.errors) {
-      const errStr = JSON.stringify(data.errors).toLowerCase();
-      if (errStr.includes("duplicate")) return true;
+    if (Array.isArray(receipt.images)) {
+      receipt.images.forEach((img) => {
+        const u = typeof img === "string" ? img : img?.url;
+        if (
+          u?.startsWith("blob:") &&
+          typeof URL.revokeObjectURL === "function" &&
+          !isBlobUrlInUseElsewhere(u, receipt)
+        ) {
+          URL.revokeObjectURL(u);
+        }
+      });
     }
-    return false;
+    if (receipt.id && pollTimers[receipt.id]) {
+      clearInterval(pollTimers[receipt.id]);
+      delete pollTimers[receipt.id];
+    }
+  }
+
+  async function deleteDraftFromBackend(id) {
+    if (!id || String(id).startsWith("temp-")) return;
+    try {
+      const headers = { Accept: "application/json" };
+      if (authStore.token) headers["Authorization"] = `Bearer ${authStore.token}`;
+      await fetch(`/api/serms/reimbursements/receipts/${id}`, {
+        method: "DELETE",
+        headers,
+      });
+    } catch {
+      // Non-fatal cleanup errors are intentionally ignored for rejected/canceled drafts.
+    }
+  }
+
+  async function purgeRejectedReceipt(idOrTempId) {
+    if (!idOrTempId) return;
+    const targetKey = String(idOrTempId);
+    const existing = localReceipts.value.find(
+      (r) => String(r.id) === targetKey,
+    );
+    if (existing) {
+      cleanupReceiptResources(existing);
+      localReceipts.value = localReceipts.value.filter(
+        (r) => String(r.id) !== targetKey,
+      );
+    } else if (pollTimers[idOrTempId]) {
+      clearInterval(pollTimers[idOrTempId]);
+      delete pollTimers[idOrTempId];
+    }
+
+    if (!targetKey.startsWith("temp-") && !existing?.isForwarded) {
+      await deleteDraftFromBackend(idOrTempId);
+    }
+  }
+
+  function handleReceiptRejectionOrFailure({
+    index,
+    tempId,
+    receiptId,
+    file,
+    payload,
+    isHttp422 = false,
+    isMultiSegment = false,
+    segmentImages = null,
+    defaultQualityReason = "Receipt image quality is too low for accurate OCR data extraction.",
+    toastPrefix = "Receipt rejected",
+  }) {
+    const status = String(payload?.status || "").toLowerCase();
+    const reason =
+      payload?.rejection_reason ||
+      payload?.message ||
+      payload?.error ||
+      "";
+    const isOffline =
+      status === "failed" ||
+      isOcrOfflineFailure({
+        status,
+        rejectionCode: payload?.rejection_code,
+        rejectionReason: reason,
+      });
+
+    if (isOffline) {
+      const offlineReason =
+        reason || "OCR processing failed. You can retry OCR.";
+      const offlineCode = payload?.rejection_code || "ocr_failed";
+      if (index !== -1) {
+        if (!isHttp422 && payload?.id) {
+          localReceipts.value[index] = {
+            ...buildPrefilledReceiptDraft({
+              id: payload.id,
+              file,
+              receiptData: payload,
+              thumbnail: localReceipts.value[index].thumbnail,
+            }),
+            isUploading: false,
+            isProcessing: false,
+            isRejected: true,
+            ...(isMultiSegment
+              ? { isMultiReceipt: true, images: segmentImages }
+              : {}),
+            rejectionCode: offlineCode,
+            rejectionReason: offlineReason,
+          };
+        } else {
+          localReceipts.value[index] = {
+            ...localReceipts.value[index],
+            isUploading: false,
+            isProcessing: false,
+            isRejected: true,
+            rejectionCode: offlineCode,
+            rejectionReason: offlineReason,
+          };
+        }
+      }
+      addToast({ message: offlineReason, type: "error" });
+      return;
+    }
+
+    const resolvedId = payload?.id || receiptId || tempId;
+    if (index !== -1 && resolvedId && localReceipts.value[index]) {
+      localReceipts.value[index].id = resolvedId;
+    }
+
+    if (checkIsDuplicateResponse(payload)) {
+      const msg =
+        payload?.rejection_reason ||
+        payload?.message ||
+        (payload?.errors?.file_hash ? payload.errors.file_hash[0] : null) ||
+        payload?.error ||
+        "Duplicate receipt detected.";
+      window.dispatchEvent(
+        new CustomEvent("receipt-duplicate-detected", {
+          detail: {
+            similarityScore: payload?.duplicate_similarity || 1.0,
+            receiptId: resolvedId,
+            message: msg,
+          },
+        }),
+      );
+      purgeRejectedReceipt(resolvedId);
+      return;
+    }
+
+    const rejectionCode = payload?.rejection_code || "blurry";
+    const rejectionReason =
+      payload?.rejection_reason ||
+      payload?.error ||
+      payload?.message ||
+      defaultQualityReason;
+
+    qualityRejection.value = {
+      receiptId: resolvedId,
+      file,
+      rejectionCode,
+      rejectionReason,
+    };
+    addToast({
+      message: `${toastPrefix}: ${payload?.rejection_reason || payload?.error || payload?.message || "Image quality issue"}`,
+      type: "error",
+    });
+    purgeRejectedReceipt(resolvedId);
+  }
+
+  function checkIsDuplicateResponse(data) {
+    return isDuplicateOcrResponse(data);
+  }
+
+  function buildSplitReceiptCard(payload, groupImages, currentItem) {
+    const firstImg = groupImages[0];
+    const firstImgUrl = typeof firstImg === "string" ? firstImg : firstImg?.url;
+    const fallbackUrl = Array.isArray(payload?.file_url)
+      ? payload.file_url[0]
+      : payload?.file_url;
+    const sourceFile =
+      (firstImg && typeof firstImg === "object" ? firstImg.file : null) ||
+      currentItem?.sourceFile ||
+      null;
+    const thumbnail = firstImgUrl || fallbackUrl || currentItem?.thumbnail || "";
+
+    const card = buildPrefilledReceiptDraft({
+      id: payload?.id,
+      file: sourceFile,
+      receiptData: payload,
+      thumbnail,
+    });
+    card.isUploading = false;
+    card.isProcessing = false;
+    card.sourceFile = sourceFile;
+    card.thumbnail = thumbnail;
+    if (groupImages.length > 1) {
+      card.isMultiReceipt = true;
+      card.images = groupImages;
+    } else {
+      card.isMultiReceipt = false;
+    }
+    return card;
+  }
+
+  function applySplitReceiptPayloads(index, data) {
+    const allPayloads = [data, ...data.split_receipts];
+    addToast({
+      message: formatSplitReceiptsToastMessage(allPayloads.length),
+      type: "info",
+    });
+
+    const currentItem = index !== -1 ? localReceipts.value[index] : null;
+    const sourceImages = Array.isArray(currentItem?.images)
+      ? currentItem.images
+      : [];
+    const segmentIndexGroups = resolveSplitSegmentIndices(
+      allPayloads,
+      sourceImages.length,
+    );
+
+    const builtCards = allPayloads.map((payload, groupIdx) => {
+      const indices = segmentIndexGroups[groupIdx] || [];
+      let groupImages = indices
+        .map((imgIdx) => sourceImages[imgIdx])
+        .filter(Boolean);
+      if (
+        groupImages.length === 0 &&
+        sourceImages.length === 0 &&
+        Array.isArray(payload?.file_url) &&
+        payload.file_url.length > 0
+      ) {
+        groupImages = payload.file_url;
+      }
+      return buildSplitReceiptCard(payload, groupImages, currentItem);
+    });
+
+    if (index !== -1) {
+      localReceipts.value.splice(index, 1, ...builtCards);
+    } else {
+      localReceipts.value.push(...builtCards);
+    }
+
+    allPayloads.forEach((payload, groupIdx) => {
+      const targetCard = builtCards[groupIdx];
+      // Re-resolve current index by card reference/id because earlier purged rejections shift array indices.
+      const cardIdx = localReceipts.value.findIndex(
+        (r) =>
+          r === targetCard ||
+          (payload?.id != null && String(r.id) === String(payload.id)),
+      );
+      const pStatus = String(payload?.status || "").toLowerCase();
+      if (pStatus === "rejected" || pStatus === "failed") {
+        handleReceiptRejectionOrFailure({
+          index: cardIdx,
+          receiptId: payload?.id ?? targetCard.id,
+          file: targetCard.sourceFile || null,
+          payload,
+          isMultiSegment: Boolean(targetCard.isMultiReceipt),
+          segmentImages: targetCard.isMultiReceipt ? targetCard.images : null,
+        });
+      } else if (cardIdx !== -1) {
+        checkAndNotifyMissingFields(localReceipts.value[cardIdx]);
+      }
+    });
   }
 
   function startPolling(receiptId) {
     if (pollTimers[receiptId]) return;
-    pollTimers[receiptId] = setInterval(async () => {
+    const timer = setInterval(async () => {
       try {
         const headers = { Accept: "application/json" };
         if (authStore.token)
@@ -105,9 +363,11 @@ export function useReceiptUploads(options = {}) {
           `/api/serms/reimbursements/receipts/${receiptId}`,
           { headers },
         );
-        if (!res.ok) return;
+        if (!res.ok || pollTimers[receiptId] !== timer) return;
 
         const { data } = await res.json();
+        if (pollTimers[receiptId] !== timer) return;
+
         if (data.status !== "processing") {
           clearInterval(pollTimers[receiptId]);
           delete pollTimers[receiptId];
@@ -116,111 +376,19 @@ export function useReceiptUploads(options = {}) {
             (r) => String(r.id) === String(receiptId),
           );
 
-           if (data.status === "rejected" || data.status === "failed") {
-             const rejectedItem = index !== -1 ? localReceipts.value[index] : null;
-             const fileObj = rejectedItem?.sourceFile || rejectedItem?.file || null;
+          if (hasSplitReceipts(data)) {
+            applySplitReceiptPayloads(index, data);
+            return;
+          }
 
-             // A `failed` receipt means the OCR pipeline errored (AI service
-             // unreachable / dispatch failed), NOT a quality rejection. Surface a
-             // clear error and leave Retry OCR available instead of opening the
-             // quality-rejection modal.
-             if (data.status === "failed") {
-               if (index !== -1) {
-                 localReceipts.value[index] = {
-                   ...localReceipts.value[index],
-                   isUploading: false,
-                   isProcessing: false,
-                   isRejected: true,
-                   rejectionCode: data.rejection_code || "ocr_failed",
-                   rejectionReason:
-                     data.rejection_reason ||
-                     "OCR processing failed. You can retry OCR.",
-                 };
-               }
-               addToast({
-                 message:
-                   data.rejection_reason ||
-                   "OCR processing failed. You can retry OCR.",
-                 type: "error",
-               });
-               return;
-             }
-
-             if (checkIsDuplicateResponse(data)) {
-                if (index !== -1) {
-                  localReceipts.value[index].isUploading = false;
-                  localReceipts.value[index].isProcessing = false;
-                  localReceipts.value[index].isRejected = true;
-                  localReceipts.value[index].rejectionCode = "duplicate";
-                }
-                window.dispatchEvent(new CustomEvent('receipt-duplicate-detected', { 
-                  detail: { 
-                    similarityScore: data.duplicate_similarity || 1.0,
-                    receiptId: data.id,
-                    message: data.rejection_reason || data.error || "Duplicate receipt detected."
-                  } 
-                }));
-                return;
-            }
-
-            // Defensive: a `rejected` payload carrying an OCR-infra code/reason
-            // (e.g. `ocr_failed` / "OCR could not be started") is an offline
-            // failure, NOT a quality rejection — toast only, no modal.
-            if (
-              isOcrOfflineFailure({
-                status: data.status,
-                rejectionCode: data.rejection_code,
-                rejectionReason: data.rejection_reason || data.error,
-              })
-            ) {
-              if (index !== -1) {
-                localReceipts.value[index] = {
-                  ...localReceipts.value[index],
-                  isUploading: false,
-                  isProcessing: false,
-                  isRejected: true,
-                  rejectionCode: data.rejection_code || "ocr_failed",
-                  rejectionReason:
-                    data.rejection_reason ||
-                    data.error ||
-                    "OCR processing failed. You can retry OCR.",
-                };
-              }
-              addToast({
-                message:
-                  data.rejection_reason ||
-                  data.error ||
-                  "OCR processing failed. You can retry OCR.",
-                type: "error",
-              });
-              return;
-            }
-
-            if (index !== -1) {
-              localReceipts.value[index] = {
-                ...localReceipts.value[index],
-                isUploading: false,
-                isProcessing: false,
-                isRejected: true,
-                rejectionCode: data.rejection_code || "blurry",
-                rejectionReason:
-                  data.rejection_reason ||
-                  data.error ||
-                  "Receipt image quality is too low for accurate OCR data extraction.",
-              };
-            }
-            qualityRejection.value = {
-              receiptId: data.id,
+          if (data.status === "rejected" || data.status === "failed") {
+            const rejectedItem = index !== -1 ? localReceipts.value[index] : null;
+            const fileObj = rejectedItem?.sourceFile || rejectedItem?.file || null;
+            handleReceiptRejectionOrFailure({
+              index,
+              receiptId,
               file: fileObj,
-              rejectionCode: data.rejection_code || "blurry",
-              rejectionReason:
-                data.rejection_reason ||
-                data.error ||
-                "Receipt image quality is too low for accurate OCR data extraction.",
-            };
-            addToast({
-              message: `Receipt rejected: ${data.rejection_reason || data.error || "Image quality issue"}`,
-              type: "error",
+              payload: data,
             });
             return;
           }
@@ -249,6 +417,7 @@ export function useReceiptUploads(options = {}) {
         console.error("Polling error for receipt", receiptId, e);
       }
     }, 3000);
+    pollTimers[receiptId] = timer;
   }
 
   onMounted(() => {
@@ -282,7 +451,7 @@ export function useReceiptUploads(options = {}) {
     return res;
   }
 
-  async function addReceiptFiles(fileList, forceProcess = false) {
+  async function addReceiptFiles(fileList) {
     const allowedMimeTypes = ["image/jpeg", "image/png", "application/pdf"];
     const files = Array.from(fileList || []);
 
@@ -322,9 +491,6 @@ export function useReceiptUploads(options = {}) {
         if (isDraftMode) {
           formData.append("is_draft", "1");
         }
-        if (forceProcess) {
-          formData.append("force_process", "1");
-        }
 
         const headers = { Accept: "application/json" };
         if (authStore.token)
@@ -339,63 +505,14 @@ export function useReceiptUploads(options = {}) {
         if (res.status === 422) {
           const errorData = await res.json();
           const index = localReceipts.value.findIndex((r) => r.id === tempId);
-          if (index !== -1) {
-            localReceipts.value[index].isUploading = false;
-            localReceipts.value[index].isProcessing = false;
-            localReceipts.value[index].isRejected = true;
-          }
-          
-          if (checkIsDuplicateResponse(errorData)) {
-             if (index !== -1) {
-               localReceipts.value[index].rejectionCode = "duplicate";
-             }
-             const msg = errorData.rejection_reason || errorData.message || (errorData.errors?.file_hash ? errorData.errors.file_hash[0] : null) || "Duplicate receipt detected.";
-             window.dispatchEvent(new CustomEvent('receipt-duplicate-detected', {
-               detail: {
-                 similarityScore: errorData.duplicate_similarity || 1.0,
-                 receiptId: tempId,
-                 message: msg
-               }
-             }));
-             return;
-          }
-          // OCR offline / could-not-start must NOT open the quality modal.
-          // Toast is enough (caller stays on the reimbursement page).
-          if (
-            isOcrOfflineFailure({
-              rejectionCode: errorData.rejection_code,
-              rejectionReason:
-                errorData.rejection_reason || errorData.message || errorData.error,
-            })
-          ) {
-            if (index !== -1) {
-              localReceipts.value[index].rejectionCode =
-                errorData.rejection_code || "ocr_failed";
-              localReceipts.value[index].rejectionReason =
-                errorData.rejection_reason ||
-                errorData.message ||
-                "OCR processing failed. You can retry OCR.";
-            }
-            addToast({
-              message:
-                errorData.rejection_reason ||
-                errorData.message ||
-                "OCR processing failed. You can retry OCR.",
-              type: "error",
-            });
-            return;
-          }
-          qualityRejection.value = {
-            receiptId: tempId,
+          handleReceiptRejectionOrFailure({
+            index,
+            tempId,
             file,
-            rejectionCode: errorData.rejection_code || "blurry",
-            rejectionReason:
-              errorData.rejection_reason ||
+            payload: errorData,
+            isHttp422: true,
+            defaultQualityReason:
               "Receipt image quality is too low for OCR processing.",
-          };
-          addToast({
-            message: `Receipt rejected: ${errorData.rejection_reason || "Image quality issue"}`,
-            type: "error",
           });
           return;
         }
@@ -406,88 +523,11 @@ export function useReceiptUploads(options = {}) {
         const index = localReceipts.value.findIndex((r) => r.id === tempId);
 
         if (data.data?.status === "rejected" || data.data?.status === "failed") {
-          if (checkIsDuplicateResponse(data.data)) {
-             if (index !== -1) {
-               localReceipts.value[index].isUploading = false;
-               localReceipts.value[index].isProcessing = false;
-               localReceipts.value[index].isRejected = true;
-               localReceipts.value[index].rejectionCode = "duplicate";
-             }
-             window.dispatchEvent(new CustomEvent('receipt-duplicate-detected', {
-               detail: {
-                 similarityScore: data.data.duplicate_similarity || 1.0,
-                 receiptId: data.data.id || tempId,
-                 message: data.data.rejection_reason || data.data.error || "Duplicate receipt detected."
-               }
-             }));
-             return;
-          }
-          // OCR offline / could-not-start must NOT open the quality modal.
-          // Toast is enough — user stays on the reimbursement page with
-          // Retry OCR available on the receipt row.
-          if (
-            isOcrOfflineFailure({
-              status: data.data?.status,
-              rejectionCode: data.data?.rejection_code,
-              rejectionReason:
-                data.data?.rejection_reason || data.data?.error,
-            })
-          ) {
-            if (index !== -1) {
-              localReceipts.value[index] = {
-                ...buildPrefilledReceiptDraft({
-                  id: data.data.id,
-                  file,
-                  receiptData: data.data,
-                  thumbnail: localReceipts.value[index].thumbnail,
-                }),
-                isUploading: false,
-                isProcessing: false,
-                isRejected: true,
-                rejectionCode: data.data.rejection_code || "ocr_failed",
-                rejectionReason:
-                  data.data.rejection_reason ||
-                  data.data.error ||
-                  "OCR processing failed. You can retry OCR.",
-              };
-            }
-            addToast({
-              message:
-                data.data.rejection_reason ||
-                data.data.error ||
-                "OCR processing failed. You can retry OCR.",
-              type: "error",
-            });
-            return;
-          }
-          if (index !== -1) {
-            localReceipts.value[index] = {
-              ...buildPrefilledReceiptDraft({
-                id: data.data.id,
-                file,
-                receiptData: data.data,
-                thumbnail: localReceipts.value[index].thumbnail,
-              }),
-              isUploading: false,
-              isProcessing: false,
-              isRejected: true,
-              rejectionCode: data.data.rejection_code || "blurry",
-              rejectionReason:
-                data.data.rejection_reason ||
-                "Receipt image quality is too low for accurate OCR data extraction.",
-            };
-          }
-          qualityRejection.value = {
-            receiptId: data.data.id,
+          handleReceiptRejectionOrFailure({
+            index,
+            tempId,
             file,
-            rejectionCode: data.data.rejection_code || "blurry",
-            rejectionReason:
-              data.data.rejection_reason ||
-              "Receipt image quality is too low for accurate OCR data extraction.",
-          };
-          addToast({
-            message: `Receipt rejected: ${data.data.rejection_reason || "Image quality issue"}`,
-            type: "error",
+            payload: data.data,
           });
           return;
         }
@@ -512,6 +552,8 @@ export function useReceiptUploads(options = {}) {
       } catch (e) {
         console.error(e);
         addToast({ message: `Failed to upload ${file.name}`, type: "error" });
+        const existing = localReceipts.value.find((r) => r.id === tempId);
+        cleanupReceiptResources(existing);
         localReceipts.value = localReceipts.value.filter(
           (r) => r.id !== tempId,
         );
@@ -520,43 +562,22 @@ export function useReceiptUploads(options = {}) {
   }
 
   function continueAnyway() {
-    const targetId = qualityRejection.value?.receiptId;
-    const rejectionCode = qualityRejection.value?.rejectionCode;
-
-    if (targetId) {
-      const target = localReceipts.value.find((r) => r.id === targetId);
-      if (target) {
-        target.isRejected = false;
-        target.isQualityOverridden = true;
-        target.hasOcrReturned = true;
-      }
-    }
-
     clearQualityRejection();
-
-    if (rejectionCode === "not_a_receipt") {
-      addToast({
-        message:
-          "Warning overridden. Please enter the receipt details manually.",
-        type: "info",
-      });
-    } else {
-      addToast({
-        message:
-          "Quality warning overridden. Please fill in the receipt details manually.",
-        type: "info",
-      });
-    }
   }
 
   const submitWithForce = continueAnyway;
 
   async function submitSegments(files) {
-    if (!files || files.length < 2) return;
+    const fileArray = Array.from(files || []);
+    if (fileArray.length === 0) return;
+    if (fileArray.length === 1) {
+      return addReceiptFiles(fileArray);
+    }
 
+    const selectedFiles = fileArray.slice(0, 6);
     const tempId = `temp-seg-${Date.now()}`;
-    const firstFile = files[0];
-    const segmentImages = files.map((file, idx) => ({
+    const firstFile = selectedFiles[0];
+    const segmentImages = selectedFiles.map((file, idx) => ({
       id: `seg-${tempId}-${idx}`,
       url: URL.createObjectURL(file),
       name: file.name,
@@ -575,7 +596,7 @@ export function useReceiptUploads(options = {}) {
 
     try {
       const formData = new FormData();
-      files.forEach((file) => {
+      selectedFiles.forEach((file) => {
         formData.append("files[]", file);
       });
       if (isDraftMode) formData.append("is_draft", "1");
@@ -593,62 +614,16 @@ export function useReceiptUploads(options = {}) {
       if (res.status === 422) {
         const errorData = await res.json();
         const index = localReceipts.value.findIndex((r) => r.id === tempId);
-        if (index !== -1) {
-          localReceipts.value[index].isUploading = false;
-          localReceipts.value[index].isProcessing = false;
-          localReceipts.value[index].isRejected = true;
-        }
-        
-        if (checkIsDuplicateResponse(errorData)) {
-           if (index !== -1) {
-             localReceipts.value[index].rejectionCode = "duplicate";
-           }
-           const msg = errorData.rejection_reason || errorData.message || (errorData.errors?.file_hash ? errorData.errors.file_hash[0] : null) || "Duplicate receipt detected.";
-           window.dispatchEvent(new CustomEvent('receipt-duplicate-detected', {
-             detail: {
-               similarityScore: errorData.duplicate_similarity || 1.0,
-               receiptId: tempId,
-               message: msg
-             }
-           }));
-           return;
-        }
-        // OCR offline / could-not-start must NOT open the quality modal.
-        if (
-          isOcrOfflineFailure({
-            rejectionCode: errorData.rejection_code,
-            rejectionReason:
-              errorData.rejection_reason || errorData.message || errorData.error,
-          })
-        ) {
-          if (index !== -1) {
-            localReceipts.value[index].rejectionCode =
-              errorData.rejection_code || "ocr_failed";
-            localReceipts.value[index].rejectionReason =
-              errorData.rejection_reason ||
-              errorData.message ||
-              "OCR processing failed. You can retry OCR.";
-          }
-          addToast({
-            message:
-              errorData.rejection_reason ||
-              errorData.message ||
-              "OCR processing failed. You can retry OCR.",
-            type: "error",
-          });
-          return;
-        }
-        qualityRejection.value = {
-          receiptId: tempId,
+        handleReceiptRejectionOrFailure({
+          index,
+          tempId,
           file: firstFile,
-          rejectionCode: errorData.rejection_code || "blurry",
-          rejectionReason:
-            errorData.rejection_reason ||
-            "One or more segments are too low quality.",
-        };
-        addToast({
-          message: `Segmented receipt rejected: ${errorData.rejection_reason || "Quality issue"}`,
-          type: "error",
+          payload: errorData,
+          isHttp422: true,
+          isMultiSegment: true,
+          segmentImages,
+          defaultQualityReason: "One or more segments are too low quality.",
+          toastPrefix: "Segmented receipt rejected",
         });
         return;
       }
@@ -658,91 +633,22 @@ export function useReceiptUploads(options = {}) {
 
       const index = localReceipts.value.findIndex((r) => r.id === tempId);
 
+      if (hasSplitReceipts(data.data)) {
+        applySplitReceiptPayloads(index, data.data);
+        return;
+      }
+
       if (data.data?.status === "rejected" || data.data?.status === "failed") {
-        if (checkIsDuplicateResponse(data.data)) {
-           if (index !== -1) {
-             localReceipts.value[index].isUploading = false;
-             localReceipts.value[index].isProcessing = false;
-             localReceipts.value[index].isRejected = true;
-             localReceipts.value[index].rejectionCode = "duplicate";
-           }
-           window.dispatchEvent(new CustomEvent('receipt-duplicate-detected', {
-             detail: {
-               similarityScore: data.data.duplicate_similarity || 1.0,
-               receiptId: data.data.id || tempId,
-               message: data.data.rejection_reason || data.data.error || "Duplicate receipt detected."
-             }
-           }));
-           return;
-        }
-        // OCR offline / could-not-start must NOT open the quality modal.
-        if (
-          isOcrOfflineFailure({
-            status: data.data?.status,
-            rejectionCode: data.data?.rejection_code,
-            rejectionReason:
-              data.data?.rejection_reason || data.data?.error,
-          })
-        ) {
-          if (index !== -1) {
-            localReceipts.value[index] = {
-              ...buildPrefilledReceiptDraft({
-                id: data.data.id,
-                file: firstFile,
-                receiptData: data.data,
-                thumbnail: localReceipts.value[index].thumbnail,
-              }),
-              isUploading: false,
-              isProcessing: false,
-              isRejected: true,
-              isMultiReceipt: true,
-              images: segmentImages,
-              rejectionCode: data.data.rejection_code || "ocr_failed",
-              rejectionReason:
-                data.data.rejection_reason ||
-                data.data.error ||
-                "OCR processing failed. You can retry OCR.",
-            };
-          }
-          addToast({
-            message:
-              data.data.rejection_reason ||
-              data.data.error ||
-              "OCR processing failed. You can retry OCR.",
-            type: "error",
-          });
-          return;
-        }
-        if (index !== -1) {
-          localReceipts.value[index] = {
-            ...buildPrefilledReceiptDraft({
-              id: data.data.id,
-              file: firstFile,
-              receiptData: data.data,
-              thumbnail: localReceipts.value[index].thumbnail,
-            }),
-            isUploading: false,
-            isProcessing: false,
-            isRejected: true,
-            isMultiReceipt: true,
-            images: segmentImages,
-            rejectionCode: data.data.rejection_code || "blurry",
-            rejectionReason:
-              data.data.rejection_reason ||
-              "One or more segments are too low quality for accurate OCR data extraction.",
-          };
-        }
-        qualityRejection.value = {
-          receiptId: data.data.id,
+        handleReceiptRejectionOrFailure({
+          index,
+          tempId,
           file: firstFile,
-          rejectionCode: data.data.rejection_code || "blurry",
-          rejectionReason:
-            data.data.rejection_reason ||
+          payload: data.data,
+          isMultiSegment: true,
+          segmentImages,
+          defaultQualityReason:
             "One or more segments are too low quality for accurate OCR data extraction.",
-        };
-        addToast({
-          message: `Segmented receipt rejected: ${data.data.rejection_reason || "Quality issue"}`,
-          type: "error",
+          toastPrefix: "Segmented receipt rejected",
         });
         return;
       }
@@ -772,42 +678,27 @@ export function useReceiptUploads(options = {}) {
         message: "Failed to upload segmented receipt",
         type: "error",
       });
+      const existing = localReceipts.value.find((r) => r.id === tempId);
+      cleanupReceiptResources(existing);
       localReceipts.value = localReceipts.value.filter((r) => r.id !== tempId);
     }
   }
 
   async function removeReceipt(receipt) {
-    if (receipt.thumbnail?.startsWith("blob:")) {
-      URL.revokeObjectURL(receipt.thumbnail);
-    }
-    if (Array.isArray(receipt.images)) {
-      receipt.images.forEach((img) => {
-        const u = typeof img === "string" ? img : img.url;
-        if (u?.startsWith("blob:")) {
-          URL.revokeObjectURL(u);
-        }
-      });
-    }
-    if (receipt.id && pollTimers[receipt.id]) {
-      clearInterval(pollTimers[receipt.id]);
-      delete pollTimers[receipt.id];
-    }
+    const targetId = receipt?.id;
+    const existing = targetId
+      ? localReceipts.value.find((r) => String(r.id) === String(targetId))
+      : null;
+    cleanupReceiptResources(existing || receipt);
+    if (!targetId || !existing) return;
+
     localReceipts.value = localReceipts.value.filter(
-      (r) => r.id !== receipt.id,
+      (r) => String(r.id) !== String(targetId),
     );
 
     // If this receipt has a persisted backend ID and was uploaded as a draft, delete it from storage, pgvector and DB
-    if (receipt.id && !String(receipt.id).startsWith("temp-") && !receipt.isForwarded) {
-      try {
-        const headers = { Accept: "application/json" };
-        if (authStore.token) headers["Authorization"] = `Bearer ${authStore.token}`;
-        await fetch(`/api/serms/reimbursements/receipts/${receipt.id}`, {
-          method: "DELETE",
-          headers,
-        });
-      } catch (err) {
-        console.error("Failed to delete canceled receipt draft:", err);
-      }
+    if (!String(targetId).startsWith("temp-") && !existing.isForwarded) {
+      await deleteDraftFromBackend(targetId);
     }
   }
 
@@ -819,18 +710,7 @@ export function useReceiptUploads(options = {}) {
     if (receiptsToDelete.length === 0) return;
 
     await Promise.allSettled(
-      receiptsToDelete.map(async (r) => {
-        try {
-          const headers = { Accept: "application/json" };
-          if (authStore.token) headers["Authorization"] = `Bearer ${authStore.token}`;
-          await fetch(`/api/serms/reimbursements/receipts/${r.id}`, {
-            method: "DELETE",
-            headers,
-          });
-        } catch (err) {
-          console.error(`Failed to delete receipt draft ${r.id}:`, err);
-        }
-      }),
+      receiptsToDelete.map((r) => deleteDraftFromBackend(r.id)),
     );
   }
 
@@ -842,6 +722,7 @@ export function useReceiptUploads(options = {}) {
     handleReceiptSelect,
     addReceiptFiles,
     removeReceipt,
+    purgeRejectedReceipt,
     clearDraftReceipts,
     abortSessionReceipts,
     qualityRejection,

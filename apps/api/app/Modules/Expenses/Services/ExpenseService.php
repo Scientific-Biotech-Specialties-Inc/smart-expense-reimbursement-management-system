@@ -132,6 +132,12 @@ class ExpenseService
                 throw new \Illuminate\Auth\Access\AuthorizationException('Forbidden.');
             }
 
+            if (!$canManage && $receipt->isRejectedStatus()) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'status' => ['Rejected receipts cannot be edited or overridden. Please delete this receipt and upload a clearer copy.'],
+                ]);
+            }
+
             $expenseCategoryId = $data['expense_category_id'] ?? null;
             if (isset($data['category'])) {
                 if (!$expenseCategoryId) {

@@ -14,6 +14,7 @@ use App\Modules\CashAdvances\Http\Requests\RejectCashAdvanceRequest;
 use App\Modules\CashAdvances\Http\Requests\DisburseCashAdvanceRequest;
 use App\Modules\CashAdvances\Http\Requests\AcknowledgeCashAdvanceRequest;
 use App\Modules\Shared\Services\CashAdvanceEnrichmentService;
+use App\Modules\Shared\Services\PenaltySyncService;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
 use App\Modules\AuditLogs\Services\AuditLogService;
@@ -22,11 +23,16 @@ class CashAdvanceController extends Controller
 {
     protected CashAdvanceService $service;
     protected CashAdvanceEnrichmentService $enrichmentService;
+    protected PenaltySyncService $penaltySync;
 
-    public function __construct(CashAdvanceService $service, CashAdvanceEnrichmentService $enrichmentService)
-    {
+    public function __construct(
+        CashAdvanceService $service,
+        CashAdvanceEnrichmentService $enrichmentService,
+        PenaltySyncService $penaltySync
+    ) {
         $this->service = $service;
         $this->enrichmentService = $enrichmentService;
+        $this->penaltySync = $penaltySync;
     }
 
     private const ADVANCE_WITH = [
@@ -64,18 +70,21 @@ class CashAdvanceController extends Controller
         Gate::authorize('viewAny', CashAdvance::class);
 
         $user = $request->user();
+        $canManage = $user->can('serms.cash_advances.manage');
+
+        $this->penaltySync->syncPendingOverdueAdvances($canManage ? null : (int) $user->id);
 
         $query = CashAdvance::with(self::ADVANCE_WITH)
             ->withSum('penalties as penalties_total', 'penalty_amount')
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
-        if (!$user->can('serms.cash_advances.manage')) {
+        if (!$canManage) {
             $query->where('user_id', $user->id);
         }
 
         $advances = $query->get();
-        AuditLogService::enrichCashAdvances($advances, $user->can('serms.cash_advances.manage'));
+        AuditLogService::enrichCashAdvances($advances, $canManage);
         $enriched = $advances->map(fn (CashAdvance $a) => $this->enrichAdvance($a));
 
         return response()->json($enriched);
@@ -109,11 +118,15 @@ class CashAdvanceController extends Controller
      */
     public function show(Request $request, $id)
     {
+        $advance = CashAdvance::findOrFail($id);
+
+        Gate::authorize('view', $advance);
+
+        $this->penaltySync->syncAdvance($advance);
+
         $advance = CashAdvance::with(self::ADVANCE_WITH)
             ->withSum('penalties as penalties_total', 'penalty_amount')
             ->findOrFail($id);
-
-        Gate::authorize('view', $advance);
 
         $this->enrichAdvance($advance);
 
@@ -223,7 +236,7 @@ class CashAdvanceController extends Controller
 
         Gate::authorize('disburse', $advance);
 
-        if ($advance->status !== 'approved') {
+        if ($advance->status !== 'approved' || $advance->disbursement()->exists()) {
             return response()->json(['message' => 'Conflict. Cash advance is not in an approved state.'], 409);
         }
 

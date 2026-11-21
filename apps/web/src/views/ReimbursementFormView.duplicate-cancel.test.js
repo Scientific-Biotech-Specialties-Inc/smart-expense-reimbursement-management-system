@@ -4,8 +4,24 @@ import { mount } from "@vue/test-utils";
 import { ref } from "vue";
 import ReimbursementFormView from "@/views/ReimbursementFormView.vue";
 
-const { routerPushMock, receiptsState } = vi.hoisted(() => {
-  return { routerPushMock: vi.fn(), receiptsState: { value: [] } };
+const {
+  routerPushMock,
+  receiptsState,
+  qualityRejectionState,
+  clearQualityRejectionMock,
+  addReceiptFilesMock,
+  submitSegmentsMock,
+  handleReceiptSelectMock,
+} = vi.hoisted(() => {
+  return {
+    routerPushMock: vi.fn(),
+    receiptsState: { value: [] },
+    qualityRejectionState: { value: null },
+    clearQualityRejectionMock: vi.fn(),
+    addReceiptFilesMock: vi.fn(),
+    submitSegmentsMock: vi.fn(),
+    handleReceiptSelectMock: vi.fn(),
+  };
 });
 
 vi.mock("@/stores/policy", () => ({
@@ -51,16 +67,16 @@ vi.mock("@/composables/reimbursements/useReceiptUploads", () => ({
     receiptDrag: ref(false),
     receiptInput: ref(null),
     handleReceiptDrop: vi.fn(),
-    handleReceiptSelect: vi.fn(),
-    addReceiptFiles: vi.fn(),
+    handleReceiptSelect: handleReceiptSelectMock,
+    addReceiptFiles: addReceiptFilesMock,
     removeReceipt: vi.fn(),
     clearDraftReceipts: vi.fn(),
-    qualityRejection: ref(null),
-    clearQualityRejection: vi.fn(),
+    qualityRejection: qualityRejectionState,
+    clearQualityRejection: clearQualityRejectionMock,
     showSegmentedUpload: ref(false),
     continueAnyway: vi.fn(),
     submitWithForce: vi.fn(),
-    submitSegments: vi.fn(),
+    submitSegments: submitSegmentsMock,
   }),
 }));
 
@@ -88,7 +104,12 @@ function mountForm() {
         ReimbursementSummaryPanel: true,
         SegmentedReceiptUpload: true,
         ConfirmModal: true,
-        ReceiptQualityRejectionModal: true,
+        ReceiptQualityRejectionModal: {
+          name: "ReceiptQualityRejectionModal",
+          props: ["isOpen", "rejectionCode", "rejectionReason"],
+          emits: ["close", "retake", "upload-segmented"],
+          template: `<div class="quality-modal-stub" :data-open="isOpen" />`,
+        },
         BaseToggleSwitch: true,
       },
     },
@@ -131,5 +152,78 @@ describe("ReimbursementFormView — duplicate Upload New One cancel goes to /rei
     expect(html).not.toContain("reimbursement-empty-state");
     expect(text).not.toContain("Upload Receipts");
     expect(text).not.toContain("Drag and drop receipt images here");
+  });
+
+  it("wires @close on ReceiptQualityRejectionModal to clearQualityRejection", async () => {
+    clearQualityRejectionMock.mockClear();
+    qualityRejectionState.value = {
+      receiptId: "temp-1",
+      file: null,
+      rejectionCode: "unreadable",
+      rejectionReason: "Critical details unreadable.",
+    };
+    const wrapper = mountForm();
+    await wrapper.vm.$nextTick();
+
+    const modal = wrapper.findComponent({ name: "ReceiptQualityRejectionModal" });
+    expect(modal.exists()).toBe(true);
+    expect(modal.props("isOpen")).toBe(true);
+
+    await modal.vm.$emit("close");
+    expect(clearQualityRejectionMock).toHaveBeenCalledTimes(1);
+    qualityRejectionState.value = null;
+  });
+
+  it("falls back to addReceiptFiles when uploadMode is multi and 1 file is selected, and caps multi select at 6 files", async () => {
+    addReceiptFilesMock.mockClear();
+    submitSegmentsMock.mockClear();
+    handleReceiptSelectMock.mockClear();
+
+    receiptsState.value = [
+      { id: "1", amount: 100, date: "2026-09-01", categoryId: 1, eventType: "Meals" },
+    ];
+    const wrapper = mountForm();
+
+    // Trigger Multi Receipt mode via ReceiptsManagementHeader event
+    wrapper.findComponent({ name: "ReceiptsManagementHeader" }).vm.$emit("open-segmented-upload");
+    await wrapper.vm.$nextTick();
+
+    const input = wrapper.find('input[type="file"]');
+    const singleFile = new File(["1"], "one.jpg", { type: "image/jpeg" });
+    Object.defineProperty(input.element, "files", {
+      value: [singleFile],
+      configurable: true,
+    });
+    await input.trigger("change");
+
+    expect(addReceiptFilesMock).toHaveBeenCalledWith([singleFile]);
+    expect(submitSegmentsMock).not.toHaveBeenCalled();
+
+    // Subsequent normal select uses handleReceiptSelect because uploadMode reset to single
+    Object.defineProperty(input.element, "files", {
+      value: [singleFile],
+      configurable: true,
+    });
+    await input.trigger("change");
+    expect(handleReceiptSelectMock).toHaveBeenCalledTimes(1);
+
+    // Multi-file selection > 6 caps at 6 and calls submitSegments
+    addReceiptFilesMock.mockClear();
+    submitSegmentsMock.mockClear();
+    wrapper.findComponent({ name: "ReceiptsManagementHeader" }).vm.$emit("open-segmented-upload");
+    await wrapper.vm.$nextTick();
+
+    const eightFiles = Array.from({ length: 8 }, (_, idx) =>
+      new File([`${idx}`], `f${idx}.jpg`, { type: "image/jpeg" }),
+    );
+    Object.defineProperty(input.element, "files", {
+      value: eightFiles,
+      configurable: true,
+    });
+    await input.trigger("change");
+
+    expect(submitSegmentsMock).toHaveBeenCalledTimes(1);
+    expect(submitSegmentsMock.mock.calls[0][0]).toHaveLength(6);
+    expect(addReceiptFilesMock).not.toHaveBeenCalled();
   });
 });

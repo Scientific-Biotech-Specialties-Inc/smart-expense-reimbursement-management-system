@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import CashAdvanceFormView from "@/views/CashAdvanceFormView.vue";
+import ConfirmModal from "@/components/base/ConfirmModal.vue";
 
 const { mockPush, mockRequest, mockUpdateRequest, mockFetchRequest, mockAddToast } = vi.hoisted(() => ({
   mockPush: vi.fn(),
@@ -89,6 +90,13 @@ describe("CashAdvanceFormView — SBSI Report Template Integration", () => {
     expect(submitBtn.attributes("disabled")).toBeUndefined();
 
     await wrapper.find("#cashAdvanceForm").trigger("submit");
+    await flushPromises();
+
+    const submitModal = wrapper
+      .findAllComponents(ConfirmModal)
+      .find((m) => m.props("message")?.toLowerCase().includes("submit this request"));
+    expect(submitModal).toBeDefined();
+    await submitModal.vm.$emit("confirm");
     await flushPromises();
 
     expect(mockRequest).toHaveBeenCalledTimes(1);

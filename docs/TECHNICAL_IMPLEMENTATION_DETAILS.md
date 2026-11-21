@@ -79,14 +79,14 @@ Financial mutation endpoints are protected by [`EnsureIdempotency.php`](file:///
 ## 3. SERMS Financial Compliance & Business Math Engine
 
 ### 3.1 Daily Overdue Penalty Accrual
-Automated via [`ComputeDailyPenalties.php`](file:///c:/Projects/smart-expense-management-system/apps/api/app/Console/Commands/ComputeDailyPenalties.php) running nightly at 00:00:
+Automated via [`PenaltySyncService.php`](file:///c:/Projects/smart-expense-management-system/apps/api/app/Modules/Shared/Services/PenaltySyncService.php) and [`ComputeDailyPenalties.php`](file:///c:/Projects/smart-expense-management-system/apps/api/app/Console/Commands/ComputeDailyPenalties.php) (invoked nightly via CLI and synced on cash-advance/liquidation reads and submissions):
 
 ![Figure 2: Daily Overdue Penalty Accrual & Reversion State Machine](./diagrams/daily_penalty_accrual.png)  
 *Figure 2: Daily Overdue Penalty Accrual & Reversion State Machine*
 
-- **Overdue Day Calculation:**
-  $$D_{\text{overdue}} = \max\left(0, \, \left\lfloor \frac{T_{\text{today}} - T_{\text{due}}}{86400} \right\rfloor\right)$$
-- **Penalty Accrual:**
+- **Overdue Day Calculation (7-Day Grace Period):**
+  $$D_{\text{overdue}} = \max\left(0, \, \left\lfloor \frac{T_{\text{today}} - T_{\text{due}}}{86400} \right\rfloor - 7\right)$$
+- **Penalty Accrual (Paused while a submitted liquidation is `pending` / `under-review`, resumed if returned for `revise` / `incomplete`):**
   $$\Delta P = \sum_{d=1}^{D_{\text{overdue}}} [d \notin \text{Penalties}(A)] \times 50.00$$
   $$\text{Balance}_{\text{new}} = \text{Balance}_{\text{old}} + \Delta P$$
 - **Reversion Mechanism:** If an administrator officially extends the `expected_liquidation_date` in the database, invalid penalty records where $\text{days\_overdue} > D_{\text{overdue}}$ are summed, deleted in a transaction, and subtracted from `outstanding_balance` to guarantee zero mathematical drift.

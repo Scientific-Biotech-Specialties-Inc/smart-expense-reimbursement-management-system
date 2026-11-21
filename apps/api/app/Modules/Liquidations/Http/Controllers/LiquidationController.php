@@ -9,10 +9,12 @@ use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Shared\Services\CashAdvanceEnrichmentService;
 use App\Modules\Shared\Services\PasswordVerificationService;
+use App\Modules\Shared\Services\PenaltySyncService;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Jobs\DispatchReceiptToAiService;
 use App\Modules\Shared\Traits\HandlesReportTemplateData;
+use App\Modules\Shared\Traits\HydratesSplitReceipts;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
@@ -24,9 +26,12 @@ class LiquidationController extends Controller
 {
     use ValidatesReceiptDuplicates;
     use HandlesReportTemplateData;
+    use HydratesSplitReceipts;
 
-    public function __construct(private readonly CashAdvanceEnrichmentService $enrichmentService)
-    {
+    public function __construct(
+        private readonly CashAdvanceEnrichmentService $enrichmentService,
+        private readonly PenaltySyncService $penaltySync
+    ) {
     }
 
     /**
@@ -48,6 +53,24 @@ class LiquidationController extends Controller
         return $advance ? $this->enrichmentService->enrich($advance, false) : null;
     }
 
+    private function assertExpenseMeetsBalance(float $expenseAmount, float $outstandingBalance): void
+    {
+        $expenseCents = (int) round($expenseAmount * 100);
+        $balanceCents = (int) round($outstandingBalance * 100);
+
+        if ($expenseCents < $balanceCents) {
+            throw ValidationException::withMessages([
+                'total_expense_amount' => [
+                    sprintf(
+                        'Total expense amount (PHP %s) must be equal to or greater than the outstanding balance (PHP %s).',
+                        number_format($expenseAmount, 2),
+                        number_format($outstandingBalance, 2)
+                    ),
+                ],
+            ]);
+        }
+    }
+
     /**
      * Update receipt metadata and replace line items for each liquidation receipt.
      *
@@ -61,6 +84,11 @@ class LiquidationController extends Controller
                 continue;
             }
             $receipt = Receipt::findOrFail($receiptData['id']);
+            if ($receipt->isRejectedStatus()) {
+                throw ValidationException::withMessages([
+                    'receipts' => ['Rejected receipts cannot be submitted in a liquidation. Please remove the rejected receipt and upload a clearer copy.'],
+                ]);
+            }
             $receipt->update([
                 'vendor_name' => $receiptData['vendor_name'] ?? $receiptData['vendor'] ?? $receipt->vendor_name,
                 'transaction_date' => $receiptData['transaction_date'] ?? $receiptData['date'] ?? $receipt->transaction_date,
@@ -135,10 +163,13 @@ class LiquidationController extends Controller
     public function index(Request $request)
     {
         $user = $request->user();
+        $canManage = $user->can('serms.liquidations.manage');
+
+        $this->penaltySync->syncPendingOverdueAdvances($canManage ? null : (int) $user->id);
 
         $with = array_merge(['user', 'cashAdvance'], array_map(fn($r) => "cashAdvance.$r", self::CASH_ADVANCE_ROADMAP_WITH));
 
-        if (!$request->user()->can('serms.liquidations.manage')) {
+        if (!$canManage) {
             $liquidations = Liquidation::where('user_id', $user->id)
                 ->with($with)
                 ->orderByDesc('created_at')
@@ -206,7 +237,7 @@ class LiquidationController extends Controller
 
         // Duplicate guard — same as ReceiptService::storeReceipt
         try {
-            $this->validateDuplicateReceipt($fileHashes);
+            $this->validateUploadDuplicates($fileHashes);
         } catch (ValidationException $e) {
             // Best-effort cleanup of just-uploaded objects so duplicates don't orphan files
             foreach ($filePaths as $path) {
@@ -342,7 +373,7 @@ class LiquidationController extends Controller
             return response()->json(['message' => 'Forbidden.'], 403);
         }
 
-        return response()->json(['data' => $receipt]);
+        return response()->json(['data' => $this->hydrateSplitMetadata($receipt)]);
     }
 
     /**
@@ -442,24 +473,18 @@ class LiquidationController extends Controller
                 return response()->json(['message' => 'Conflict. Cash advance is not in a reconcilable state.'], 409);
             }
 
+            // Reconcile any unapplied overdue penalties into outstanding_balance before snapshotting
+            $this->penaltySync->syncAdvance($advance, true);
+            $advance->refresh();
+
+            // Snapshot the cash advance's current outstanding balance (principal + accrued penalties)
+            $currentOutstandingBalance = (float) ($advance->outstanding_balance ?? $advance->amount);
+
+            // Enforce: total expenses must equal or exceed the current outstanding balance
+            $this->assertExpenseMeetsBalance((float) $validated['total_expense_amount'], $currentOutstandingBalance);
+
             // Update each receipt in database with user-edited fields
             $receiptIds = $this->syncLiquidationReceipts($receiptsData);
-
-            // Snapshot the cash advance's current outstanding balance
-            $currentOutstandingBalance = $advance->outstanding_balance ?? $advance->amount;
-
-            // Calculate variance based on the current balance, not original amount
-            $variance = $currentOutstandingBalance - $validated['total_expense_amount'];
-
-            // Enforce: shortfalls require an explanation
-            if ($variance > 0 && empty($validated['shortfall_explanation'])) {
-                return response()->json([
-                    'message' => 'Validation error.',
-                    'errors' => [
-                        'shortfall_explanation' => ['Shortfall explanation is required when total expense is less than the advanced amount.']
-                    ]
-                ], 422);
-            }
 
             // Handle Report Attachment Upload
             $reportFilePath = null;
@@ -556,12 +581,18 @@ class LiquidationController extends Controller
     public function show(Request $request, $id)
     {
         $user = $request->user();
-        $with = array_merge(['user', 'cashAdvance'], array_map(fn($r) => "cashAdvance.$r", self::CASH_ADVANCE_ROADMAP_WITH));
-        $liquidation = Liquidation::with($with)->findOrFail($id);
+        $liquidation = Liquidation::with('cashAdvance')->findOrFail($id);
 
         if (!$request->user()->can('serms.liquidations.manage') && $liquidation->user_id !== $user->id) {
             return response()->json(['message' => 'Forbidden.'], 403);
         }
+
+        if ($liquidation->cashAdvance) {
+            $this->penaltySync->syncAdvance($liquidation->cashAdvance);
+        }
+
+        $with = array_merge(['user', 'cashAdvance'], array_map(fn($r) => "cashAdvance.$r", self::CASH_ADVANCE_ROADMAP_WITH));
+        $liquidation = Liquidation::with($with)->findOrFail($id);
 
         $this->hydrateLiquidation($liquidation);
 
@@ -750,6 +781,17 @@ class LiquidationController extends Controller
             $wasRevise = $liquidation->status === 'revise';
             $beforeState = $liquidation->toArray();
 
+            $advance = CashAdvance::find($liquidation->cash_advance_id);
+            if ($wasRevise && $advance) {
+                $this->penaltySync->syncAdvance($advance, true);
+                $advance->refresh();
+                $liquidation->outstanding_balance = $advance->outstanding_balance ?? $advance->amount;
+            }
+
+            $requiredBalance = (float) ($liquidation->outstanding_balance ?? $advance?->outstanding_balance ?? $advance?->amount ?? 0);
+            $effectiveExpense = (float) ($validated['total_expense_amount'] ?? $liquidation->total_expense_amount);
+            $this->assertExpenseMeetsBalance($effectiveExpense, $requiredBalance);
+
             // Handle receipts update
             if (isset($validated['receipts'])) {
                 $receiptsData = is_string($validated['receipts'])
@@ -782,7 +824,7 @@ class LiquidationController extends Controller
             }
 
             // Reset revise → pending on re-submission (rejected terminal stays rejected)
-            if ($liquidation->status === 'revise') {
+            if ($wasRevise) {
                 $liquidation->status = 'pending';
             }
 

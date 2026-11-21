@@ -3,11 +3,11 @@
 **Project:** Smart Expense & Reimbursement Management System (SERMS)  
 **Client / Partner:** Science Biotech Specialties Inc. (SBSI) — [https://sbsi.com.ph/about-us/](https://sbsi.com.ph/about-us/)  
 **Academic Context:** 3rd & 4th Year Capstone Project (Capstone 1: Ended July 2026 · Capstone 2: September–December 2026)  
-**Date:** Nov 14, 2026  
+**Date:** Nov 21, 2026  
 **Version:** 2.1.0  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** Nov 14, 2026 (Bi-Directional CMS ↔ SERMS Integration)  
+**Last reconciled:** Nov 21, 2026 (Bi-Directional CMS ↔ SERMS Integration & Staging Reconciliation)  
 **Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
 
 ---
@@ -21,6 +21,35 @@ All notable changes, architectural decisions, and documentation updates for the 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
+
+## [Unreleased] - Nov 21, 2026
+
+### Added
+- **Cash Advance Disbursement via `GrantPayoutModal` & Unified Payout Integration (`docs/SERMS.md`, `apps/api`, `apps/web`):**
+  - Updated `docs/SERMS.md` (§4.2, §6.1, §6.4) to specify Cash Advance disbursement through the shared `GrantPayoutModal` (`granted_by`, `payout_method`, `payout_method_other`, `granter_signature`, password verification, and legacy `{ channel, reference, password }` backwards compatibility), unified `payout` enrichment via `CashAdvanceEnrichmentService`, `CASH_ADVANCE_DISBURSED` audit trail fields, and unified `PayoutView.vue` tracking & employee acknowledgement.
+  - **Backend (`apps/api`):** Added `2026_11_21_000001_add_payout_fields_to_cash_advance_disbursements_table.php`, updated `CashAdvanceDisbursement`, `DisburseCashAdvanceRequest`, `CashAdvanceController`, `CashAdvanceService`, `CashAdvanceEnrichmentService`, and `AuditLogService`, and added `CashAdvancePayoutDisbursementTest.php`.
+  - **Frontend (`apps/web`):** Reused `GrantPayoutModal.vue` in `CashAdvanceDetailsModal.vue` (`stores/cashAdvance.js`) and integrated Cash Advance payouts into `usePayoutFilters.js`, `PayoutView.vue`, `PayoutsTable.vue`, and `PayoutDetailsModal.vue`.
+- **Smart Multi-Receipt Auto-Split & Per-Card Isolation (`docs/SERMS.md`, `apps/web`):**
+  - Documented the Multi-Receipt Auto-Split workflow and `split_receipts` / `segment_indices` cross-service contract in `docs/SERMS.md` (§4.2 and §6.3) and `docs/CHANGELOG.md`.
+  - **Shared Utilities (`receiptUtils.js`):** Extracted `hasSplitReceipts()`, `formatSplitReceiptsToastMessage()`, `resolveSplitSegmentIndices()`, and `isDuplicateOcrResponse()`.
+  - **Reimbursements & My Expense (`useReceiptUploads.js`, `ReimbursementFormView.vue`):** Delegated 1-file `submitSegments()` and `onReceiptSelect()` Multi Receipt selections to `addReceiptFiles()`, capped multi-file batches at 6, expanded `split_receipts` before early rejection/failure returns, isolated per-card rejections/duplicates by card `id`/reference, and guarded blob URL revocation across siblings.
+  - **Liquidations (`FileUpload.vue`):** Partitioned `pages`/`previews` on `split_receipts`, inserted child entries after the placeholder entry, showed the split info toast, and evaluated each entry independently (`hydrateEntry`, `handleRejectedEntry`, or `failed` status).
+  - **Vitest Coverage:** Added `useReceiptUploads.test.js` and `FileUpload.test.js`, and extended `receiptUtils.test.js`, `ReceiptUploadModal.spec.js`, and `ReimbursementFormView.duplicate-cancel.test.js`.
+
+### Changed
+- **Liquidation Minimum Balance Enforcement (`docs/SERMS.md`, `docs/PRD.md`, `apps/api`, `apps/web`):**
+  - Updated `docs/SERMS.md` and `docs/PRD.md` to require `total_expense_amount >= outstanding_balance` (equal to or greater than the current penalty-inclusive balance) on liquidation submissions and updates, blocking under-balance submissions at both UI and API layers.
+  - **Backend (`LiquidationController.php`):** Added `assertExpenseMeetsBalance()` with cent-precision validation in both `store()` (post-penalty sync, pre-receipt mutation) and `update()` (covering `pending` and penalty-synced `revise` edits) returning HTTP `422` on `total_expense_amount`, and removed the prior `variance > 0` `shortfall_explanation` gate.
+  - **Frontend (`liquidationPenalties.js`, `LiquidationSettlementForm.vue`, `LiquidationsView.vue`, `useLiquidationSubmit.js`):** Extracted `resolveAdvanceBalance` and `isExpenseBelowBalance`, disabled `#submit-liquidation-btn` with an accessible inline `role="alert"` message (`data-testid="liquidation-balance-error"`) when expenses are below balance, guarded `promptSubmitLiquidation()` / `submitLiquidation()` in `LiquidationsView.vue`, and removed automatic shortfall note synthesis in `useLiquidationSubmit.js`.
+
+## [Unreleased] - Nov 20, 2026
+
+### Fixed
+- **Overdue Penalty Balance Reconciliation & 7-Day Grace Period Enforcement (`apps/api`, `apps/web`, `docs/TECHNICAL_IMPLEMENTATION_DETAILS.md`):**
+  - **Shared Backend Sync (`PenaltySyncService.php`):** Extracted `App\Modules\Shared\Services\PenaltySyncService` (shared by `ComputeDailyPenalties`, `CashAdvanceController`, and `LiquidationController`) to enforce the canonical 7-day grace period after `expected_liquidation_date`, accrue daily `PHP 50.00` `PenaltyRecord` rows into `cash_advances.outstanding_balance` (propagating to `liquidations.outstanding_balance`), pause daily accrual while a liquidation is `pending` / `under-review` (resuming on `revise` / `incomplete`), and write `OVERDUE_PENALTY` audit logs on `entity_type = 'cash_advance'`.
+  - **Deadline Notifications & PDF Reports (`CheckLiquidationDeadlines.php`, `ReportGeneratorService.php`):** Aligned Stage 3 overdue notifications and liquidation PDF penalty fallback with the 7-day grace period.
+  - **Seeder Repair (`OverdueCashAdvanceSeeder.php`):** Updated overdue fixture due dates to `7 + overdueDays` days ago, seeded daily `PHP 50.00` `PenaltyRecord` entries, and persisted penalty-inclusive `outstanding_balance` (`PHP 10,250.00`, `PHP 15,200.00`, `PHP 5,150.00`) across `cash_advances` and `liquidations`.
+  - **Frontend Liquidation UI & Math (`liquidationPenalties.js`, `liquidation.js`, `LiquidationsView.vue`, `LiquidationSettlementForm.vue`, `LiquidationReviewModal.vue`, `UnifiedRoadmapStepper.vue`):** Enforced the 7-day grace period in `calculateAging` and roadmap/overdue helpers, fixed `calculateLiquidationStatus` and `roadmapOverpayment` to evaluate against `outstandingBalance` rather than `cashAdvanceAmount`, and added `Requested Amount` + `Overdue Penalty` = `Total Balance` breakdowns in Settlement Summary and the Admin Review modal.
 
 ## [2.1.0] - Nov 14, 2026
 

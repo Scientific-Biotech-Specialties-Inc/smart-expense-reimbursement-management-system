@@ -49,6 +49,7 @@ const emit = defineEmits([
   "update:purpose",
   "update:contractId",
   "update:clientName",
+  "update:isManualMode",
 ]);
 
 const editorMode = ref(
@@ -75,19 +76,30 @@ function onTemplateModelUpdate(val) {
   emit("update:reportTemplateData", { ...val, mode: "template" });
 }
 
-function handleEditorClick(e) {
-  const target = e.target;
-  if (target?.closest?.('[data-testid="mode-manual"]')) {
-    editorMode.value = "manual";
-    emit("update:reportTemplateData", { ...(props.reportTemplateData || {}), mode: "manual" });
-  } else if (target?.closest?.('[data-testid="mode-template"]')) {
-    editorMode.value = "template";
-    if (props.reportFile) emit("update:reportFile", null);
-    if (lastTemplatePayload.value) {
-      emit("update:reportTemplateData", { ...lastTemplatePayload.value, mode: "template" });
-    } else if (props.reportTemplateData) {
-      emit("update:reportTemplateData", { ...props.reportTemplateData, mode: "template" });
+function onEditorModeUpdate(nextMode) {
+  const normalized = nextMode === "manual" ? "manual" : "template";
+  const wasManual =
+    editorMode.value === "manual" ||
+    Boolean(props.isManualMode) ||
+    props.reportTemplateData?.mode === "manual";
+  const changed = editorMode.value !== normalized;
+  editorMode.value = normalized;
+  emit("update:isManualMode", normalized === "manual");
+
+  if (normalized === "manual") {
+    if (changed && (props.reportTemplateData || !props.reportFile)) {
+      emit("update:reportTemplateData", { ...(props.reportTemplateData || {}), mode: "manual" });
     }
+    return;
+  }
+
+  if (!wasManual) return;
+
+  if (props.reportFile) emit("update:reportFile", null);
+  if (lastTemplatePayload.value) {
+    emit("update:reportTemplateData", { ...lastTemplatePayload.value, mode: "template" });
+  } else if (props.reportTemplateData) {
+    emit("update:reportTemplateData", { ...props.reportTemplateData, mode: "template" });
   }
 }
 </script>
@@ -101,7 +113,7 @@ function handleEditorClick(e) {
         <span class="text-danger">*</span>
       </h3>
 
-      <div @click="handleEditorClick">
+      <div>
         <SbsiReportDocumentEditor
           type="reimbursement"
           :model-value="reportTemplateData"
@@ -113,6 +125,7 @@ function handleEditorClick(e) {
           @update:model-value="onTemplateModelUpdate"
           @update:report-file="$emit('update:reportFile', $event)"
           @update:purpose="$emit('update:purpose', $event)"
+          @update:mode="onEditorModeUpdate"
         />
       </div>
     </section>

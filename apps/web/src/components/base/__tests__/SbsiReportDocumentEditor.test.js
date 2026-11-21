@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { nextTick } from "vue";
+import { createPinia, setActivePinia } from "pinia";
+import { useAuthStore } from "@/stores/auth";
 import SbsiReportDocumentEditor from "../SbsiReportDocumentEditor.vue";
 import {
   DEFAULT_SBSI_RECIPIENT,
@@ -14,6 +16,66 @@ import {
   validateTemplateData,
 } from "@/utils/sbsiReportTemplateUtils";
 import { generateSbsiReportPdfBytes, createSbsiReportPdfFile } from "@/utils/sbsiPdfGenerator";
+import { deflateSync } from "node:zlib";
+
+function buildTestRgbaPngDataUrl(width, height, rgbaRows) {
+  const crcTable = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    crcTable[n] = c >>> 0;
+  }
+  const crc32 = (buf) => {
+    let c = 0xffffffff;
+    for (let i = 0; i < buf.length; i++) c = crcTable[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const out = Buffer.alloc(12 + data.length);
+    out.writeUInt32BE(data.length, 0);
+    out.write(type, 4, 4, "ascii");
+    data.copy(out, 8);
+    out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
+    return out;
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 6; // RGBA
+  const raw = Buffer.alloc(height * (1 + width * 4));
+  for (let y = 0; y < height; y++) {
+    const off = y * (1 + width * 4);
+    raw[off] = 1; // Sub filter to exercise PNG unfiltering too
+    for (let i = 0; i < width * 4; i++) {
+      const prev = i >= 4 ? rgbaRows[y][i - 4] : 0;
+      raw[off + 1 + i] = (rgbaRows[y][i] - prev) & 0xff;
+    }
+  }
+  const idat = deflateSync(raw);
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", idat),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+  return `data:image/png;base64,${png.toString("base64")}`;
+}
+
+function decodePdfRle(bytes) {
+  const out = [];
+  for (let i = 0; i < bytes.length; ) {
+    const len = bytes[i++];
+    if (len === 128) break;
+    if (len < 128) {
+      for (let k = 0; k < len + 1; k++) out.push(bytes[i++]);
+    } else {
+      const val = bytes[i++];
+      for (let k = 0; k < 257 - len; k++) out.push(val);
+    }
+  }
+  return Uint8Array.from(out);
+}
 
 const user = { name: "Juan Dela Cruz", position: "Field Engineer", department: "Operations" };
 const receipts = [
@@ -295,6 +357,253 @@ describe("SbsiReportDocumentEditor", () => {
     expect(wrapper.find('[data-testid="document-wrapper"]').element.parentElement).not.toBe(document.body);
     expect(wrapper.find('[data-testid="document-canvas"]').classes()).toContain("ring-1");
     wrapper.unmount();
+  });
+
+  it("defaults signatorySignature to saved profile signature and allows switching to free draw and back", async () => {
+    const savedSig = "data:image/png;base64,savedProfileSignatureData";
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const auth = useAuthStore();
+    auth.user = { id: 1, name: "Juan Dela Cruz", signature: savedSig };
+
+    const wrapper = mountEditor({ type: "reimbursement", receipts, user });
+    await nextTick();
+
+    expect(wrapper.find('[data-testid="signatory-signature-pad"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="saved-signature-indicator"]').exists()).toBe(true);
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].signatorySignature).toBe(savedSig);
+
+    // Clear and free draw a custom signature
+    await wrapper.find('[data-testid="clear-signature-btn"]').trigger("click");
+    await nextTick();
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].signatorySignature).toBe("");
+
+    const canvas = wrapper.find('[data-testid="signatory-signature-pad"] canvas');
+    const ctxMock = {
+      scale: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn(),
+      clearRect: vi.fn(),
+    };
+    canvas.element.getContext = vi.fn(() => ctxMock);
+    canvas.element.toDataURL = vi.fn(() => "data:image/png;base64,freeDrawnSignature");
+
+    await canvas.trigger("pointerdown", { clientX: 10, clientY: 10, pointerId: 1 });
+    await canvas.trigger("pointermove", { clientX: 40, clientY: 20 });
+    await canvas.trigger("pointerup");
+    await nextTick();
+
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].signatorySignature).toBe("data:image/png;base64,freeDrawnSignature");
+
+    // Switch back to saved profile signature
+    const useSavedBtn = wrapper.find('[data-testid="use-saved-signature-btn"]');
+    expect(useSavedBtn.exists()).toBe(true);
+    await useSavedBtn.trigger("click");
+    await nextTick();
+
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].signatorySignature).toBe(savedSig);
+  });
+
+  it("allows free draw when user has no saved profile signature", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const auth = useAuthStore();
+    auth.user = { id: 2, name: "Maria Clara", signature: null };
+
+    const wrapper = mountEditor({ type: "cash-advance" });
+    await nextTick();
+
+    expect(wrapper.find('[data-testid="saved-signature-indicator"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="use-saved-signature-btn"]').exists()).toBe(false);
+
+    const canvas = wrapper.find('[data-testid="signatory-signature-pad"] canvas');
+    const ctxMock = {
+      scale: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn(),
+      clearRect: vi.fn(),
+    };
+    canvas.element.getContext = vi.fn(() => ctxMock);
+    canvas.element.toDataURL = vi.fn(() => "data:image/png;base64,noProfileFreeDraw");
+
+    await canvas.trigger("pointerdown", { clientX: 5, clientY: 5, pointerId: 1 });
+    await canvas.trigger("pointermove", { clientX: 30, clientY: 18 });
+    await canvas.trigger("pointerup");
+    await nextTick();
+
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].signatorySignature).toBe("data:image/png;base64,noProfileFreeDraw");
+  });
+
+  it("renders signatory signature image in readonly mode and ignores unsafe urls", async () => {
+    const validSig = "data:image/png;base64,iVBORw0KGgo=";
+    const wrapper = mountEditor({
+      type: "reimbursement",
+      receipts,
+      readonly: true,
+      modelValue: { signatorySignature: validSig },
+    });
+    await nextTick();
+
+    expect(wrapper.find('[data-testid="signatory-signature-pad"]').exists()).toBe(false);
+    const img = wrapper.find('[data-testid="signatory-signature-image"]');
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe(validSig);
+
+    await wrapper.setProps({ modelValue: { signatorySignature: "javascript:alert(1)" } });
+    await nextTick();
+    expect(wrapper.find('[data-testid="signatory-signature-image"]').exists()).toBe(false);
+  });
+
+  it("embeds a valid RGBA PNG signature into the generated PDF with accurate white-composited RGB pixels", () => {
+    // 2x1 RGBA PNG: pixel 0 = opaque dark ink (30, 41, 59, 255), pixel 1 = transparent (0, 0, 0, 0)
+    const sigUrl = buildTestRgbaPngDataUrl(2, 1, [[30, 41, 59, 255, 0, 0, 0, 0]]);
+    const data = createDefaultTemplateData("reimbursement", {
+      user: { ...user, signature: sigUrl },
+      receipts,
+      purpose: "Field visit",
+    });
+
+    const bytes = generateSbsiReportPdfBytes(data);
+    const latin1 = new TextDecoder("latin1").decode(bytes);
+    expect(latin1).toContain("/Subtype /Image");
+    expect(latin1).toContain("/Width 2 /Height 1");
+    expect(latin1).toContain("/Filter /RunLengthDecode");
+    expect(latin1).toContain("/Im1 Do");
+
+    const imgMatch = /\/Subtype \/Image[\s\S]*?\/Length (\d+) >>\nstream\n/.exec(latin1);
+    expect(imgMatch).not.toBeNull();
+    const streamStart = imgMatch.index + imgMatch[0].length;
+    const streamLen = Number(imgMatch[1]);
+    const rleBytes = bytes.slice(streamStart, streamStart + streamLen);
+    const decodedRgb = Array.from(decodePdfRle(rleBytes));
+    expect(decodedRgb).toEqual([30, 41, 59, 255, 255, 255]);
+  });
+
+  it("decodes larger multi-row RGBA PNGs (dynamic Huffman) cleanly and keeps PDF size compact", () => {
+    const w = 120;
+    const h = 40;
+    const rows = Array.from({ length: h }, (_, y) => {
+      const row = new Uint8Array(w * 4);
+      for (let x = 0; x < w; x++) {
+        const onStroke = (x + y * 2) % 17 === 0 || (x > 20 && x < 100 && y === 20);
+        row[x * 4] = onStroke ? 30 : 0;
+        row[x * 4 + 1] = onStroke ? 41 : 0;
+        row[x * 4 + 2] = onStroke ? 59 : 0;
+        row[x * 4 + 3] = onStroke ? 255 : 0;
+      }
+      return row;
+    });
+    const sigUrl = buildTestRgbaPngDataUrl(w, h, rows);
+    const data = createDefaultTemplateData("reimbursement", {
+      user: { ...user, signature: sigUrl },
+      receipts,
+      purpose: "Dynamic Huffman signature check",
+    });
+
+    const bytes = generateSbsiReportPdfBytes(data);
+    const latin1 = new TextDecoder("latin1").decode(bytes);
+    expect(latin1).toContain("/Width 120 /Height 40");
+    expect(bytes.length).toBeLessThan(50_000);
+  });
+
+  it("gracefully skips malformed signature data URLs during PDF generation without crashing", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const data = createDefaultTemplateData("cash-advance", {
+      purpose: "Travel",
+      totalAmount: 500,
+    });
+    data.signatorySignature = "data:image/png;base64,bm90LWEtdmFsaWQtcG5n";
+
+    const text = pdfText(data);
+    expect(text.startsWith("%PDF-1.4")).toBe(true);
+    expect(text.endsWith("%%EOF")).toBe(true);
+    expect(text).not.toContain("/Subtype /Image");
+    warnSpy.mockRestore();
+  });
+
+  it("preserves signatorySignature across Expand Editor toggle and keeps signature pad active", async () => {
+    const savedSig = "data:image/png;base64,savedProfileSignatureData";
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const auth = useAuthStore();
+    auth.user = { ...user, signature: savedSig };
+
+    const wrapper = mountEditor(
+      {
+        type: "reimbursement",
+        receipts,
+        user: auth.user,
+      },
+      { attachTo: document.body }
+    );
+
+    await nextTick();
+    await wrapper.find('[data-testid="expand-editor"]').trigger("click");
+    await nextTick();
+
+    const expandedEl = document.body.querySelector('[data-testid="document-wrapper"]');
+    expect(expandedEl).not.toBeNull();
+    const pad = wrapper.findComponent({ name: "BaseSignaturePad" });
+    expect(pad.exists()).toBe(true);
+    expect(pad.props("modelValue")).toBe(savedSig);
+
+    pad.vm.$emit("update:modelValue", "data:image/png;base64,drawnInExpanded");
+    await nextTick();
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].signatorySignature).toBe(
+      "data:image/png;base64,drawnInExpanded"
+    );
+
+    document.body.querySelector('[data-testid="collapse-editor"]')?.click();
+    await nextTick();
+    expect(pad.props("modelValue")).toBe("data:image/png;base64,drawnInExpanded");
+    wrapper.unmount();
+  });
+
+  it("gracefully skips indexed colorType 3 PNG missing a PLTE chunk without crashing", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ihdr = Buffer.alloc(13);
+    ihdr.writeUInt32BE(2, 0);
+    ihdr.writeUInt32BE(1, 4);
+    ihdr[8] = 8;
+    ihdr[9] = 3; // indexed color without PLTE chunk
+    const idat = deflateSync(Buffer.from([0, 0, 1]));
+
+    const makeChunk = (type, data) => {
+      let c = 0xffffffff;
+      const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+      for (let i = 0; i < body.length; i++) {
+        c ^= body[i];
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      }
+      const out = Buffer.alloc(12 + data.length);
+      out.writeUInt32BE(data.length, 0);
+      body.copy(out, 4);
+      out.writeUInt32BE((c ^ 0xffffffff) >>> 0, 8 + data.length);
+      return out;
+    };
+
+    const png = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      makeChunk("IHDR", ihdr),
+      makeChunk("IDAT", idat),
+      makeChunk("IEND", Buffer.alloc(0)),
+    ]);
+
+    const data = createDefaultTemplateData("cash-advance", {
+      purpose: "Missing PLTE",
+      totalAmount: 100,
+    });
+    data.signatorySignature = `data:image/png;base64,${png.toString("base64")}`;
+
+    const text = pdfText(data);
+    expect(text.startsWith("%PDF-1.4")).toBe(true);
+    expect(text.endsWith("%%EOF")).toBe(true);
+    expect(text).not.toContain("/Subtype /Image");
+    warnSpy.mockRestore();
   });
 });
 

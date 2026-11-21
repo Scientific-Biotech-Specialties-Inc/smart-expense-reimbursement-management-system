@@ -291,7 +291,7 @@ class AttachmentReportTemplateTest extends TestCase
             ->assertJsonPath('0.report_template_data.signatoryName', 'John Doe');
     }
 
-    public function test_liquidation_shortfall_still_requires_explanation_even_with_template(): void
+    public function test_liquidation_below_balance_is_blocked_even_with_template_and_explanation(): void
     {
         $advance = $this->makeCashAdvance();
         $receipt = $this->makeReceipt('c');
@@ -300,24 +300,24 @@ class AttachmentReportTemplateTest extends TestCase
             'cash_advance_id' => $advance->id,
             'receipts' => [['id' => $receipt->id, 'vendor_name' => 'Vendor', 'total_amount' => 3000]],
             'total_expense_amount' => 3000,
+            'shortfall_explanation' => 'Unused funds returned.',
             'report_template_data' => $this->template,
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors('shortfall_explanation');
+        $response->assertJsonValidationErrors('total_expense_amount');
         $this->assertDatabaseCount('liquidations', 0);
     }
 
-    public function test_liquidation_shortfall_with_explanation_and_template_succeeds(): void
+    public function test_liquidation_equal_to_balance_with_template_succeeds_without_explanation(): void
     {
         $advance = $this->makeCashAdvance();
         $receipt = $this->makeReceipt('d');
 
         $this->withHeaders($this->auth())->postJson('/api/liquidations', [
             'cash_advance_id' => $advance->id,
-            'receipts' => [['id' => $receipt->id, 'vendor_name' => 'Vendor', 'total_amount' => 3000]],
-            'total_expense_amount' => 3000,
-            'shortfall_explanation' => 'Unused funds returned.',
+            'receipts' => [['id' => $receipt->id, 'vendor_name' => 'Vendor', 'total_amount' => 5000]],
+            'total_expense_amount' => 5000,
             'report_template_data' => $this->template,
         ])->assertStatus(210);
 
@@ -365,5 +365,26 @@ class AttachmentReportTemplateTest extends TestCase
         $log = AuditLog::where('entity_type', 'liquidation')->where('entity_id', $liquidation->id)->where('action_type', 'LIQUIDATION_UPDATED')->firstOrFail();
         $this->assertNull($log->before_state['report_template_data']);
         $this->assertEquals($this->template, $log->after_state['report_template_data']);
+    }
+
+    public function test_report_template_persists_signatory_signature_and_rejects_non_string(): void
+    {
+        $receipt = $this->makeReceipt('f');
+        $sig = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        $tplWithSig = array_merge($this->template, ['signatorySignature' => $sig]);
+
+        $response = $this->withHeaders($this->auth())->post('/api/reimbursements', $this->reimbursementPayload($receipt, [
+            'report_template_data' => json_encode($tplWithSig),
+        ]));
+
+        $response->assertStatus(201);
+        $response->assertJsonPath('data.report_template_data.signatorySignature', $sig);
+
+        $bad = $this->withHeaders($this->auth())->post('/api/reimbursements', $this->reimbursementPayload($receipt, [
+            'report_template_data' => json_encode(array_merge($this->template, ['signatorySignature' => ['invalid']])),
+        ]));
+
+        $bad->assertStatus(422);
+        $bad->assertJsonValidationErrors('report_template_data.signatorySignature');
     }
 }

@@ -145,7 +145,7 @@ describe("LiquidationsView — Submit Confirmation Modal & Toast", () => {
   it("opens confirmation modal when submit-liquidation is triggered instead of submitting immediately", async () => {
     const wrapper = mountView();
 
-    // Select an advance so selectedAdvanceCanLiquidate is true
+    // Select an advance and matching receipt so submission is eligible
     wrapper.vm.selectedAdvance = {
       id: "ca-1",
       amount: 500,
@@ -153,6 +153,7 @@ describe("LiquidationsView — Submit Confirmation Modal & Toast", () => {
       status: "signed",
       acknowledgedAt: "2026-10-01",
     };
+    wrapper.vm.receipts = [{ id: 1, ocrData: { amount: 500 } }];
     await wrapper.vm.$nextTick();
 
     const settlementForm = wrapper.findComponent(LiquidationSettlementForm);
@@ -189,6 +190,7 @@ describe("LiquidationsView — Submit Confirmation Modal & Toast", () => {
       status: "signed",
       acknowledgedAt: "2026-10-01",
     };
+    wrapper.vm.receipts = [{ id: 1, ocrData: { amount: 500 } }];
     await wrapper.vm.$nextTick();
 
     const settlementForm = wrapper.findComponent(LiquidationSettlementForm);
@@ -222,6 +224,7 @@ describe("LiquidationsView — Submit Confirmation Modal & Toast", () => {
       status: "signed",
       acknowledgedAt: "2026-10-01",
     };
+    wrapper.vm.receipts = [{ id: 1, ocrData: { amount: 500 } }];
     await wrapper.vm.$nextTick();
 
     const settlementForm = wrapper.findComponent(LiquidationSettlementForm);
@@ -245,6 +248,38 @@ describe("LiquidationsView — Submit Confirmation Modal & Toast", () => {
     expect(addToastMock).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "success",
+      })
+    );
+  });
+
+  it("blocks submit confirmation and shows danger toast when total expenses are less than balance", async () => {
+    const wrapper = mountView();
+    wrapper.vm.selectedAdvance = {
+      id: "ca-1",
+      amount: 500,
+      balance: 500,
+      status: "signed",
+      acknowledgedAt: "2026-10-01",
+    };
+    wrapper.vm.receipts = [{ id: 1, ocrData: { amount: 300 } }];
+    await wrapper.vm.$nextTick();
+
+    const settlementForm = wrapper.findComponent(LiquidationSettlementForm);
+    await settlementForm.vm.$emit("submit-liquidation");
+    await wrapper.vm.$nextTick();
+
+    const confirmModals = wrapper.findAllComponents(ConfirmModal);
+    const submitModal = confirmModals.find(
+      (m) =>
+        m.props("message")?.toLowerCase().includes("are you sure do you want to submit this request?") ||
+        m.props("message")?.toLowerCase().includes("are you sure you want to submit this request?")
+    );
+
+    expect(submitModal.props("isOpen")).toBe(false);
+    expect(submitLiquidationMock).not.toHaveBeenCalled();
+    expect(addToastMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "danger",
       })
     );
   });
