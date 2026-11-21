@@ -244,7 +244,7 @@ describe("LiquidationSettlementForm — Receipt Grid vs Form List", () => {
     expect(submitBtn.classes()).not.toContain("h-9");
   });
 
-  it("mounts SbsiReportDocumentEditor in Report Attachment card and allows template submit with positive variance without shortfallExplanation", async () => {
+  it("disables submit and renders inline alert in template mode when totalExpenseAmount < balance even with shortfallExplanation", () => {
     const validTemplate = {
       type: "liquidation",
       date: "2026-10-12",
@@ -267,7 +267,7 @@ describe("LiquidationSettlementForm — Receipt Grid vs Form List", () => {
         receipts: sampleReceipts,
         totalExpenseAmount: 1700,
         variance: 3300,
-        shortfallExplanation: "",
+        shortfallExplanation: "Unused funds returned.",
         reportTemplateData: validTemplate,
         isManualMode: false,
       },
@@ -287,11 +287,16 @@ describe("LiquidationSettlementForm — Receipt Grid vs Form List", () => {
     expect(card.exists()).toBe(true);
     expect(wrapper.find('[data-testid="sbsi-report-editor"]').exists()).toBe(true);
 
+    const balanceError = wrapper.find('[data-testid="liquidation-balance-error"]');
+    expect(balanceError.exists()).toBe(true);
+    expect(balanceError.attributes("role")).toBe("alert");
+    expect(balanceError.text()).toContain("5,000.00");
+
     const submitBtn = wrapper.find("#submit-liquidation-btn");
-    expect(submitBtn.attributes("disabled")).toBeUndefined();
+    expect(submitBtn.attributes("disabled")).toBeDefined();
   });
 
-  it("disables submit in manual mode when variance > 0 and shortfallExplanation is empty", () => {
+  it("disables submit in manual mode when totalExpenseAmount < balance and allows submit when totalExpenseAmount >= balance without shortfallExplanation", async () => {
     const wrapper = mount(LiquidationSettlementForm, {
       props: {
         selectedAdvance: sampleAdvance,
@@ -299,7 +304,7 @@ describe("LiquidationSettlementForm — Receipt Grid vs Form List", () => {
         receipts: sampleReceipts,
         totalExpenseAmount: 1700,
         variance: 3300,
-        shortfallExplanation: "",
+        shortfallExplanation: "Unused funds returned.",
         reportAttachment: new File(["pdf"], "report.pdf", { type: "application/pdf" }),
         isManualMode: true,
       },
@@ -317,6 +322,15 @@ describe("LiquidationSettlementForm — Receipt Grid vs Form List", () => {
 
     const submitBtn = wrapper.find("#submit-liquidation-btn");
     expect(submitBtn.attributes("disabled")).toBeDefined();
+    expect(wrapper.find('[data-testid="liquidation-balance-error"]').exists()).toBe(true);
+
+    await wrapper.setProps({
+      totalExpenseAmount: 5000,
+      variance: 0,
+      shortfallExplanation: "",
+    });
+    expect(wrapper.find('[data-testid="liquidation-balance-error"]').exists()).toBe(false);
+    expect(submitBtn.attributes("disabled")).toBeUndefined();
   });
 
   it("does not clear template attachment on initial mount and guards standalone revise template/manual transitions", async () => {

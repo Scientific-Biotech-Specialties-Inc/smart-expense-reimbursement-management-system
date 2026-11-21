@@ -40,7 +40,7 @@
 
 - **AI-Powered OCR Receipt Extraction (`ocr-pipeline`):** Asynchronous extraction of vendor name, date, total amount, VAT amount, TIN, and invoice number using lightweight <= 1.5B parameter models + Tesseract OCR across both Reimbursements and Liquidations. Stores confidence score and flags manual verification if confidence is below 0.80.
 - **BIR VAT Classification:** Automated classification of receipts as VAT or NON-VAT based on Philippine BIR validation logic.
-- **Cash Advance & Liquidation Lifecycle:** Track cash disbursements, calculate variance (reimbursements or shortfalls), and handle settlement closure.
+- **Cash Advance & Liquidation Lifecycle:** Track cash disbursements, enforce liquidation expenses equal to or exceeding the current outstanding balance (including accrued penalties), track overpayment variance for reimbursement forwarding, and handle settlement closure.
 - **Revise / 3-Strike Rejection Workflow:** Returned submissions transition to `revise` status with incremented `revision_count`; submissions exceeding 3 revision cycles automatically transition to terminal `rejected`.
 - **Admin Password Verification:** Enforce mandatory password re-verification on all high-privilege approval, rejection, and disbursement actions.
 - **Daily Penalty Assessment:** Apply a strict 7-day grace period followed by a daily penalty (PHP 50.00/day) for unliquidated funds.
@@ -61,7 +61,7 @@
 
 1. **Reimbursement Submission:** User uploads receipt -> file stored in Supabase Bucket -> OCR queue job triggered -> `ocr-pipeline` processes receipt and sends callback -> duplicate check and VAT classification -> user confirms data and submits.
 2. **Cash Advance Request & Approval:** Employee requests advance -> routed based on active thresholds -> accounting manager approves (with password verification) -> finance team records disbursement reference -> advance status set to UNLIQUIDATED.
-3. **Liquidation & Settlement:** Employee submits liquidation report with receipt attachments scanned via `ocr-pipeline` -> system checks variance -> excess funds returned (or shortfall claimed) -> accounting audits and approves -> status set to LIQUIDATED.
+3. **Liquidation & Settlement:** Employee submits liquidation report with receipt attachments scanned via `ocr-pipeline` -> system enforces `total_expense_amount >= outstanding_balance` (blocking under-balance submissions and updates) and computes any overpayment variance -> accounting audits and approves -> status set to LIQUIDATED.
 4. **Revision & Rejection:** Admin returns claim for revision (`revise`) -> employee edits and resubmits -> if revision count exceeds 3, system automatically transitions status to terminal `rejected`.
 5. **Penalty Assessment:** Scheduled nightly job runs -> flags advances past 7-day grace -> computes and appends immutable penalty records.
 

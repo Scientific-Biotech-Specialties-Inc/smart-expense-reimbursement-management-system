@@ -51,6 +51,24 @@ class LiquidationController extends Controller
         return $advance ? $this->enrichmentService->enrich($advance, false) : null;
     }
 
+    private function assertExpenseMeetsBalance(float $expenseAmount, float $outstandingBalance): void
+    {
+        $expenseCents = (int) round($expenseAmount * 100);
+        $balanceCents = (int) round($outstandingBalance * 100);
+
+        if ($expenseCents < $balanceCents) {
+            throw ValidationException::withMessages([
+                'total_expense_amount' => [
+                    sprintf(
+                        'Total expense amount (PHP %s) must be equal to or greater than the outstanding balance (PHP %s).',
+                        number_format($expenseAmount, 2),
+                        number_format($outstandingBalance, 2)
+                    ),
+                ],
+            ]);
+        }
+    }
+
     /**
      * Update receipt metadata and replace line items for each liquidation receipt.
      *
@@ -457,24 +475,14 @@ class LiquidationController extends Controller
             $this->penaltySync->syncAdvance($advance, true);
             $advance->refresh();
 
+            // Snapshot the cash advance's current outstanding balance (principal + accrued penalties)
+            $currentOutstandingBalance = (float) ($advance->outstanding_balance ?? $advance->amount);
+
+            // Enforce: total expenses must equal or exceed the current outstanding balance
+            $this->assertExpenseMeetsBalance((float) $validated['total_expense_amount'], $currentOutstandingBalance);
+
             // Update each receipt in database with user-edited fields
             $receiptIds = $this->syncLiquidationReceipts($receiptsData);
-
-            // Snapshot the cash advance's current outstanding balance (principal + accrued penalties)
-            $currentOutstandingBalance = $advance->outstanding_balance ?? $advance->amount;
-
-            // Calculate variance based on the current balance, not original amount
-            $variance = $currentOutstandingBalance - $validated['total_expense_amount'];
-
-            // Enforce: shortfalls require an explanation
-            if ($variance > 0 && empty($validated['shortfall_explanation'])) {
-                return response()->json([
-                    'message' => 'Validation error.',
-                    'errors' => [
-                        'shortfall_explanation' => ['Shortfall explanation is required when total expense is less than the advanced amount.']
-                    ]
-                ], 422);
-            }
 
             // Handle Report Attachment Upload
             $reportFilePath = null;
@@ -771,6 +779,17 @@ class LiquidationController extends Controller
             $wasRevise = $liquidation->status === 'revise';
             $beforeState = $liquidation->toArray();
 
+            $advance = CashAdvance::find($liquidation->cash_advance_id);
+            if ($wasRevise && $advance) {
+                $this->penaltySync->syncAdvance($advance, true);
+                $advance->refresh();
+                $liquidation->outstanding_balance = $advance->outstanding_balance ?? $advance->amount;
+            }
+
+            $requiredBalance = (float) ($liquidation->outstanding_balance ?? $advance?->outstanding_balance ?? $advance?->amount ?? 0);
+            $effectiveExpense = (float) ($validated['total_expense_amount'] ?? $liquidation->total_expense_amount);
+            $this->assertExpenseMeetsBalance($effectiveExpense, $requiredBalance);
+
             // Handle receipts update
             if (isset($validated['receipts'])) {
                 $receiptsData = is_string($validated['receipts'])
@@ -803,12 +822,7 @@ class LiquidationController extends Controller
             }
 
             // Reset revise → pending on re-submission (rejected terminal stays rejected)
-            if ($liquidation->status === 'revise') {
-                if ($advance = CashAdvance::find($liquidation->cash_advance_id)) {
-                    $this->penaltySync->syncAdvance($advance, true);
-                    $advance->refresh();
-                    $liquidation->outstanding_balance = $advance->outstanding_balance ?? $advance->amount;
-                }
+            if ($wasRevise) {
                 $liquidation->status = 'pending';
             }
 

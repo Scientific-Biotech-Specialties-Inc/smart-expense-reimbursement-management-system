@@ -185,8 +185,8 @@ describe("LiquidationSettlementForm — revise Update button stays disabled unti
         selectedAdvance: {
           id: 12,
           purpose: "Site Visit",
-          amount: 2000,
-          balance: 2000,
+          amount: 1000,
+          balance: 1000,
           status: "signed",
           acknowledged_at: "2026-09-01",
         },
@@ -202,7 +202,7 @@ describe("LiquidationSettlementForm — revise Update button stays disabled unti
         isManualMode: false,
         shortfallExplanation: shortfallExplanation.value,
         totalExpenseAmount: 1000,
-        variance: 1000,
+        variance: 0,
       },
       global: {
         stubs: {
@@ -276,8 +276,8 @@ describe("LiquidationSettlementForm — revise Update button stays disabled unti
       id: 19,
       user_id: 5,
       purpose: "Provincial Deployment",
-      amount: 2000,
-      balance: 2000,
+      amount: 1000,
+      balance: 1000,
       status: "signed",
       acknowledged_at: "2026-09-02",
       disbursement: { disbursed_at: "2026-09-02" },
@@ -413,8 +413,8 @@ describe("LiquidationSettlementForm — revise Update button stays disabled unti
       id: 21,
       user_id: 5,
       purpose: "Manual Mode Audit",
-      amount: 2000,
-      balance: 2000,
+      amount: 1000,
+      balance: 1000,
       status: "signed",
       acknowledged_at: "2026-09-02",
       disbursement: { disbursed_at: "2026-09-02" },
@@ -507,8 +507,8 @@ describe("LiquidationSettlementForm — revise Update button stays disabled unti
         selectedAdvance: {
           id: 14,
           purpose: "Site Visit",
-          amount: 2000,
-          balance: 2000,
+          amount: 1000,
+          balance: 1000,
           status: "signed",
           acknowledged_at: "2026-09-01",
         },
@@ -525,7 +525,7 @@ describe("LiquidationSettlementForm — revise Update button stays disabled unti
         isManualMode: true,
         shortfallExplanation: "Returned balance via bank",
         totalExpenseAmount: 1000,
-        variance: 1000,
+        variance: 0,
       },
       global: {
         stubs: {
@@ -563,5 +563,51 @@ describe("LiquidationSettlementForm — revise Update button stays disabled unti
     await wrapper.setProps({ reportAttachment: null });
     await flushPromises();
     expect(submitBtn.attributes("disabled")).toBeDefined();
+  });
+
+  it("keeps Update button disabled in revise mode when totalExpenseAmount < balance even after editing", async () => {
+    const wrapper = mount(LiquidationSettlementForm, {
+      props: {
+        selectedAdvance: {
+          id: 22,
+          purpose: "Site Visit",
+          amount: 2000,
+          balance: 2000,
+          status: "signed",
+          acknowledged_at: "2026-09-01",
+        },
+        existingLiquidation: {
+          id: 80,
+          cash_advance_id: 22,
+          status: "revise",
+          admin_note: "Total receipts must match balance",
+        },
+        receipts: buildSampleReceipts(),
+        categories: categoriesState,
+        reportTemplateData: buildSampleTemplate(),
+        isManualMode: false,
+        shortfallExplanation: "Returning balance",
+        totalExpenseAmount: 1000,
+        variance: 1000,
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          BaseAuditTrail: true,
+          ReceiptImagePreview: true,
+          BaseReceiptDetailModal: true,
+          BaseSignaturePad: true,
+          SbsiReportPreviewModal: true,
+          ConfirmModal: true,
+        },
+      },
+    });
+    await flushPromises();
+
+    await wrapper.setProps({ shortfallExplanation: "Edited note" });
+    await flushPromises();
+
+    expect(wrapper.find("#submit-liquidation-btn").attributes("disabled")).toBeDefined();
+    expect(wrapper.find('[data-testid="liquidation-balance-error"]').exists()).toBe(true);
   });
 });

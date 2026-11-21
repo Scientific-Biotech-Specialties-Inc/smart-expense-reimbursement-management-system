@@ -211,7 +211,7 @@ class PenaltyLogicTest extends TestCase
         $this->assertEquals(5150.0, (float) $fetched['balance']);
         $this->assertEquals(150.0, (float) $fetched['penalties_total']);
 
-        // Submitting receipts equal only to requested amount (5000 < 5150) requires shortfall explanation
+        // Submitting receipts equal only to requested amount (5000 < 5150) is blocked even with shortfall_explanation
         $receipt = Receipt::create([
             'uploaded_by' => $this->employee->id,
             'file_path' => 'receipts/test_overdue_sync.png',
@@ -233,9 +233,10 @@ class PenaltyLogicTest extends TestCase
                 'total_amount' => 5000.00,
             ]],
             'total_expense_amount' => 5000.00,
+            'shortfall_explanation' => 'Principal covered, penalty excluded.',
         ]);
         $shortfallFail->assertStatus(422);
-        $shortfallFail->assertJsonValidationErrors(['shortfall_explanation']);
+        $shortfallFail->assertJsonValidationErrors(['total_expense_amount']);
 
         // Submitting overpayment (6000 > 5150) succeeds with balance=5150 and overpayment=850
         $receipt->update(['total_amount' => 6000.00]);

@@ -22,7 +22,11 @@ import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor
 import { useLiquidationStore } from "@/stores/liquidation";
 import { useReportExport } from "@/composables/useReportExport";
 import { formatPeso, formatDate } from "@/utils/formatters";
-import { sumPenaltyRecords } from "@/utils/liquidationPenalties";
+import {
+  sumPenaltyRecords,
+  resolveAdvanceBalance,
+  isExpenseBelowBalance,
+} from "@/utils/liquidationPenalties";
 import { apiFetch } from "@/utils/apiFetch";
 import { getFileUrl } from "@/utils/fileUtils";
 import { validateTemplateData } from "@/utils/sbsiReportTemplateUtils";
@@ -442,13 +446,20 @@ const penaltyDaysCount = computed(() => {
 });
 
 const totalAdvanceBalance = computed(() =>
-  Number(
-    props.selectedAdvance?.balance ??
-      props.selectedAdvance?.outstanding_balance ??
-      props.selectedAdvance?.amount ??
-      0,
-  ),
+  resolveAdvanceBalance(props.selectedAdvance),
 );
+
+const isBelowBalance = computed(
+  () =>
+    Boolean(props.selectedAdvance) &&
+    isExpenseBelowBalance(props.totalExpenseAmount, totalAdvanceBalance.value),
+);
+
+const shortfallAmount = computed(() => {
+  const expenseCents = Math.round(Number(props.totalExpenseAmount || 0) * 100);
+  const balanceCents = Math.round(totalAdvanceBalance.value * 100);
+  return Math.max(0, (balanceCents - expenseCents) / 100);
+});
 
 async function handleRemoveReceipt(receiptToRemove) {
   const updated = props.receipts.filter(
@@ -812,8 +823,7 @@ const normalizedViewReceipt = computed(() => {
         <div class="flex items-center justify-between">
           <label class="input-label !mb-0">
             Reviewer Note / Explanation
-            <span v-if="effectiveManualMode && variance > 0" class="text-danger ml-0.5">*</span>
-            <span v-else class="text-xs font-normal text-slate-400 ml-1">(Optional)</span>
+            <span class="text-xs font-normal text-slate-400 ml-1">(Optional)</span>
           </label>
         </div>
 
@@ -841,11 +851,7 @@ const normalizedViewReceipt = computed(() => {
               'pointer-events-none select-none cursor-not-allowed':
                 isFormDisabled,
             }"
-            :placeholder="
-              variance > 0
-                ? 'Optional reviewer note (auto-generated from the SBSI report if left blank)...'
-                : 'Provide an optional note for this liquidation...'
-            "
+            placeholder="Provide an optional note for this liquidation..."
           />
           <div
             class="flex items-center justify-end px-4 pb-3 pt-1 text-xs font-medium text-slate-400 select-none"
@@ -981,6 +987,23 @@ const normalizedViewReceipt = computed(() => {
       class="mt-4"
     />
 
+    <div
+      v-if="!isFormDisabled && receipts.length > 0 && isBelowBalance"
+      data-testid="liquidation-balance-error"
+      role="alert"
+      class="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3.5 text-sm text-red-700"
+    >
+      <AlertCircle class="h-4 w-4 shrink-0 mt-0.5 text-red-600" />
+      <div>
+        <p class="font-semibold">
+          Total expenses must be equal to or greater than the outstanding balance.
+        </p>
+        <p class="mt-0.5 text-xs text-red-600">
+          Current receipts total {{ formatPeso(totalExpenseAmount) }}, which is {{ formatPeso(shortfallAmount) }} short of the {{ formatPeso(totalAdvanceBalance) }} balance. Please attach additional receipts covering at least {{ formatPeso(totalAdvanceBalance) }} before submitting.
+        </p>
+      </div>
+    </div>
+
     <div class="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
       <BaseButton
         v-if="existingLiquidation && existingLiquidation.status === 'pending'"
@@ -1004,10 +1027,9 @@ const normalizedViewReceipt = computed(() => {
           hasIncompleteReceiptFields ||
           receipts.some((r) => r.ocrStatus === 'processing') ||
           totalExpenseAmount === 0 ||
+          isBelowBalance ||
           submitting ||
-          (effectiveManualMode
-            ? !localManualAttachment || (variance > 0 && !shortfallExplanation.trim())
-            : !isTemplateValid)
+          (effectiveManualMode ? !localManualAttachment : !isTemplateValid)
         "
         @click="$emit('submit-liquidation')"
       >
