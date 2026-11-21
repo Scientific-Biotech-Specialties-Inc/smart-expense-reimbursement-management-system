@@ -236,7 +236,7 @@ class CashAdvanceController extends Controller
 
         Gate::authorize('disburse', $advance);
 
-        if ($advance->status !== 'approved') {
+        if ($advance->status !== 'approved' || $advance->disbursement()->exists()) {
             return response()->json(['message' => 'Conflict. Cash advance is not in an approved state.'], 409);
         }
 

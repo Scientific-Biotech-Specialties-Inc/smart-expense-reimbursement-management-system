@@ -26,6 +26,22 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  title: {
+    type: String,
+    default: "Grant Reimbursement Payout",
+  },
+  confirmTitle: {
+    type: String,
+    default: "Confirm Payout Handover",
+  },
+  submitLabel: {
+    type: String,
+    default: "Submit Payout",
+  },
+  confirmLabel: {
+    type: String,
+    default: "Confirm & Grant",
+  },
 });
 
 const emit = defineEmits(["close", "confirm"]);
@@ -66,6 +82,10 @@ const isFormValid = computed(() => {
 const isProceedDisabled = computed(() => {
   return !password.value?.trim() || props.isSubmitting;
 });
+
+function pickValidDate(...candidates) {
+  return candidates.find((val) => val && val !== "—" && val !== "--") || null;
+}
 
 function handleClose() {
   isConfirmStep.value = false;
@@ -109,7 +129,7 @@ function handleConfirm() {
             </div>
             <div>
               <h3 class="font-heading text-base font-bold text-slate-800">
-                {{ isConfirmStep ? "Confirm Payout Handover" : "Grant Reimbursement Payout" }}
+                {{ isConfirmStep ? confirmTitle : title }}
               </h3>
               <p class="text-[11px] text-slate-500 font-medium">
                 Ref #{{ record?.id }} &bull; {{ formatAmount(record?.amount || 0, record?.currency || 'PHP') }}
@@ -134,13 +154,13 @@ function handleConfirm() {
           <div>
             <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date of Request</p>
             <p class="text-xs font-semibold text-slate-700 mt-0.5">
-              {{ formatDate(record?.date || record?.created_at) }}
+              {{ formatDate(pickValidDate(record?.date, record?.requested, record?.created_at)) }}
             </p>
           </div>
           <div>
             <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date of Approval</p>
             <p class="text-xs font-semibold text-slate-700 mt-0.5">
-              {{ formatDate(record?.approved_at || record?.updated_at) }}
+              {{ formatDate(pickValidDate(record?.approved_at, record?.approvedAt, record?.payout?.approved_at, record?.updated_at, record?.updatedAt)) }}
             </p>
           </div>
           <div>
@@ -158,7 +178,7 @@ function handleConfirm() {
           <div class="col-span-2 pt-2 border-t border-slate-200/60">
             <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Approved by</p>
             <p class="text-xs font-medium text-slate-700 mt-0.5">
-              {{ record?.approved_by || 'Approver' }}
+              {{ record?.approved_by || record?.approvedBy || record?.payout?.approved_by || 'Approver' }}
             </p>
           </div>
         </div>
@@ -228,7 +248,7 @@ function handleConfirm() {
             :disabled="!isFormValid || isSubmitting"
             @click="handleNext"
           >
-            Submit Payout
+            {{ submitLabel }}
           </BaseButton>
         </div>
       </template>
@@ -281,7 +301,7 @@ function handleConfirm() {
             :disabled="isProceedDisabled"
             @click="handleConfirm"
           >
-            {{ isSubmitting ? "Processing..." : "Confirm & Grant" }}
+            {{ isSubmitting ? "Processing..." : confirmLabel }}
           </BaseButton>
         </div>
       </template>

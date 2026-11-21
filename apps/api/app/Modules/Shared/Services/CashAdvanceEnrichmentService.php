@@ -11,9 +11,20 @@ use Carbon\Carbon;
  */
 class CashAdvanceEnrichmentService
 {
+    private const DISBURSED_PAYOUT_STATUSES = [
+        'disbursed',
+        'signed',
+        'unliquidated',
+        'under-review',
+        'incomplete',
+        'overdue',
+        'liquidated',
+        'settled',
+    ];
+
     /**
      * Enrich a CashAdvance model with penalties totals, aging, linked liquidation aliases,
-     * normalized status history, and balance fields.
+     * normalized status history, payout details, and balance fields.
      */
     public function enrich(CashAdvance $advance, bool $includeExtraRoadmapFields = false): CashAdvance
     {
@@ -87,7 +98,7 @@ class CashAdvanceEnrichmentService
         if ($includeExtraRoadmapFields) {
             $approvalHistory = collect();
             if ($advance->relationLoaded('approvalActions')) {
-                $approvalHistory = $advance->approvalActions->map(function ($a) {
+                $approvalHistory = $advance->getRelation('approvalActions')->map(function ($a) {
                     $approver = $a->relationLoaded('approver') ? $a->approver : null;
                     return [
                         'id' => $a->id,
@@ -102,6 +113,60 @@ class CashAdvanceEnrichmentService
             $advance->setAttribute('approval_actions', $approvalHistory);
             $advance->setAttribute('approvalActions', $approvalHistory);
             $advance->setAttribute('expected_disbursement_date', $advance->expected_disbursement_date);
+        }
+
+        $latestApproved = null;
+        if ($advance->relationLoaded('approvalActions')) {
+            $latestApproved = $advance->getRelation('approvalActions')
+                ->where('action', 'approved')
+                ->sortByDesc(fn ($action) => [
+                    $action->actioned_at?->getTimestamp() ?? $action->created_at?->getTimestamp() ?? 0,
+                    (int) $action->id,
+                ])
+                ->first();
+        }
+
+        $approvedBy = ($latestApproved && $latestApproved->relationLoaded('approver') && $latestApproved->approver)
+            ? $latestApproved->approver->name
+            : 'Approver';
+        $approvedAtRaw = $latestApproved
+            ? ($latestApproved->actioned_at ?? $latestApproved->created_at ?? $advance->updated_at)
+            : $advance->updated_at;
+        $approvedAt = $approvedAtRaw ? Carbon::parse($approvedAtRaw)->toIso8601String() : null;
+
+        $disbursement = $advance->relationLoaded('disbursement') ? $advance->getRelation('disbursement') : null;
+        $isDisbursedStatus = in_array($advance->status, self::DISBURSED_PAYOUT_STATUSES, true);
+
+        if ($latestApproved !== null || $disbursement !== null || $isDisbursedStatus || $advance->status === 'approved') {
+            $advance->setAttribute('approved_by', $approvedBy);
+            $advance->setAttribute('approved_at', $approvedAt);
+        }
+
+        if ($disbursement !== null || $isDisbursedStatus) {
+            $requestDateRaw = $advance->submitted_at ?? $advance->created_at;
+            $grantedAtRaw = $disbursement?->created_at ?? $disbursement?->disbursement_date ?? $advance->updated_at;
+            $grantedBy = $disbursement?->granted_by
+                ?: ($disbursement && $disbursement->relationLoaded('disbursedBy') && $disbursement->disbursedBy
+                    ? $disbursement->disbursedBy->name
+                    : null)
+                ?: 'Finance / Admin';
+
+            $advance->setAttribute('payout', [
+                'id' => $disbursement?->id ?? $advance->id,
+                'cash_advance_id' => $advance->id,
+                'request_date' => $requestDateRaw ? Carbon::parse($requestDateRaw)->toDateString() : null,
+                'approved_at' => $approvedAt,
+                'granted_at' => $grantedAtRaw ? Carbon::parse($grantedAtRaw)->toIso8601String() : null,
+                'approved_by' => $approvedBy,
+                'granted_by' => $grantedBy,
+                'payout_method' => $disbursement?->payout_method ?: $disbursement?->channel ?: 'Cash',
+                'payout_method_other' => $disbursement?->payout_method_other,
+                'reference_number' => $disbursement?->reference_number,
+                'amount' => $advance->amount,
+                'granter_signature' => $disbursement?->granter_signature,
+                'employee_signature' => $advance->signature,
+                'acknowledged_at' => $advance->acknowledged_at ? Carbon::parse($advance->acknowledged_at)->toIso8601String() : null,
+            ]);
         }
 
         $advance->setAttribute('balance', $advance->outstanding_balance !== null ? (float) $advance->outstanding_balance : (float) ($advance->amount ?? 0));
