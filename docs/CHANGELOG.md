@@ -6,6 +6,13 @@ Please refer to [**`DOC_CHANGELOG.md`**](DOC_CHANGELOG.md) for the complete vers
 
 ---
 
+## [Unreleased] - Nov 21, 2026
+
+### Changed
+- **Liquidation Minimum Balance Enforcement (`docs/SERMS.md`, `docs/PRD.md`, `apps/api`, `apps/web`):**
+  - Updated `docs/SERMS.md` and `docs/PRD.md` to mandate `total_expense_amount >= outstanding_balance` on liquidation submissions and edits (`422` validation error on `total_expense_amount` when below balance), replacing shortfall-permitted submission flow.
+  - Enforced the check in `LiquidationController@store` and `LiquidationController@update`, `LiquidationSettlementForm.vue` (button disable + inline `role="alert"`), `LiquidationsView.vue` (submit confirmation guard), and `useLiquidationSubmit.js`, with updated PHPUnit and Vitest suites.
+
 ## [Unreleased] - Nov 16, 2026
 
 ### Changed

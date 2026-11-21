@@ -112,7 +112,7 @@ class LiquidationLogicTest extends TestCase
         ]);
     }
 
-    public function test_submit_liquidation_requires_shortfall_explanation(): void
+    public function test_submit_liquidation_blocks_amount_less_than_outstanding_balance(): void
     {
         $receipt = Receipt::create([
             'uploaded_by' => $this->employee->id,
@@ -138,17 +138,51 @@ class LiquidationLogicTest extends TestCase
             'receipts' => [
                 [
                     'id' => $receipt->id,
-                    'vendor_name' => 'Original Vendor',
+                    'vendor_name' => 'Edited Vendor',
                     'transaction_date' => '2026-06-12',
                     'total_amount' => 3000.00,
                 ]
             ],
             'total_expense_amount' => 3000.00,
-            // shortfall_explanation is intentionally missing when variance is 2000
+            'shortfall_explanation' => 'Remaining cash to be returned later.',
         ]);
 
         $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['shortfall_explanation']);
+        $response->assertJsonValidationErrors(['total_expense_amount']);
+        $this->assertDatabaseCount('liquidations', 0);
+        $this->assertEquals('signed', $this->cashAdvance->fresh()->status);
+        $this->assertEquals('Original Vendor', $receipt->fresh()->vendor_name);
+    }
+
+    public function test_update_liquidation_blocks_amount_less_than_outstanding_balance(): void
+    {
+        $liquidation = Liquidation::create([
+            'cash_advance_id' => $this->cashAdvance->id,
+            'user_id' => $this->employee->id,
+            'status' => 'revise',
+            'reimbursement_ids' => [],
+            'total_expense_amount' => 5000.00,
+            'outstanding_balance' => 5000.00,
+        ]);
+
+        $token = $this->generateMockToken([
+            'email' => $this->employee->email,
+            'role' => $this->employee->role,
+            'first_name' => 'John',
+            'last_name' => 'Employee',
+        ]);
+
+        $response = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+        ])->putJson("/api/liquidations/{$liquidation->id}", [
+            'total_expense_amount' => 4500.00,
+            'shortfall_explanation' => 'Trying to lower amount during revision.',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['total_expense_amount']);
+        $this->assertEquals(5000.00, (float) $liquidation->fresh()->total_expense_amount);
+        $this->assertEquals('revise', $liquidation->fresh()->status);
     }
 
     public function test_audit_liquidation_approval_on_full_payment_sets_advance_to_liquidated(): void
@@ -278,8 +312,12 @@ class LiquidationLogicTest extends TestCase
 
     public function test_resubmission_is_allowed_on_incomplete_advance(): void
     {
-        // Set cash advance to incomplete (post-first-round approval with shortfall)
-        $this->cashAdvance->update(['status' => 'incomplete', 'acknowledged_at' => now()]);
+        // Set cash advance to incomplete (post-first-round approval with 2,000 remaining balance)
+        $this->cashAdvance->update([
+            'status' => 'incomplete',
+            'outstanding_balance' => 2000.00,
+            'acknowledged_at' => now(),
+        ]);
 
         $receipt = Receipt::create([
             'uploaded_by' => $this->employee->id,

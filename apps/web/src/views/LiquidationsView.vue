@@ -40,6 +40,8 @@ import { numberOrZero } from "@/utils/numbers";
 import {
   computePenaltyDaysPastGrace,
   sumPenaltyRecords,
+  resolveAdvanceBalance,
+  isExpenseBelowBalance,
 } from "@/utils/liquidationPenalties";
 import { getFileUrl } from "@/utils/fileUtils";
 import { firstFilePathField } from "@/utils/receiptUtils";
@@ -238,12 +240,19 @@ const hasIncompleteReceiptFields = computed(() => {
   });
 });
 
+const currentAdvanceBalance = computed(() =>
+  resolveAdvanceBalance(selectedAdvance.value),
+);
+
+const isExpenseBelowRequiredBalance = computed(
+  () =>
+    Boolean(selectedAdvance.value) &&
+    isExpenseBelowBalance(totalExpenseAmount.value, currentAdvanceBalance.value),
+);
+
 const variance = computed(() => {
   if (!selectedAdvance.value) return 0;
-  const currentBalance = numberOrZero(
-    selectedAdvance.value.balance ?? selectedAdvance.value.amount,
-  );
-  return currentBalance - totalExpenseAmount.value;
+  return currentAdvanceBalance.value - totalExpenseAmount.value;
 });
 
 const liquidationOutstandingBalance = computed(() =>
@@ -256,11 +265,7 @@ const liquidationStatus = computed(() => {
   return "Liquidated";
 });
 const overpaymentAmount = computed(() =>
-  Math.max(
-    totalExpenseAmount.value -
-      numberOrZero(selectedAdvance.value?.balance ?? selectedAdvance.value?.amount),
-    0,
-  ),
+  Math.max(totalExpenseAmount.value - currentAdvanceBalance.value, 0),
 );
 
 const { forwardOverpaymentToReimbursement } = useLiquidationForwarding(
@@ -1034,9 +1039,7 @@ const selectedAdvanceCanLiquidate = computed(() => {
 
 const showSubmitConfirmModal = ref(false);
 
-function promptSubmitLiquidation() {
-  if (settlementModalMode.value === "view") return;
-  if (isLiquidationUnchangedRevision.value) return;
+function canProceedWithLiquidationSubmission() {
   // Preview-only until acknowledged / Phase 2 — block submit with feedback
   if (!selectedAdvanceCanLiquidate.value) {
     addToast({
@@ -1045,8 +1048,25 @@ function promptSubmitLiquidation() {
         "Please acknowledge the cash advance (sign) before submitting a liquidation. Preview only until Phase 2.",
       type: "danger",
     });
-    return;
+    return false;
   }
+
+  if (isExpenseBelowRequiredBalance.value) {
+    addToast({
+      title: "Insufficient Liquidation Amount",
+      message: `Total expenses (${formatPeso(totalExpenseAmount.value)}) must be equal to or greater than the outstanding balance (${formatPeso(currentAdvanceBalance.value)}).`,
+      type: "danger",
+    });
+    return false;
+  }
+
+  return true;
+}
+
+function promptSubmitLiquidation() {
+  if (settlementModalMode.value === "view") return;
+  if (isLiquidationUnchangedRevision.value) return;
+  if (!canProceedWithLiquidationSubmission()) return;
   showSubmitConfirmModal.value = true;
 }
 
@@ -1061,16 +1081,7 @@ function handleCancelSubmit() {
 
 async function submitLiquidation() {
   if (isLiquidationUnchangedRevision.value) return;
-  // Preview-only until acknowledged / Phase 2 — block submit with feedback
-  if (!selectedAdvanceCanLiquidate.value) {
-    addToast({
-      title: "Acknowledgement Required",
-      message:
-        "Please acknowledge the cash advance (sign) before submitting a liquidation. Preview only until Phase 2.",
-      type: "danger",
-    });
-    return;
-  }
+  if (!canProceedWithLiquidationSubmission()) return;
   const isEditing = !!existingLiquidation.value;
   const success = await performSubmitLiquidation({
     receipts: receipts.value,

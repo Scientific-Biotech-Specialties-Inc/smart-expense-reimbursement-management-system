@@ -22,6 +22,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
 
+## [Unreleased] - Nov 21, 2026
+
+### Changed
+- **Liquidation Minimum Balance Enforcement (`docs/SERMS.md`, `docs/PRD.md`, `apps/api`, `apps/web`):**
+  - Updated `docs/SERMS.md` and `docs/PRD.md` to require `total_expense_amount >= outstanding_balance` (equal to or greater than the current penalty-inclusive balance) on liquidation submissions and updates, blocking under-balance submissions at both UI and API layers.
+  - **Backend (`LiquidationController.php`):** Added `assertExpenseMeetsBalance()` with cent-precision validation in both `store()` (post-penalty sync, pre-receipt mutation) and `update()` (covering `pending` and penalty-synced `revise` edits) returning HTTP `422` on `total_expense_amount`, and removed the prior `variance > 0` `shortfall_explanation` gate.
+  - **Frontend (`liquidationPenalties.js`, `LiquidationSettlementForm.vue`, `LiquidationsView.vue`, `useLiquidationSubmit.js`):** Extracted `resolveAdvanceBalance` and `isExpenseBelowBalance`, disabled `#submit-liquidation-btn` with an accessible inline `role="alert"` message (`data-testid="liquidation-balance-error"`) when expenses are below balance, guarded `promptSubmitLiquidation()` / `submitLiquidation()` in `LiquidationsView.vue`, and removed automatic shortfall note synthesis in `useLiquidationSubmit.js`.
+
 ## [Unreleased] - Nov 20, 2026
 
 ### Fixed

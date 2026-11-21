@@ -227,7 +227,7 @@ class RequestAuditTrailTest extends TestCase
             'file_type' => ['image/png'],
             'file_size_bytes' => [2048],
             'vendor_name' => 'Fuel Depot',
-            'total_amount' => 2800.00,
+            'total_amount' => 3000.00,
             'transaction_date' => '2026-10-26',
             'status' => 'pending',
         ]);
@@ -236,8 +236,7 @@ class RequestAuditTrailTest extends TestCase
             ->postJson('/api/liquidations', [
                 'cash_advance_id' => $advance->id,
                 'receipts' => json_encode([['id' => $receipt->id]]),
-                'total_expense_amount' => 2800.00,
-                'shortfall_explanation' => 'Remaining 200 returned.',
+                'total_expense_amount' => 3000.00,
             ]);
         $resLiq->assertStatus(210);
         $liqId = $resLiq->json('data.id');

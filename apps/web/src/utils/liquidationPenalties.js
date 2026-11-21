@@ -38,3 +38,30 @@ export function computePenaltyDaysPastGrace(dueDateValue, referenceDate = new Da
   const daysPastDue = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
   return Math.max(0, daysPastDue - GRACE_PERIOD_DAYS);
 }
+
+/**
+ * Resolve the authoritative outstanding balance for a cash advance (balance -> outstanding_balance -> amount).
+ *
+ * @param {{ balance?: number|string|null, outstanding_balance?: number|string|null, amount?: number|string|null }|null|undefined} advance
+ * @returns {number}
+ */
+export function resolveAdvanceBalance(advance) {
+  if (!advance) return 0;
+  const val = Number(advance.balance ?? advance.outstanding_balance ?? advance.amount ?? 0);
+  return Number.isFinite(val) ? val : 0;
+}
+
+/**
+ * Check at cent precision whether total expenses are strictly below the required advance balance.
+ *
+ * @param {number|string|null|undefined} expenseAmount
+ * @param {number|string|null|undefined} balanceAmount
+ * @returns {boolean}
+ */
+export function isExpenseBelowBalance(expenseAmount, balanceAmount) {
+  const expense = Number(expenseAmount);
+  const balance = Number(balanceAmount);
+  const expenseCents = Math.round((Number.isFinite(expense) ? expense : 0) * 100);
+  const balanceCents = Math.round((Number.isFinite(balance) ? balance : 0) * 100);
+  return expenseCents < balanceCents;
+}

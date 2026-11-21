@@ -185,8 +185,8 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
       {
         id: 10,
         purpose: "Site Inspection",
-        amount: 2000,
-        balance: 2000,
+        amount: 500,
+        balance: 500,
         status: "disbursed",
         acknowledgedAt: "2026-12-01",
         date: "2026-12-01",
@@ -240,8 +240,8 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
       {
         id: 12,
         purpose: "Travel",
-        amount: 2000,
-        balance: 2000,
+        amount: 500,
+        balance: 500,
         status: "signed",
         acknowledgedAt: "2026-12-01",
         date: "2026-12-01",
@@ -287,8 +287,8 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
       {
         id: 13,
         purpose: "Supplies",
-        amount: 2000,
-        balance: 2000,
+        amount: 500,
+        balance: 500,
         status: "signed",
         acknowledgedAt: "2026-12-01",
         date: "2026-12-01",
@@ -369,8 +369,8 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
       {
         id: 14,
         purpose: "Regional Audit",
-        amount: 2000,
-        balance: 2000,
+        amount: 500,
+        balance: 500,
         status: "disbursed",
         acknowledgedAt: "2026-12-01",
         date: "2026-12-01",
@@ -440,5 +440,77 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
     await wrapper.find('[data-testid="mode-template"]').trigger("click");
     await flushPromises();
     expect(submitBtn().attributes("disabled")).toBeDefined();
+  });
+
+  it("keeps Update button disabled and blocks submit confirmation when total expenses are less than balance", async () => {
+    mockAdvances.value = [
+      {
+        id: 15,
+        purpose: "Under-Balance Audit",
+        amount: 2000,
+        balance: 2000,
+        status: "signed",
+        acknowledgedAt: "2026-12-01",
+        date: "2026-12-01",
+        dueDate: "2026-12-30",
+      },
+    ];
+    mockSettlements.value = [
+      {
+        id: 206,
+        cash_advance_id: 15,
+        status: "revise",
+        admin_note: "Attach remaining receipts",
+        shortfall_explanation: "Initial note",
+        report_file_path: null,
+        report_template_data: {
+          type: "liquidation",
+          payTo: "Jane Employee",
+          department: "Operations",
+          date: "2026-12-01",
+          purpose: "Under-Balance Audit",
+          breakdownItems: [{ qty: 1, description: "Meals - Jollibee", amount: 500 }],
+          signatoryName: "Jane Employee",
+          signatorySignature: "",
+        },
+        receipts: [
+          {
+            id: 306,
+            vendor_name: "Jollibee",
+            transaction_date: "2026-12-01",
+            total_amount: 500,
+            vat_amount: 53.57,
+            tin: "123-456-789-000",
+            invoice_number: "INV-26",
+            expense_category_id: 1,
+            vat_classification: "vat",
+            file_path: "receipts/r6.jpg",
+          },
+        ],
+      },
+    ];
+
+    const wrapper = trackMount();
+    await flushPromises();
+    await openAction(wrapper, "Settle");
+
+    await wrapper.find("textarea").setValue("Updated note");
+    await flushPromises();
+
+    expect(wrapper.find("#submit-liquidation-btn").attributes("disabled")).toBeDefined();
+    expect(wrapper.find('[data-testid="liquidation-balance-error"]').exists()).toBe(true);
+
+    wrapper.findComponent(LiquidationSettlementForm).vm.$emit("submit-liquidation");
+    await flushPromises();
+
+    const modals = wrapper.findAllComponents({ name: "ConfirmModal" });
+    const submitModal = modals.find((m) => m.props("title") === "Submit Request");
+    expect(submitModal.props("isOpen")).toBe(false);
+    expect(mockAddToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Insufficient Liquidation Amount",
+        type: "danger",
+      }),
+    );
   });
 });
