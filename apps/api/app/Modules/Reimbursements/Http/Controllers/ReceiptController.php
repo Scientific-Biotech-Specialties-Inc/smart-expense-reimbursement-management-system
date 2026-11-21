@@ -8,11 +8,14 @@ use App\Modules\Reimbursements\Services\ReceiptService;
 use App\Modules\Reimbursements\Http\Requests\StoreReceiptRequest;
 use App\Modules\Reimbursements\Http\Requests\UpdateReceiptRequest;
 use App\Modules\Reimbursements\Http\Requests\ResubmitReceiptRequest;
+use App\Modules\Shared\Traits\HydratesSplitReceipts;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
 
 class ReceiptController extends Controller
 {
+    use HydratesSplitReceipts;
+
     protected ReceiptService $service;
 
     public function __construct(ReceiptService $service)
@@ -64,7 +67,7 @@ class ReceiptController extends Controller
             );
 
             return response()->json([
-                'data' => $receipt,
+                'data' => $this->hydrateSplitMetadata($receipt),
             ]);
         } catch (AuthorizationException $e) {
             return response()->json(['message' => $e->getMessage()], 403);

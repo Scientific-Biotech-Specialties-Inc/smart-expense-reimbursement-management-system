@@ -3,7 +3,11 @@ import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
 import {
   buildPrefilledReceiptDraft,
+  formatSplitReceiptsToastMessage,
+  hasSplitReceipts,
+  isDuplicateOcrResponse,
   markOcrReturnedAndGetMissingWarning,
+  resolveSplitSegmentIndices,
 } from "@/utils/receiptUtils";
 import { isOcrOfflineFailure } from "@/utils/ocrErrors";
 
@@ -65,18 +69,38 @@ export function useReceiptUploads(options = {}) {
 
   const pollTimers = {};
 
+  function isBlobUrlInUseElsewhere(url, targetReceipt) {
+    if (!url) return false;
+    return localReceipts.value.some((other) => {
+      if (other === targetReceipt) return false;
+      if (targetReceipt?.id != null && String(other.id) === String(targetReceipt.id)) {
+        return false;
+      }
+      if (other.thumbnail === url) return true;
+      return (
+        Array.isArray(other.images) &&
+        other.images.some((img) => (typeof img === "string" ? img : img?.url) === url)
+      );
+    });
+  }
+
   function cleanupReceiptResources(receipt) {
     if (!receipt) return;
     if (
       receipt.thumbnail?.startsWith("blob:") &&
-      typeof URL.revokeObjectURL === "function"
+      typeof URL.revokeObjectURL === "function" &&
+      !isBlobUrlInUseElsewhere(receipt.thumbnail, receipt)
     ) {
       URL.revokeObjectURL(receipt.thumbnail);
     }
     if (Array.isArray(receipt.images)) {
       receipt.images.forEach((img) => {
         const u = typeof img === "string" ? img : img?.url;
-        if (u?.startsWith("blob:") && typeof URL.revokeObjectURL === "function") {
+        if (
+          u?.startsWith("blob:") &&
+          typeof URL.revokeObjectURL === "function" &&
+          !isBlobUrlInUseElsewhere(u, receipt)
+        ) {
           URL.revokeObjectURL(u);
         }
       });
@@ -231,33 +255,105 @@ export function useReceiptUploads(options = {}) {
   }
 
   function checkIsDuplicateResponse(data) {
-    if (!data) return false;
-    if (
-      data.rejection_code === "duplicate" ||
-      data.rejectionCode === "duplicate" ||
-      data.is_duplicate ||
-      data.isDuplicate
-    ) {
-      return true;
+    return isDuplicateOcrResponse(data);
+  }
+
+  function buildSplitReceiptCard(payload, groupImages, currentItem) {
+    const firstImg = groupImages[0];
+    const firstImgUrl = typeof firstImg === "string" ? firstImg : firstImg?.url;
+    const fallbackUrl = Array.isArray(payload?.file_url)
+      ? payload.file_url[0]
+      : payload?.file_url;
+    const sourceFile =
+      (firstImg && typeof firstImg === "object" ? firstImg.file : null) ||
+      currentItem?.sourceFile ||
+      null;
+    const thumbnail = firstImgUrl || fallbackUrl || currentItem?.thumbnail || "";
+
+    const card = buildPrefilledReceiptDraft({
+      id: payload?.id,
+      file: sourceFile,
+      receiptData: payload,
+      thumbnail,
+    });
+    card.isUploading = false;
+    card.isProcessing = false;
+    card.sourceFile = sourceFile;
+    card.thumbnail = thumbnail;
+    if (groupImages.length > 1) {
+      card.isMultiReceipt = true;
+      card.images = groupImages;
+    } else {
+      card.isMultiReceipt = false;
     }
-    const reason = (
-      data.rejection_reason ||
-      data.rejectionReason ||
-      data.message ||
-      data.error ||
-      ""
-    ).toLowerCase();
-    if (reason.includes("duplicate")) return true;
-    if (data.errors) {
-      const errStr = JSON.stringify(data.errors).toLowerCase();
-      if (errStr.includes("duplicate")) return true;
+    return card;
+  }
+
+  function applySplitReceiptPayloads(index, data) {
+    const allPayloads = [data, ...data.split_receipts];
+    addToast({
+      message: formatSplitReceiptsToastMessage(allPayloads.length),
+      type: "info",
+    });
+
+    const currentItem = index !== -1 ? localReceipts.value[index] : null;
+    const sourceImages = Array.isArray(currentItem?.images)
+      ? currentItem.images
+      : [];
+    const segmentIndexGroups = resolveSplitSegmentIndices(
+      allPayloads,
+      sourceImages.length,
+    );
+
+    const builtCards = allPayloads.map((payload, groupIdx) => {
+      const indices = segmentIndexGroups[groupIdx] || [];
+      let groupImages = indices
+        .map((imgIdx) => sourceImages[imgIdx])
+        .filter(Boolean);
+      if (
+        groupImages.length === 0 &&
+        sourceImages.length === 0 &&
+        Array.isArray(payload?.file_url) &&
+        payload.file_url.length > 0
+      ) {
+        groupImages = payload.file_url;
+      }
+      return buildSplitReceiptCard(payload, groupImages, currentItem);
+    });
+
+    if (index !== -1) {
+      localReceipts.value.splice(index, 1, ...builtCards);
+    } else {
+      localReceipts.value.push(...builtCards);
     }
-    return false;
+
+    allPayloads.forEach((payload, groupIdx) => {
+      const targetCard = builtCards[groupIdx];
+      // Re-resolve current index by card reference/id because earlier purged rejections shift array indices.
+      const cardIdx = localReceipts.value.findIndex(
+        (r) =>
+          r === targetCard ||
+          (payload?.id != null && String(r.id) === String(payload.id)),
+      );
+      const pStatus = String(payload?.status || "").toLowerCase();
+      if (pStatus === "rejected" || pStatus === "failed") {
+        handleReceiptRejectionOrFailure({
+          index: cardIdx,
+          receiptId: payload?.id ?? targetCard.id,
+          file: targetCard.sourceFile || null,
+          payload,
+          isMultiSegment: Boolean(targetCard.isMultiReceipt),
+          segmentImages: targetCard.isMultiReceipt ? targetCard.images : null,
+        });
+      } else if (cardIdx !== -1) {
+        checkAndNotifyMissingFields(localReceipts.value[cardIdx]);
+      }
+    });
   }
 
   function startPolling(receiptId) {
     if (pollTimers[receiptId]) return;
-    pollTimers[receiptId] = setInterval(async () => {
+    const timer = setInterval(async () => {
       try {
         const headers = { Accept: "application/json" };
         if (authStore.token)
@@ -267,9 +363,11 @@ export function useReceiptUploads(options = {}) {
           `/api/serms/reimbursements/receipts/${receiptId}`,
           { headers },
         );
-        if (!res.ok) return;
+        if (!res.ok || pollTimers[receiptId] !== timer) return;
 
         const { data } = await res.json();
+        if (pollTimers[receiptId] !== timer) return;
+
         if (data.status !== "processing") {
           clearInterval(pollTimers[receiptId]);
           delete pollTimers[receiptId];
@@ -277,6 +375,11 @@ export function useReceiptUploads(options = {}) {
           const index = localReceipts.value.findIndex(
             (r) => String(r.id) === String(receiptId),
           );
+
+          if (hasSplitReceipts(data)) {
+            applySplitReceiptPayloads(index, data);
+            return;
+          }
 
           if (data.status === "rejected" || data.status === "failed") {
             const rejectedItem = index !== -1 ? localReceipts.value[index] : null;
@@ -314,6 +417,7 @@ export function useReceiptUploads(options = {}) {
         console.error("Polling error for receipt", receiptId, e);
       }
     }, 3000);
+    pollTimers[receiptId] = timer;
   }
 
   onMounted(() => {
@@ -464,11 +568,16 @@ export function useReceiptUploads(options = {}) {
   const submitWithForce = continueAnyway;
 
   async function submitSegments(files) {
-    if (!files || files.length < 2) return;
+    const fileArray = Array.from(files || []);
+    if (fileArray.length === 0) return;
+    if (fileArray.length === 1) {
+      return addReceiptFiles(fileArray);
+    }
 
+    const selectedFiles = fileArray.slice(0, 6);
     const tempId = `temp-seg-${Date.now()}`;
-    const firstFile = files[0];
-    const segmentImages = files.map((file, idx) => ({
+    const firstFile = selectedFiles[0];
+    const segmentImages = selectedFiles.map((file, idx) => ({
       id: `seg-${tempId}-${idx}`,
       url: URL.createObjectURL(file),
       name: file.name,
@@ -487,7 +596,7 @@ export function useReceiptUploads(options = {}) {
 
     try {
       const formData = new FormData();
-      files.forEach((file) => {
+      selectedFiles.forEach((file) => {
         formData.append("files[]", file);
       });
       if (isDraftMode) formData.append("is_draft", "1");
@@ -523,6 +632,11 @@ export function useReceiptUploads(options = {}) {
       const data = await res.json();
 
       const index = localReceipts.value.findIndex((r) => r.id === tempId);
+
+      if (hasSplitReceipts(data.data)) {
+        applySplitReceiptPayloads(index, data.data);
+        return;
+      }
 
       if (data.data?.status === "rejected" || data.data?.status === "failed") {
         handleReceiptRejectionOrFailure({

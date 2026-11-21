@@ -283,4 +283,50 @@ describe("ReceiptUploadModal — strict rejection gating and modal close", () =>
     await qualityModal.vm.$emit("close");
     expect(mockClearQualityRejection).toHaveBeenCalledTimes(1);
   });
+
+  it("enables Save Receipt and updates every expanded split receipt card on saveNewReceipt", async () => {
+    mockStore.updateReceipt.mockReset();
+    mockStore.updateReceipt.mockResolvedValue({ id: 1 });
+    const wrapper = mountModal();
+
+    mockLocalReceipts.ref.value = [
+      {
+        id: 21,
+        merchantName: "Store A",
+        date: "2026-11-20",
+        categoryId: 1,
+        amount: 120,
+        tax: "12.86",
+        vatClassification: "vat",
+        isUploading: false,
+        isProcessing: false,
+        isRejected: false,
+        status: "processed",
+      },
+      {
+        id: 22,
+        merchantName: "Store B",
+        date: "2026-11-21",
+        categoryId: 2,
+        amount: 240,
+        tax: "25.71",
+        vatClassification: "vat",
+        isUploading: false,
+        isProcessing: false,
+        isRejected: false,
+        status: "processed",
+      },
+    ];
+    await wrapper.vm.$nextTick();
+
+    const saveBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Save Receipt"));
+    expect(saveBtn.attributes("disabled")).toBeUndefined();
+
+    await saveBtn.trigger("click");
+    expect(mockStore.updateReceipt).toHaveBeenCalledTimes(2);
+    expect(mockStore.updateReceipt).toHaveBeenNthCalledWith(1, 21, expect.objectContaining({ vendor_name: "Store A" }));
+    expect(mockStore.updateReceipt).toHaveBeenNthCalledWith(2, 22, expect.objectContaining({ vendor_name: "Store B" }));
+  });
 });
