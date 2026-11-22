@@ -223,4 +223,20 @@ describe("ReimbursementFormView — SBSI Report Template Integration", () => {
     expect(wrapper.find('[data-testid="manual-file-name"]').text()).toBe("legacy-report.pdf");
     expect(wrapper.vm.reportTemplateData).toBeNull();
   });
+
+  it("keeps claim totalAmount receipt-backed while allowing editable breakdown rows and showing a non-blocking mismatch warning", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.find('[data-testid="field-purpose"]').setValue("Client site visit");
+    await wrapper.find('[data-testid="breakdown-add"]').trigger("click");
+    await wrapper.find('[data-testid="breakdown-description-1"]').setValue("Parking fee");
+    await wrapper.find('[data-testid="breakdown-amount-1"]').setValue(75);
+    await flushPromises();
+
+    expect(wrapper.vm.reportTemplateData.totalAmount).toBe(325);
+    expect(wrapper.vm.totalAmount).toBe(250);
+    expect(wrapper.find('[data-testid="breakdown-mismatch-warning"]').exists()).toBe(true);
+    expect(wrapper.find("button.btn-cta").attributes("disabled")).toBeUndefined();
+  });
 });

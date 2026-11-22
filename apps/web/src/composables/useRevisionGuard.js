@@ -137,10 +137,13 @@ export function serializeTemplateData(templateData) {
     return templateData ?? null;
   }
   const cloned = { ...templateData };
+  if (Array.isArray(cloned.removedSourceIds) && cloned.removedSourceIds.length === 0) {
+    delete cloned.removedSourceIds;
+  }
   if (Array.isArray(cloned.breakdownItems)) {
     cloned.breakdownItems = cloned.breakdownItems.map((item) => {
       if (!item || typeof item !== "object") return item;
-      const { descriptionEdited: _ignored, ...rest } = item;
+      const { descriptionEdited: _ignoredDesc, amountEdited: _ignoredAmt, ...rest } = item;
       return rest;
     });
   }
