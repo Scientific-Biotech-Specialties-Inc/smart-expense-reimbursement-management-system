@@ -726,4 +726,54 @@ describe("useReceiptStore", () => {
     expect(store.receipts[1].status).toBe("failed");
     expect(store.receipts[1].complianceStatus).toBe("failed");
   });
+
+  it("maps subtotal, eventType, and multi-segment images in mapReceipt", async () => {
+    const multiSegmentReceipt = {
+      ...arrayFieldsReceipt,
+      id: 44,
+      subtotal: "1116.07",
+      event_type: "Client Meeting",
+      file_url: [
+        "https://storage.example.com/receipts/seg-1.jpg",
+        "https://storage.example.com/receipts/seg-2.jpg",
+      ],
+      file_path: ["receipts/seg-1.jpg", "receipts/seg-2.jpg"],
+    };
+    const singleReceiptWithoutOptionalFields = {
+      ...scalarFieldsReceipt,
+      id: 45,
+      subtotal: null,
+      event_type: null,
+    };
+
+    apiFetch.mockResolvedValue(
+      okJson([multiSegmentReceipt, singleReceiptWithoutOptionalFields], 2),
+    );
+
+    const store = useReceiptStore();
+    await store.fetchAll();
+
+    const mappedMulti = store.receipts[0];
+    expect(mappedMulti.subtotal).toBe(1116.07);
+    expect(mappedMulti.eventType).toBe("Client Meeting");
+    expect(mappedMulti.isMultiReceipt).toBe(true);
+    expect(mappedMulti.images).toEqual([
+      {
+        id: "seg-44-0",
+        url: "https://storage.example.com/receipts/seg-1.jpg",
+        name: "Segment 1",
+      },
+      {
+        id: "seg-44-1",
+        url: "https://storage.example.com/receipts/seg-2.jpg",
+        name: "Segment 2",
+      },
+    ]);
+
+    const mappedSingle = store.receipts[1];
+    expect(mappedSingle.subtotal).toBeNull();
+    expect(mappedSingle.eventType).toBe("");
+    expect(mappedSingle.isMultiReceipt).toBe(false);
+    expect(mappedSingle.images).toBeNull();
+  });
 });

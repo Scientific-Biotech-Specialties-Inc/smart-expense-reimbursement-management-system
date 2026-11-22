@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use Tests\TestCase;
 use App\Modules\Users\Models\User;
+use App\Modules\Reimbursements\Models\ExpenseCategory;
 use App\Modules\Reimbursements\Models\Receipt;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -160,6 +161,161 @@ class ReceiptResubmitOcrTest extends TestCase
 
         // Metadata-only edit must not dispatch OCR.
         Queue::assertNotPushed(DispatchReceiptToAiService::class);
+    }
+
+    public function test_resubmit_persists_full_metadata_items_and_logs_audit_entry(): void
+    {
+        $category = ExpenseCategory::create(['name' => 'Meals']);
+        $receipt = Receipt::create([
+            'uploaded_by' => $this->employee->id,
+            'file_path' => ['receipts/resubmit_full.png'],
+            'file_hash' => [hash('sha256', 'resubmit_full')],
+            'file_type' => ['png'],
+            'file_size_bytes' => [1024],
+            'vendor_name' => 'Blurry Bistro',
+            'status' => 'flagged',
+            'ocr_flagged' => true,
+        ]);
+
+        Queue::fake();
+
+        $response = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->postJson("/api/reimbursements/receipts/{$receipt->id}/resubmit", [
+                'expense_category_id' => $category->id,
+                'event_type' => 'Client Meeting',
+                'vendor_name' => 'Clear Bistro Corp.',
+                'transaction_date' => '2026-11-20',
+                'tin' => '123-456-789-000',
+                'invoice_number' => 'INV-2026-9901',
+                'location' => 'Makati City',
+                'currency' => 'USD',
+                'vat_classification' => 'VAT',
+                'discount_type' => 'promo',
+                'discount_amount' => 25.00,
+                'subtotal' => 200.00,
+                'vat_amount' => 24.00,
+                'total_amount' => 224.00,
+                'items' => [
+                    ['name' => 'Team Lunch', 'quantity' => 2, 'price' => 112.00],
+                    ['name' => 'Complimentary Water', 'quantity' => 1, 'price' => 0],
+                ],
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonPath('data.status', 'processed');
+        $response->assertJsonPath('data.ocr_flagged', false);
+        $response->assertJsonPath('data.subtotal', '200.00');
+        $response->assertJsonPath('data.currency', 'USD');
+        $response->assertJsonPath('data.location', 'Makati City');
+        $response->assertJsonPath('data.event_type', 'Client Meeting');
+        $response->assertJsonPath('data.discount_type', 'promo');
+        $response->assertJsonPath('data.discount_amount', '25.00');
+        $response->assertJsonPath('data.vat_classification', 'vat');
+        $response->assertJsonPath('data.vat_amount', '24.00');
+        $response->assertJsonPath('data.total_amount', '224.00');
+        $this->assertCount(2, $response->json('data.items'));
+
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receipt->id,
+            'status' => 'processed',
+            'ocr_flagged' => false,
+            'expense_category_id' => $category->id,
+            'event_type' => 'Client Meeting',
+            'vendor_name' => 'Clear Bistro Corp.',
+            'location' => 'Makati City',
+            'currency' => 'USD',
+            'vat_classification' => 'vat',
+            'discount_type' => 'promo',
+            'discount_amount' => '25.00',
+            'subtotal' => '200.00',
+            'vat_amount' => '24.00',
+            'total_amount' => '224.00',
+        ]);
+
+        $this->assertDatabaseHas('receipt_items', [
+            'receipt_id' => $receipt->id,
+            'name' => 'Team Lunch',
+            'quantity' => 2,
+            'price' => '112.00',
+        ]);
+        $this->assertDatabaseHas('receipt_items', [
+            'receipt_id' => $receipt->id,
+            'name' => 'Complimentary Water',
+            'quantity' => 1,
+            'price' => '0.00',
+        ]);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'actor_id' => $this->employee->id,
+            'actor_role' => 'employee',
+            'action_type' => 'RECEIPT_UPDATED',
+            'entity_type' => 'receipt',
+            'entity_id' => $receipt->id,
+        ]);
+
+        Queue::assertNotPushed(DispatchReceiptToAiService::class);
+    }
+
+    public function test_resubmit_allows_null_event_type_and_rejects_negative_subtotal_or_item_price(): void
+    {
+        $receipt = Receipt::create([
+            'uploaded_by' => $this->employee->id,
+            'file_path' => ['receipts/resubmit_validation.png'],
+            'file_hash' => [hash('sha256', 'resubmit_validation')],
+            'file_type' => ['png'],
+            'file_size_bytes' => [1024],
+            'status' => 'flagged',
+            'ocr_flagged' => true,
+        ]);
+
+        $invalidResponse = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->postJson("/api/reimbursements/receipts/{$receipt->id}/resubmit", [
+                'subtotal' => -10,
+                'items' => [
+                    ['name' => 'Invalid Item', 'quantity' => 1, 'price' => -5],
+                ],
+            ]);
+
+        $invalidResponse->assertStatus(422);
+        $invalidResponse->assertJsonValidationErrors(['subtotal', 'items.0.price']);
+
+        $validResponse = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->postJson("/api/reimbursements/receipts/{$receipt->id}/resubmit", [
+                'event_type' => null,
+                'subtotal' => 100.00,
+                'currency' => 'PHP',
+                'total_amount' => 112.00,
+            ]);
+
+        $validResponse->assertStatus(200);
+        $validResponse->assertJsonPath('data.event_type', null);
+        $validResponse->assertJsonPath('data.subtotal', '100.00');
+    }
+
+    public function test_store_receipt_accepts_event_type(): void
+    {
+        $file = UploadedFile::fake()->image('event_store.png', 200, 200);
+
+        $response = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->postJson('/api/reimbursements/receipts', [
+                'file' => $file,
+                'vendor_name' => 'Event Vendor',
+                'event_type' => 'Team Offsite',
+                'subtotal' => 100.00,
+                'vat_amount' => 12.00,
+                'total_amount' => 112.00,
+                'currency' => 'PHP',
+            ]);
+
+        $response->assertStatus(201);
     }
 
     public function test_store_receipt_with_existing_file_hash_is_rejected_and_skips_ocr(): void

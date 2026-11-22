@@ -30,6 +30,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  requireEventType: {
+    type: Boolean,
+    default: true,
+  },
   disabled: {
     type: Boolean,
     default: false,
@@ -198,8 +202,8 @@ function removeReceiptItem(receipt, index) {
 </script>
 
 <template>
-  <section class="card p-6">
-    <div class="flex items-center justify-between mb-5">
+  <section class="card p-4 sm:p-6">
+    <div class="flex items-center justify-between mb-4 sm:mb-5">
       <h2
         class="text-lg font-bold text-primary"
       >
@@ -207,25 +211,25 @@ function removeReceiptItem(receipt, index) {
       </h2>
     </div>
     <!-- One block per receipt -->
-    <div class="flex flex-col gap-8">
+    <div class="flex flex-col gap-6 sm:gap-8">
       <div
         v-for="(receipt, idx) in receipts"
         :key="receipt.id"
-        class="border border-accent/15 rounded-xl p-6 bg-accent-50/20"
+        class="border border-accent/15 rounded-xl p-4 sm:p-6 bg-accent-50/20 min-w-0"
       >
         <!-- Receipt number badge -->
-        <div class="flex items-center gap-2 mb-4">
+        <div class="flex items-center gap-2 mb-4 min-w-0">
           <span
-            class="w-6 h-6 rounded-full bg-primary text-white text-[11px] font-bold flex items-center justify-center"
+            class="w-6 h-6 shrink-0 rounded-full bg-primary text-white text-[11px] font-bold flex items-center justify-center"
             >{{ idx + 1 }}</span
           >
           <span
-            class="text-xs font-bold text-primary"
+            class="text-xs font-bold text-primary truncate min-w-0"
             >{{ cleanName(receipt.fileName) }}</span
           >
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8">
           <!-- Left: Image Preview -->
           <div class="lg:col-span-4">
             <ReceiptImagePreview
@@ -244,9 +248,9 @@ function removeReceiptItem(receipt, index) {
           </div>
 
           <!-- Right: Extracted Fields -->
-          <div class="lg:col-span-8 flex flex-col gap-4">
+          <div class="lg:col-span-8 flex flex-col gap-4 min-w-0">
             <!-- Row 1: Invoice + Date -->
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div class="input-wrapper">
                 <label class="input-label">Invoice Number <span class="text-danger">*</span></label>
                 <input
@@ -394,7 +398,7 @@ function removeReceiptItem(receipt, index) {
               <!-- Type of Event -->
               <div class="input-wrapper">
                 <label class="input-label"
-                  >Type of Event <span class="text-danger">*</span></label
+                  >Type of Event <span v-if="requireEventType" class="text-danger">*</span></label
                 >
                 <div class="relative">
                   <select
@@ -402,13 +406,13 @@ function removeReceiptItem(receipt, index) {
                     class="input appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     :class="{
                       'cursor-not-allowed bg-slate-100 text-slate-500': disabled,
-                      'input-error !border-danger focus:!border-danger': isReceiptFieldMissing(receipt, 'eventType'),
+                      'input-error !border-danger focus:!border-danger': requireEventType && isReceiptFieldMissing(receipt, 'eventType'),
                     }"
                     v-model="receipt.eventType"
                     :disabled="disabled || receipt.isUploading || receipt.isProcessing"
                     @change="syncOcrData(receipt)"
                   >
-                    <option value="" disabled>Select type of event</option>
+                    <option value="" :disabled="requireEventType">Select type of event</option>
                     <option
                       v-for="eventType in REIMBURSEMENT_EVENT_TYPES"
                       :key="eventType"
@@ -421,7 +425,7 @@ function removeReceiptItem(receipt, index) {
                     class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
                   />
                 </div>
-                <span v-if="isReceiptFieldMissing(receipt, 'eventType')" class="text-[10px] text-danger font-medium mt-0.5">
+                <span v-if="requireEventType && isReceiptFieldMissing(receipt, 'eventType')" class="text-[10px] text-danger font-medium mt-0.5">
                   Type of event is required
                 </span>
               </div>
@@ -433,9 +437,9 @@ function removeReceiptItem(receipt, index) {
                 >Order Items <span class="text-danger">*</span></label
               >
               <div
-                class="border border-slate-100 rounded-lg overflow-hidden shadow-sm bg-white"
+                class="border border-slate-100 rounded-lg overflow-x-auto shadow-sm bg-white"
               >
-                <table class="w-full text-left border-collapse table-fixed">
+                <table class="w-full min-w-[420px] sm:min-w-0 text-left border-collapse table-fixed">
                   <thead
                     class="bg-slate-50 text-[11px] text-slate-500 uppercase"
                   >

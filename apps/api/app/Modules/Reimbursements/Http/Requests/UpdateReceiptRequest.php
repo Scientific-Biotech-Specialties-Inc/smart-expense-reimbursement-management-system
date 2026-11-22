@@ -40,6 +40,7 @@ class UpdateReceiptRequest extends FormRequest
 
             // Owner-editable OCR correction fields.
             'expense_category_id' => 'nullable|exists:expense_categories,id',
+            'event_type' => 'nullable|string|max:100',
             'vendor_name' => 'nullable|string|max:255',
             'transaction_date' => 'nullable|date',
             'total_amount' => 'nullable|numeric|min:0',

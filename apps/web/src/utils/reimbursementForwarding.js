@@ -70,6 +70,11 @@ export function mapReceiptToReimbursement(receipt) {
     vatClassification,
   );
 
+  const resolvedSubtotal =
+    receipt.subtotal != null && receipt.subtotal !== ""
+      ? Number(receipt.subtotal).toFixed(2)
+      : amounts.subtotal.toFixed(2);
+
   return {
     sourceExpenseId: receipt.id,
     id: receipt.dbId,
@@ -78,13 +83,14 @@ export function mapReceiptToReimbursement(receipt) {
     merchantName: receipt.vendorName || cleanName(receipt.fileName || ""),
     date: receipt.date,
     amount: amounts.gross,
-    subtotal: amounts.subtotal.toFixed(2),
+    subtotal: resolvedSubtotal,
     tax: amounts.vat.toFixed(2),
     vatClassification: amounts.vatClassification,
     tin: receipt.tin || tinFor({ id: receipt.dbId || receipt.id }),
     invoiceNumber: receipt.invoiceNumber || receipt.dbId || receipt.id,
     category: receipt.category || "Uncategorized",
     categoryId: receipt.categoryId || null,
+    eventType: receipt.eventType || "",
     location: receipt.location || "",
     thumbnail: receipt.thumbnail,
     items,
