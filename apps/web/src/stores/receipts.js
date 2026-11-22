@@ -551,41 +551,38 @@ export const useReceiptStore = defineStore("receipts", () => {
   async function updateReceipt(id, payload) {
     isSaving.value = true;
 
-    const formData = new FormData();
+    // Send JSON on PATCH: PHP does not parse multipart/form-data on PATCH requests,
+    // which caused FormData payloads (including is_draft = false) to arrive empty.
     // Skip null/undefined AND empty strings: the backend's `numeric`/`date`/
     // `exists` rules reject "" (e.g. an unextracted total_amount), and we want
     // to leave those columns untouched rather than overwrite them with blanks.
-    const shouldAppend = (v) => v != null && v !== "";
-    if (shouldAppend(payload.expense_category_id))
-      formData.append("expense_category_id", payload.expense_category_id);
-    if (shouldAppend(payload.vendor_name))
-      formData.append("vendor_name", payload.vendor_name);
-    if (shouldAppend(payload.transaction_date))
-      formData.append("transaction_date", payload.transaction_date);
-    if (shouldAppend(payload.total_amount))
-      formData.append("total_amount", payload.total_amount);
-    if (shouldAppend(payload.vat_amount))
-      formData.append("vat_amount", payload.vat_amount);
-    if (shouldAppend(payload.discount_amount))
-      formData.append("discount_amount", payload.discount_amount);
-    if (shouldAppend(payload.discount_type))
-      formData.append("discount_type", payload.discount_type);
-    if (shouldAppend(payload.tin)) formData.append("tin", payload.tin);
-    if (shouldAppend(payload.invoice_number))
-      formData.append("invoice_number", payload.invoice_number);
-    if (shouldAppend(payload.vat_classification))
-      formData.append("vat_classification", payload.vat_classification);
-    if (shouldAppend(payload.currency))
-      formData.append("currency", payload.currency);
-    if (shouldAppend(payload.location))
-      formData.append("location", payload.location);
-    if (shouldAppend(payload.status))
-      formData.append("status", payload.status);
+    const body = {};
+    const shouldInclude = (v) => v != null && v !== "";
+    const scalarFields = [
+      "expense_category_id",
+      "vendor_name",
+      "transaction_date",
+      "total_amount",
+      "vat_amount",
+      "discount_amount",
+      "discount_type",
+      "tin",
+      "invoice_number",
+      "vat_classification",
+      "currency",
+      "location",
+      "status",
+    ];
+    for (const field of scalarFields) {
+      if (shouldInclude(payload[field])) {
+        body[field] = payload[field];
+      }
+    }
     if (payload.is_draft !== undefined && payload.is_draft !== null) {
-      formData.append("is_draft", payload.is_draft ? "1" : "0");
+      body.is_draft = Boolean(payload.is_draft);
     }
     if (payload.items && Array.isArray(payload.items)) {
-      formData.append("items", JSON.stringify(payload.items));
+      body.items = payload.items;
     }
 
     try {
@@ -594,7 +591,7 @@ export const useReceiptStore = defineStore("receipts", () => {
         {
           method: "PATCH",
           credentials: "include",
-          body: formData,
+          body: JSON.stringify(body),
         },
       );
 

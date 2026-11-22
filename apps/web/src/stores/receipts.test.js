@@ -277,7 +277,7 @@ describe("useReceiptStore", () => {
     ).rejects.toThrow("Validation failed");
   });
 
-  it("appends status to the FormData when present in updateReceipt payload", async () => {
+  it("sends JSON payload (including status and is_draft) in updateReceipt PATCH", async () => {
     apiFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -307,10 +307,12 @@ describe("useReceiptStore", () => {
     expect(apiFetch).toHaveBeenCalledTimes(1);
     const [, opts] = apiFetch.mock.calls[0];
     expect(opts.method).toBe("PATCH");
-    expect(opts.body).toBeInstanceOf(FormData);
-    expect(opts.body.get("status")).toBe("processed");
-    expect(opts.body.get("vendor_name")).toBe("Updated Vendor");
-    expect(opts.body.get("is_draft")).toBe("0");
+    expect(typeof opts.body).toBe("string");
+    expect(JSON.parse(opts.body)).toEqual({
+      vendor_name: "Updated Vendor",
+      status: "processed",
+      is_draft: false,
+    });
   });
 
   it("orders visibleReceipts newest-uploaded-first (created_at desc)", async () => {

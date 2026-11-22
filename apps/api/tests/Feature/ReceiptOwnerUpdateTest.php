@@ -468,4 +468,40 @@ class ReceiptOwnerUpdateTest extends TestCase
             'price' => '100.00',
         ]);
     }
+
+    public function test_owner_can_commit_draft_receipt_and_see_it_in_my_expense_list(): void
+    {
+        $receipt = Receipt::create([
+            'uploaded_by' => $this->employee->id,
+            'file_path' => ['receipts/draft_upload.png'],
+            'file_hash' => [str_repeat('f', 64)],
+            'file_type' => ['png'],
+            'file_size_bytes' => [1024],
+            'status' => 'processing',
+            'is_draft' => true,
+        ]);
+
+        // Draft receipt should not appear in My Expense listing yet.
+        $beforeList = $this->withoutMiddleware(AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->getJson('/api/reimbursements/receipts?scope=mine');
+        $beforeList->assertStatus(200);
+        $this->assertCount(0, $beforeList->json('data'));
+
+        // Committing via JSON PATCH with is_draft = false makes it visible.
+        $patchResponse = $this->patchAs($this->employee, $receipt->id, [
+            'expense_category_id' => $this->category->id,
+            'transaction_date' => '2026-11-22',
+            'is_draft' => false,
+        ]);
+        $patchResponse->assertStatus(200)
+            ->assertJsonPath('data.is_draft', false);
+
+        $afterList = $this->withoutMiddleware(AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->getJson('/api/reimbursements/receipts?scope=mine');
+        $afterList->assertStatus(200);
+        $this->assertCount(1, $afterList->json('data'));
+        $this->assertSame($receipt->id, $afterList->json('data.0.id'));
+    }
 }
