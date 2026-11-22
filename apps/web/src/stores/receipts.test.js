@@ -695,4 +695,35 @@ describe("useReceiptStore", () => {
       expect(store.receipts[0].isDeleted).toBe(false);
     });
   });
+
+  it("preserves flagged and failed backend statuses even when ocr_flagged is true or score is below 0.75", async () => {
+    const flaggedReceipt = {
+      ...arrayFieldsReceipt,
+      id: 32,
+      vendor_name: "Ma & Pa’s Bake Shop",
+      transaction_date: "2018-10-09",
+      total_amount: "20.00",
+      invoice_number: "234234",
+      status: "flagged",
+      ocr_flagged: true,
+      ocr_confidence_score: "0.50",
+    };
+    const failedReceipt = {
+      ...arrayFieldsReceipt,
+      id: 33,
+      status: "failed",
+      ocr_flagged: true,
+      ocr_confidence_score: "0.00",
+    };
+
+    apiFetch.mockResolvedValue(okJson([flaggedReceipt, failedReceipt], 2));
+
+    const store = useReceiptStore();
+    await store.fetchAll();
+
+    expect(store.receipts[0].status).toBe("flagged");
+    expect(store.receipts[0].complianceStatus).toBe("flagged");
+    expect(store.receipts[1].status).toBe("failed");
+    expect(store.receipts[1].complianceStatus).toBe("failed");
+  });
 });
