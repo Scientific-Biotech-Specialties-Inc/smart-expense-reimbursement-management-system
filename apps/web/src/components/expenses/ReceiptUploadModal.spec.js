@@ -26,10 +26,20 @@ vi.mock("@/composables/useToast", () => ({
   useToast: () => ({ addToast: vi.fn() }),
 }));
 
-const { mockLocalReceipts, mockQualityRejection, mockClearQualityRejection } = vi.hoisted(() => ({
+const {
+  mockLocalReceipts,
+  mockQualityRejection,
+  mockClearQualityRejection,
+  mockClearDraftReceipts,
+  mockAbortSessionReceipts,
+  mockHandleConfirmLeave,
+} = vi.hoisted(() => ({
   mockLocalReceipts: { ref: null },
   mockQualityRejection: { ref: null },
   mockClearQualityRejection: vi.fn(),
+  mockClearDraftReceipts: vi.fn(),
+  mockAbortSessionReceipts: vi.fn(),
+  mockHandleConfirmLeave: vi.fn(),
 }));
 
 vi.mock("@/composables/reimbursements/useReceiptUploads", async () => {
@@ -45,7 +55,8 @@ vi.mock("@/composables/reimbursements/useReceiptUploads", async () => {
       handleReceiptSelect: vi.fn(),
       addReceiptFiles: vi.fn(),
       removeReceipt: vi.fn(),
-      clearDraftReceipts: vi.fn(),
+      clearDraftReceipts: mockClearDraftReceipts,
+      abortSessionReceipts: mockAbortSessionReceipts,
       qualityRejection: mockQualityRejection.ref,
       clearQualityRejection: mockClearQualityRejection,
       showSegmentedUpload: vueRef(false),
@@ -58,7 +69,7 @@ vi.mock("@/composables/reimbursements/useReceiptUploads", async () => {
 vi.mock("@/composables/useUnsavedChanges", () => ({
   useUnsavedChanges: () => ({
     showConfirmModal: false,
-    handleConfirmLeave: vi.fn(),
+    handleConfirmLeave: mockHandleConfirmLeave,
     handleCancelLeave: vi.fn(),
     dismissWithConfirm: (cb) => cb(),
   }),
@@ -328,5 +339,77 @@ describe("ReceiptUploadModal — strict rejection gating and modal close", () =>
     expect(mockStore.updateReceipt).toHaveBeenCalledTimes(2);
     expect(mockStore.updateReceipt).toHaveBeenNthCalledWith(1, 21, expect.objectContaining({ vendor_name: "Store A" }));
     expect(mockStore.updateReceipt).toHaveBeenNthCalledWith(2, 22, expect.objectContaining({ vendor_name: "Store B" }));
+  });
+
+  it("aborts and deletes backend draft receipts when discarding/closing without saving", async () => {
+    mockAbortSessionReceipts.mockReset();
+    mockClearDraftReceipts.mockReset();
+    const wrapper = mountModal();
+
+    mockLocalReceipts.ref.value = [
+      {
+        id: 42,
+        date: "2026-11-22",
+        categoryId: 1,
+        isUploading: false,
+        isProcessing: false,
+        isRejected: false,
+        status: "processed",
+      },
+    ];
+    await wrapper.vm.$nextTick();
+
+    const discardBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Discard All"));
+    await discardBtn.trigger("click");
+
+    expect(mockAbortSessionReceipts).toHaveBeenCalledTimes(1);
+    expect(mockClearDraftReceipts).not.toHaveBeenCalled();
+  });
+
+  it("does NOT abort backend receipts when closing after saveNewReceipt succeeds", async () => {
+    mockAbortSessionReceipts.mockReset();
+    mockClearDraftReceipts.mockReset();
+    mockStore.updateReceipt.mockReset();
+    mockStore.updateReceipt.mockResolvedValue({ id: 55 });
+
+    const wrapper = mountModal();
+    mockLocalReceipts.ref.value = [
+      {
+        id: 55,
+        merchantName: "Saved Store",
+        date: "2026-11-22",
+        categoryId: 1,
+        amount: 100,
+        tax: "10.71",
+        vatClassification: "vat",
+        isUploading: false,
+        isProcessing: false,
+        isRejected: false,
+        status: "processed",
+      },
+    ];
+    await wrapper.vm.$nextTick();
+
+    const saveBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Save Receipt"));
+    await saveBtn.trigger("click");
+
+    expect(mockAbortSessionReceipts).not.toHaveBeenCalled();
+    expect(mockClearDraftReceipts).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts backend draft receipts on ConfirmModal @confirm (route leave / discard confirm)", async () => {
+    mockAbortSessionReceipts.mockReset();
+    mockHandleConfirmLeave.mockReset();
+    const wrapper = mountModal();
+
+    const confirmModal = wrapper.findComponent({ name: "ConfirmModal" });
+    await confirmModal.vm.$emit("confirm");
+
+    expect(mockAbortSessionReceipts).toHaveBeenCalledTimes(1);
+    expect(mockHandleConfirmLeave).toHaveBeenCalledTimes(1);
   });
 });

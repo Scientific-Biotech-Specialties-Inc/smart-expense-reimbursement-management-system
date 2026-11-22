@@ -125,6 +125,25 @@ export function useReceiptUploads(options = {}) {
     }
   }
 
+  /**
+   * Delete backend draft receipts created by an in-flight upload or split
+   * that resolved after the user already removed/aborted the draft locally.
+   */
+  async function deleteOrphanedUploadPayloads(payload) {
+    if (!payload) return;
+    const ids = [payload.id];
+    if (Array.isArray(payload.split_receipts)) {
+      for (const child of payload.split_receipts) {
+        if (child?.id) ids.push(child.id);
+      }
+    }
+    const uniqueIds = [
+      ...new Set(ids.filter((id) => id && !String(id).startsWith("temp-"))),
+    ];
+    if (uniqueIds.length === 0) return;
+    await Promise.allSettled(uniqueIds.map((id) => deleteDraftFromBackend(id)));
+  }
+
   async function purgeRejectedReceipt(idOrTempId) {
     if (!idOrTempId) return;
     const targetKey = String(idOrTempId);
@@ -290,6 +309,11 @@ export function useReceiptUploads(options = {}) {
   }
 
   function applySplitReceiptPayloads(index, data) {
+    if (index === -1) {
+      deleteOrphanedUploadPayloads(data);
+      return;
+    }
+
     const allPayloads = [data, ...data.split_receipts];
     addToast({
       message: formatSplitReceiptsToastMessage(allPayloads.length),
@@ -323,8 +347,6 @@ export function useReceiptUploads(options = {}) {
 
     if (index !== -1) {
       localReceipts.value.splice(index, 1, ...builtCards);
-    } else {
-      localReceipts.value.push(...builtCards);
     }
 
     allPayloads.forEach((payload, groupIdx) => {
@@ -548,6 +570,8 @@ export function useReceiptUploads(options = {}) {
           } else {
             checkAndNotifyMissingFields(localReceipts.value[index]);
           }
+        } else {
+          await deleteOrphanedUploadPayloads(data.data);
         }
       } catch (e) {
         console.error(e);
@@ -671,6 +695,8 @@ export function useReceiptUploads(options = {}) {
         } else {
           checkAndNotifyMissingFields(localReceipts.value[index]);
         }
+      } else {
+        await deleteOrphanedUploadPayloads(data.data);
       }
     } catch (e) {
       console.error(e);

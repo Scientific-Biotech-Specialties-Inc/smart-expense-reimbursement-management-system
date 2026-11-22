@@ -126,6 +126,7 @@ const {
   addReceiptFiles,
   removeReceipt,
   clearDraftReceipts,
+  abortSessionReceipts,
   qualityRejection,
   clearQualityRejection,
   showSegmentedUpload,
@@ -403,6 +404,8 @@ watch(
       return;
     }
 
+    isSubmitted.value = false;
+
     if (!props.categories.length) {
       await receiptsStore.fetchCategories();
     }
@@ -496,12 +499,23 @@ function resetUploadForm() {
   };
 }
 
+function onConfirmLeave() {
+  if (!isEditMode.value && !isSubmitted.value) {
+    abortSessionReceipts();
+  }
+  handleConfirmLeave();
+}
+
 function close() {
   dismissWithConfirm(() => {
     if (isEditMode.value) {
       resetUploadForm();
     } else {
-      clearDraftReceipts();
+      if (!isSubmitted.value) {
+        abortSessionReceipts();
+      } else {
+        clearDraftReceipts();
+      }
       clearQualityRejection();
     }
     emit("update:modelValue", false);
@@ -654,7 +668,12 @@ function formatCurrency(amount) {
 }
 
   // Safety net: clear the poll timer if the component is destroyed while open.
-  onBeforeUnmount(stopOcrPolling);
+  onBeforeUnmount(() => {
+  stopOcrPolling();
+  if (!isEditMode.value && !isSubmitted.value) {
+    abortSessionReceipts();
+  }
+});
 
   // Exposed for unit testing (buildUpdatePayload / saveReceipt) without
   // changing runtime behavior.
@@ -1206,7 +1225,7 @@ function formatCurrency(amount) {
     confirm-text="Discard"
     cancel-text="Keep Editing"
     :danger="true"
-    @confirm="handleConfirmLeave"
+    @confirm="onConfirmLeave"
     @close="handleCancelLeave"
   />
 
