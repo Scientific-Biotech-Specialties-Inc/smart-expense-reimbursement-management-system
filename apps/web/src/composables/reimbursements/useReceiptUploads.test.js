@@ -471,4 +471,48 @@ describe("useReceiptUploads — smart multi-receipt split & fallback", () => {
     window.removeEventListener("receipt-duplicate-detected", onDup);
     wrapper.unmount();
   });
+
+  it("deletes backend draft receipt when an in-flight upload resolves after abortSessionReceipts", async () => {
+    let resolveUpload;
+    const uploadPromise = new Promise((resolve) => {
+      resolveUpload = resolve;
+    });
+
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementationOnce(() => uploadPromise)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({}) });
+
+    const { wrapper, addReceiptFiles, abortSessionReceipts, localReceipts } =
+      mountComposable({ draftKey: "test_inflight_abort" });
+
+    const file = new File(["receipt"], "receipt.jpg", { type: "image/jpeg" });
+    const pendingAdd = addReceiptFiles([file]);
+
+    expect(localReceipts.value).toHaveLength(1);
+    await abortSessionReceipts();
+    expect(localReceipts.value).toHaveLength(0);
+
+    resolveUpload({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        data: {
+          id: 999,
+          status: "processed",
+          vendor_name: "Late Store",
+        },
+      }),
+    });
+
+    await pendingAdd;
+
+    expect(localReceipts.value).toHaveLength(0);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/serms/reimbursements/receipts/999",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+
+    wrapper.unmount();
+  });
 });
