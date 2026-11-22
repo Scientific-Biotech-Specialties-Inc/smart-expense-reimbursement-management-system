@@ -291,7 +291,9 @@ describe("ReceiptUploadModal — strict rejection gating and modal close", () =>
     expect(saveBtn.attributes("disabled")).toBeUndefined();
   });
 
-  it("wires @close on ReceiptQualityRejectionModal to clearQualityRejection", async () => {
+  it("wires @close on ReceiptQualityRejectionModal to clearQualityRejection and closes upload modal when no receipts remain", async () => {
+    mockClearQualityRejection.mockClear();
+    mockLocalReceipts.ref.value = [];
     const wrapper = mountModal();
     mockQualityRejection.ref.value = {
       receiptId: "temp-1",
@@ -307,6 +309,28 @@ describe("ReceiptUploadModal — strict rejection gating and modal close", () =>
 
     await qualityModal.vm.$emit("close");
     expect(mockClearQualityRejection).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted("update:modelValue")).toEqual([[false]]);
+  });
+
+  it("keeps ReceiptUploadModal open when @close fires on ReceiptQualityRejectionModal with existing receipts", async () => {
+    mockClearQualityRejection.mockClear();
+    mockLocalReceipts.ref.value = [
+      { id: 1, merchantName: "Store", date: "2026-09-01", categoryId: 1, amount: 50 },
+    ];
+    const wrapper = mountModal();
+    mockQualityRejection.ref.value = {
+      receiptId: "temp-2",
+      file: null,
+      rejectionCode: "blurry",
+      rejectionReason: "Image is blurry.",
+    };
+    await wrapper.vm.$nextTick();
+
+    const qualityModal = wrapper.findComponent({ name: "ReceiptQualityRejectionModal" });
+    await qualityModal.vm.$emit("close");
+    expect(mockClearQualityRejection).toHaveBeenCalledTimes(1);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    mockLocalReceipts.ref.value = [];
   });
 
   it("enables Save Receipt and updates every expanded split receipt card on saveNewReceipt", async () => {
