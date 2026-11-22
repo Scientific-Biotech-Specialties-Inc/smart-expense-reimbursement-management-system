@@ -7,6 +7,7 @@ use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Models\ExpenseCategory;
 use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Shared\Services\CmsVendorVerificationService;
+use App\Modules\Shared\Services\CurrencyConversionService;
 use App\Modules\Shared\Traits\HydratesSplitReceipts;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
 use Illuminate\Support\Facades\Cache;
@@ -267,6 +268,8 @@ class OcrCallbackService
             $updatePayload['file_size_bytes'] = $slicedFiles['file_size_bytes'];
         }
 
+        $updatePayload = app(CurrencyConversionService::class)->enrichReceiptPayload($updatePayload, $receipt);
+
         $receipt->update($updatePayload);
 
         $receipt->items()->delete();
@@ -293,7 +296,17 @@ class OcrCallbackService
             ipAddress: request()->ip(),
         );
 
-        $amountText = $receipt->total_amount ? ' of ' . NotificationService::formatPeso($receipt->total_amount) : '';
+        $amountText = '';
+        if ($receipt->total_amount) {
+            $currency = strtoupper((string) ($receipt->currency ?? 'PHP'));
+            if ($currency !== 'PHP') {
+                $originalFormatted = $currency . ' ' . number_format((float) $receipt->total_amount, 2, '.', ',');
+                $phpFormatted = NotificationService::formatPeso($receipt->getEffectivePhpAmount());
+                $amountText = " of {$originalFormatted} ({$phpFormatted})";
+            } else {
+                $amountText = ' of ' . NotificationService::formatPeso($receipt->total_amount);
+            }
+        }
         if ($isRejected) {
             $reasonText = $rejectionReason ? " Reason: {$rejectionReason}" : '';
             NotificationService::notifyUser(

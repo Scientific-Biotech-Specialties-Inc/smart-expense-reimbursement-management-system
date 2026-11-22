@@ -24,6 +24,11 @@ import {
 
 // OCR-driven upload pipeline (reused from the Reimbursement feature)
 import { useReceiptUploads } from "@/composables/reimbursements/useReceiptUploads";
+import {
+  useCurrencyRates,
+  useReceiptCurrencyWatcher,
+  extractReceiptFxSnapshot,
+} from "@/composables/useCurrencyRates";
 import ScannedReceiptsList from "@/components/reimbursements/ScannedReceiptsList.vue";
 import SegmentedReceiptUpload from "@/components/reimbursements/SegmentedReceiptUpload.vue";
 import ReceiptQualityRejectionModal from "@/components/reimbursements/ReceiptQualityRejectionModal.vue";
@@ -52,6 +57,7 @@ const emit = defineEmits(["update:modelValue", "saved"]);
 
 const receiptsStore = useReceiptStore();
 const { addToast } = useToast();
+const { fetchRates } = useCurrencyRates();
 
 function notify(message, type = "info") {
   addToast({ message, type });
@@ -303,6 +309,7 @@ function mapReceiptToEditDraft(r) {
     eventType: r.eventType ?? r.event_type ?? "",
     items,
     currency: r.currency || "",
+    ...extractReceiptFxSnapshot(r, r.currency || ""),
     vatClassification,
     discountType,
     discountAmount: rawDiscount > 0 ? rawDiscount.toFixed(2) : "0.00",
@@ -486,6 +493,17 @@ watch(
 );
 
 const isFormValid = computed(() => validationErrors.value.length === 0);
+
+useReceiptCurrencyWatcher(() => editReceipts.value);
+useReceiptCurrencyWatcher(() => localReceipts.value);
+
+watch(
+  () => props.modelValue,
+  (open) => {
+    if (open) fetchRates();
+  },
+  { immediate: true },
+);
 
 function onConfirmLeave() {
   if (!isEditMode.value && !isSubmitted.value) {

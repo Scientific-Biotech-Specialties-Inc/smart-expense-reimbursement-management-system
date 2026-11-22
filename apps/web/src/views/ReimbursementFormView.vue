@@ -25,6 +25,11 @@ import { useReceiptUploads } from "@/composables/reimbursements/useReceiptUpload
 import { useReimbursementSubmit } from "@/composables/reimbursements/useReimbursementSubmit";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import {
+  useCurrencyRates,
+  useReceiptCurrencyWatcher,
+  extractReceiptFxSnapshot,
+} from "@/composables/useCurrencyRates";
+import {
   useRevisionGuard,
   isManualReportTemplate,
   isRevisionStatus,
@@ -96,6 +101,7 @@ const forwardedSource = ref("My Expense");
 const FORWARDED_RECEIPTS_KEY = "serms_forwarded_reimbursement_receipts";
 const LEGACY_LIQUIDATION_RECEIPTS_KEY = "serms_forwarded_liquidation_receipts";
 const summaryCurrency = ref("PHP");
+const { fetchRates, sumReceiptsPhpAmount } = useCurrencyRates();
 
 // Form uploads and file management
 const {
@@ -177,23 +183,10 @@ const receipts = computed(() => [
   ...localReceipts.value,
 ]);
 
-// Auto-sync summary currency if any receipt has a detected/selected currency
-watch(
-  receipts,
-  (newReceipts) => {
-    const foundCurrency = (newReceipts || []).find((r) => r && r.currency)?.currency;
-    if (foundCurrency) {
-      summaryCurrency.value = foundCurrency;
-    }
-  },
-  { immediate: true, deep: true },
-);
+useReceiptCurrencyWatcher(receipts);
 
-// Financials
-const totalAmount = computed(() => {
-  const sum = receipts.value.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
-  return Number(truncateDecimal(sum.toFixed(6), 2));
-});
+// Financials (reimbursement totals are always consolidated in PHP)
+const totalAmount = computed(() => sumReceiptsPhpAmount(receipts.value));
 const totalVat = computed(() =>
   receipts.value.reduce((sum, r) => sum + (Number(r.tax) || 0), 0),
 );
@@ -352,6 +345,7 @@ const handleOpenReceiptUpload = () => {
 onMounted(async () => {
   policyStore.fetchAll();
   receiptsStore.fetchCategories();
+  fetchRates();
   
   window.addEventListener('open-receipt-upload', handleOpenReceiptUpload);
 
@@ -487,6 +481,8 @@ onMounted(async () => {
             subtotal: resolvedSubtotal,
             tax: resolvedTax,
             vatClassification: amounts.vatClassification,
+            currency: r.currency || "",
+            ...extractReceiptFxSnapshot(r, r.currency || ""),
             tin: r.tin,
             invoiceNumber: r.invoice_number,
             location: r.location || "",
@@ -531,6 +527,7 @@ onMounted(async () => {
         : "Liquidation";
       localReceipts.value = parsed.map((r) => ({
         ...r,
+        ...extractReceiptFxSnapshot(r, r.currency || ""),
         ...(() => {
           const amounts = receiptFinancials(r, r.vatClassification);
           let sub = "";

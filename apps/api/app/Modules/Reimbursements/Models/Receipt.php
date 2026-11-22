@@ -25,6 +25,24 @@ class Receipt extends Model
         return in_array(strtolower((string) $this->status), self::REJECTED_STATUSES, true);
     }
 
+    /**
+     * Resolve the authoritative PHP equivalent amount for this receipt.
+     */
+    public function getEffectivePhpAmount(): float
+    {
+        if ($this->converted_php_amount !== null) {
+            return round((float) $this->converted_php_amount, 2);
+        }
+
+        if ($this->total_amount === null) {
+            return 0.0;
+        }
+
+        $rate = (float) ($this->exchange_rate ?: 1.0);
+
+        return round((float) $this->total_amount * $rate, 2);
+    }
+
     protected $fillable = [
         'uploaded_by',
         'file_path',
@@ -42,6 +60,10 @@ class Receipt extends Model
         'invoice_number',
         'vat_classification',
         'currency',
+        'exchange_rate',
+        'converted_php_amount',
+        'exchange_rate_date',
+        'exchange_rate_source',
         'location',
         'ocr_confidence_score',
         'ocr_flagged',
@@ -104,6 +126,9 @@ class Receipt extends Model
         'subtotal' => 'decimal:2',
         'vat_amount' => 'decimal:2',
         'discount_amount' => 'decimal:2',
+        'exchange_rate' => 'decimal:6',
+        'converted_php_amount' => 'decimal:2',
+        'exchange_rate_date' => 'date',
         'ocr_confidence_score' => 'decimal:2',
         'ocr_flagged' => 'boolean',
         'is_archived' => 'boolean',

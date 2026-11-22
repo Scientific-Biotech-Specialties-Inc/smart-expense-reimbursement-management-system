@@ -16,6 +16,11 @@ import { truncateDecimal } from "@/utils/formatters";
 import { REIMBURSEMENT_EVENT_TYPES } from "@/utils/constants";
 import CurrencySelect from "@/components/base/CurrencySelect.vue";
 import ReceiptImagePreview from "@/components/base/ReceiptImagePreview.vue";
+import {
+  useCurrencyRates,
+  useReceiptCurrencyWatcher,
+  resolveReceiptExchangeRate,
+} from "@/composables/useCurrencyRates";
 
 const props = defineProps({
   receipts: {
@@ -41,6 +46,18 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["remove-receipt"]);
+
+const { isForeignCurrency, formatPhpConversionLabel } = useCurrencyRates();
+useReceiptCurrencyWatcher(() => props.receipts);
+
+function getPhpConversionLabel(receipt) {
+  if (!receipt || !isForeignCurrency(receipt.currency)) return "";
+  return formatPhpConversionLabel(
+    receipt.amount ?? receipt.total_amount ?? receipt.ocrData?.amount ?? 0,
+    receipt.currency,
+    resolveReceiptExchangeRate(receipt),
+  );
+}
 
 function getCategoryOptions() {
   return props.categories;
@@ -543,6 +560,18 @@ function removeReceiptItem(receipt, index) {
                     <ChevronDown class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                   </div>
                 </div>
+              </div>
+              <div
+                v-if="isForeignCurrency(receipt.currency)"
+                data-testid="receipt-php-conversion-badge"
+                class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+              >
+                <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  PHP Equivalent (System Rate)
+                </span>
+                <span class="font-semibold text-primary">
+                  {{ getPhpConversionLabel(receipt) }}
+                </span>
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
                 <div class="input-wrapper">

@@ -8,6 +8,7 @@ use App\Modules\Liquidations\Models\Liquidation;
 use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Shared\Services\CashAdvanceEnrichmentService;
+use App\Modules\Shared\Services\CurrencyConversionService;
 use App\Modules\Shared\Services\PasswordVerificationService;
 use App\Modules\Shared\Services\PenaltySyncService;
 use App\Modules\AuditLogs\Services\AuditLogService;
@@ -78,6 +79,7 @@ class LiquidationController extends Controller
      */
     private function syncLiquidationReceipts(array $receiptsData): array
     {
+        $conversionService = app(CurrencyConversionService::class);
         $receiptIds = [];
         foreach ($receiptsData as $receiptData) {
             if (!isset($receiptData['id'])) {
@@ -89,7 +91,8 @@ class LiquidationController extends Controller
                     'receipts' => ['Rejected receipts cannot be submitted in a liquidation. Please remove the rejected receipt and upload a clearer copy.'],
                 ]);
             }
-            $receipt->update([
+
+            $updatePayload = $conversionService->enrichReceiptPayload([
                 'vendor_name' => $receiptData['vendor_name'] ?? $receiptData['vendor'] ?? $receipt->vendor_name,
                 'transaction_date' => $receiptData['transaction_date'] ?? $receiptData['date'] ?? $receipt->transaction_date,
                 'total_amount' => $receiptData['total_amount'] ?? $receiptData['amount'] ?? $receipt->total_amount,
@@ -101,7 +104,9 @@ class LiquidationController extends Controller
                 'currency' => $receiptData['currency'] ?? $receipt->currency ?? 'PHP',
                 'vat_classification' => $receiptData['vat_classification'] ?? $receiptData['vatClassification'] ?? $receipt->vat_classification ?? 'vat',
                 'status' => 'pending', // Awaiting admin audit
-            ]);
+            ], $receipt);
+
+            $receipt->update($updatePayload);
 
             if (isset($receiptData['items']) && is_array($receiptData['items'])) {
                 $receipt->items()->delete();
@@ -339,6 +344,10 @@ class LiquidationController extends Controller
                 'invoice_number' => $fresh->invoice_number,
                 'location' => $fresh->location,
                 'currency' => $fresh->currency,
+                'exchange_rate' => $fresh->exchange_rate,
+                'converted_php_amount' => $fresh->converted_php_amount,
+                'exchange_rate_date' => $fresh->exchange_rate_date?->format('Y-m-d'),
+                'exchange_rate_source' => $fresh->exchange_rate_source,
                 'vat_classification' => $fresh->vat_classification,
                 'items' => $fresh->items->map(fn ($item) => [
                     'name' => $item->name,
@@ -480,11 +489,15 @@ class LiquidationController extends Controller
             // Snapshot the cash advance's current outstanding balance (principal + accrued penalties)
             $currentOutstandingBalance = (float) ($advance->outstanding_balance ?? $advance->amount);
 
-            // Enforce: total expenses must equal or exceed the current outstanding balance
-            $this->assertExpenseMeetsBalance((float) $validated['total_expense_amount'], $currentOutstandingBalance);
-
-            // Update each receipt in database with user-edited fields
+            // Sync receipts and lock FX snapshots first so balance validation uses converted PHP total
             $receiptIds = $this->syncLiquidationReceipts($receiptsData);
+            $effectiveExpense = (float) app(CurrencyConversionService::class)->resolveAuthoritativePhpTotal(
+                $receiptIds,
+                (float) $validated['total_expense_amount']
+            );
+
+            // Enforce: total expenses must equal or exceed the current outstanding balance
+            $this->assertExpenseMeetsBalance($effectiveExpense, $currentOutstandingBalance);
 
             // Handle Report Attachment Upload
             $reportFilePath = null;
@@ -498,7 +511,7 @@ class LiquidationController extends Controller
                 'user_id' => $user->id,
                 'status' => 'pending',
                 'reimbursement_ids' => $receiptIds,
-                'total_expense_amount' => $validated['total_expense_amount'],
+                'total_expense_amount' => $effectiveExpense,
                 'outstanding_balance' => $currentOutstandingBalance,
                 'shortfall_explanation' => $validated['shortfall_explanation'] ?? null,
                 'report_file_path' => $reportFilePath,
@@ -790,18 +803,33 @@ class LiquidationController extends Controller
 
             $requiredBalance = (float) ($liquidation->outstanding_balance ?? $advance?->outstanding_balance ?? $advance?->amount ?? 0);
             $effectiveExpense = (float) ($validated['total_expense_amount'] ?? $liquidation->total_expense_amount);
-            $this->assertExpenseMeetsBalance($effectiveExpense, $requiredBalance);
 
-            // Handle receipts update
+            // Handle receipts update before validating balance so foreign receipts convert to PHP
             if (isset($validated['receipts'])) {
                 $receiptsData = is_string($validated['receipts'])
                     ? json_decode($validated['receipts'], true)
                     : $validated['receipts'];
 
-                if (is_array($receiptsData)) {
-                    $liquidation->reimbursement_ids = $this->syncLiquidationReceipts($receiptsData);
+                if (!is_array($receiptsData)) {
+                    return response()->json(['message' => 'Invalid receipts data format.'], 422);
                 }
+
+                $receiptIds = $this->syncLiquidationReceipts($receiptsData);
+                $liquidation->reimbursement_ids = $receiptIds;
+                $effectiveExpense = (float) app(CurrencyConversionService::class)->resolveAuthoritativePhpTotal(
+                    $receiptIds,
+                    $effectiveExpense
+                );
+            } elseif (isset($validated['total_expense_amount'])) {
+                $existingIds = is_array($liquidation->reimbursement_ids) ? $liquidation->reimbursement_ids : [];
+                $effectiveExpense = (float) app(CurrencyConversionService::class)->resolveAuthoritativePhpTotal(
+                    $existingIds,
+                    $effectiveExpense,
+                    backfillMissing: true
+                );
             }
+
+            $this->assertExpenseMeetsBalance($effectiveExpense, $requiredBalance);
 
             // Handle report attachment
             if ($request->hasFile('report_attachment')) {
@@ -811,8 +839,8 @@ class LiquidationController extends Controller
                 $liquidation->report_file_path = $request->file('report_attachment')->store('report_letters', 'supabase');
             }
 
-            if (isset($validated['total_expense_amount'])) {
-                $liquidation->total_expense_amount = $validated['total_expense_amount'];
+            if (isset($validated['receipts']) || isset($validated['total_expense_amount'])) {
+                $liquidation->total_expense_amount = $effectiveExpense;
             }
 
             if (array_key_exists('shortfall_explanation', $validated)) {

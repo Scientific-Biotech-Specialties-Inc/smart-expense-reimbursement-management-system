@@ -1,7 +1,11 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { formatAmount } from "@/utils/formatters";
 import { formatDiscountTypeLabel, normalizeDiscountType } from "@/utils/receiptUtils";
+import {
+  useCurrencyRates,
+  resolveReceiptExchangeRate,
+} from "@/composables/useCurrencyRates";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseModal from "@/components/base/BaseModal.vue";
 import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
@@ -66,6 +70,28 @@ const subtotal = computed(() => {
     );
   }
   return (Number(props.receipt?.amount) || 0) - (Number(props.receipt?.vat) || 0);
+});
+
+const { isForeignCurrency, ensureCurrencyRate, formatPhpConversionLabel } =
+  useCurrencyRates();
+
+watch(
+  () => [props.isOpen, props.receipt?.currency],
+  ([open, currency]) => {
+    if (open && isForeignCurrency(currency) && !resolveReceiptExchangeRate(props.receipt)) {
+      ensureCurrencyRate(currency);
+    }
+  },
+  { immediate: true },
+);
+
+const phpConversionLabel = computed(() => {
+  if (!props.receipt || !isForeignCurrency(props.receipt.currency)) return "";
+  return formatPhpConversionLabel(
+    props.receipt.amount || 0,
+    props.receipt.currency,
+    resolveReceiptExchangeRate(props.receipt),
+  );
 });
 </script>
 
@@ -227,6 +253,15 @@ const subtotal = computed(() => {
               <span class="text-sm text-slate-700">Total</span>
               <span class="text-base font-semibold text-primary">
                 {{ formatAmount(receipt.amount || 0, receipt.currency || "PHP") }}
+              </span>
+            </div>
+            <div
+              v-if="phpConversionLabel"
+              data-testid="receipt-detail-php-conversion"
+              class="flex justify-end pt-1"
+            >
+              <span class="inline-flex items-center rounded-full bg-slate-100 border border-slate-200 px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
+                {{ phpConversionLabel }}
               </span>
             </div>
           </div>

@@ -758,5 +758,30 @@ describe("SbsiReportDocumentEditor", () => {
     expect(liqWrapper.find('[data-testid="breakdown-add"]').exists()).toBe(true);
     expect(liqWrapper.find('[data-testid="breakdown-reset"]').exists()).toBe(true);
   });
+
+  it("converts foreign-currency receipts to PHP in breakdown items, descriptions, and report totals without false mismatch", async () => {
+    const mixedReceipts = [
+      { id: 101, category: "Meals", vendor_name: "Max's", amount: 1000, currency: "PHP" },
+      { id: 102, category: "Meals", vendor_name: "Jollibee", amount: 50, currency: "USD", exchange_rate: 58.5 },
+    ];
+
+    const reimbData = createDefaultTemplateData("reimbursement", { receipts: mixedReceipts });
+    expect(reimbData.breakdownItems[0].amount).toBe(1000);
+    expect(reimbData.breakdownItems[1].amount).toBe(2925);
+    expect(reimbData.breakdownItems[1].description).toBe("Meals - Jollibee (USD 50.00)");
+    expect(reimbData.totalAmount).toBe(3925);
+
+    const liqData = createDefaultTemplateData("liquidation", {
+      receipts: mixedReceipts,
+      allocatedAmount: 5000,
+    });
+    expect(liqData.utilizedAmount).toBe(3925);
+    expect(liqData.variance).toBe(1075);
+
+    const wrapper = mountEditor({ type: "reimbursement", receipts: mixedReceipts, totalAmount: 3925 });
+    await nextTick();
+    expect(wrapper.find('[data-testid="breakdown-total"]').text()).toContain("PHP 3,925.00");
+    expect(wrapper.find('[data-testid="breakdown-mismatch-warning"]').exists()).toBe(false);
+  });
 });
 

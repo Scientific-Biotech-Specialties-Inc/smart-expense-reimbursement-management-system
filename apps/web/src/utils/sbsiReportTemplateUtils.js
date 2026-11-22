@@ -1,5 +1,11 @@
 import { formatDate } from "@/utils/formatters";
 import { receiptGrossAmount } from "@/utils/receiptUtils";
+import {
+  isForeignCurrency,
+  normalizeCurrencyCode,
+  resolveReceiptExchangeRate,
+  useCurrencyRates,
+} from "@/composables/useCurrencyRates";
 
 /** Default SBSI addressee used by all premade attachment reports. */
 export const DEFAULT_SBSI_RECIPIENT = {
@@ -67,10 +73,30 @@ export function generateSystemRefId(type, id = null) {
   return `SYS-${prefix}-${new Date().getFullYear()}-${suffix.padStart(4, "0")}`;
 }
 
+/** Resolve a receipt's gross amount converted into PHP using its FX rate or live rate table. */
+export function receiptPhpGrossAmount(r) {
+  const { getConvertedPhpAmount } = useCurrencyRates();
+  const gross = receiptGrossAmount(r) || Number(r?.ocrData?.amount || 0);
+  const currency = r?.currency ?? r?.ocrData?.currency ?? "PHP";
+  const rate = resolveReceiptExchangeRate(r);
+  const converted = getConvertedPhpAmount(gross, currency, rate);
+  return round2(converted ?? gross);
+}
+
 function receiptDescription(r) {
   const category = typeof r?.category === "object" ? r?.category?.name : r?.category;
   const vendor = r?.merchantName || r?.vendor_name || r?.vendor || r?.title || r?.fileName;
-  return [category, vendor].filter(Boolean).join(" - ") || "Expense";
+  const base = [category, vendor].filter(Boolean).join(" - ") || "Expense";
+  const currency = r?.currency ?? r?.ocrData?.currency;
+  const gross = receiptGrossAmount(r) || Number(r?.ocrData?.amount || 0);
+  if (isForeignCurrency(currency) && gross > 0) {
+    const formatted = gross.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return `${base} (${normalizeCurrencyCode(currency)} ${formatted})`;
+  }
+  return base;
 }
 
 function receiptKey(r, i) {
@@ -101,7 +127,7 @@ function reconcileBreakdownItems(receipts, previous = [], previousRemovedIds = [
   const entries = receipts.map((r, i) => ({
     sourceId: receiptKey(r, i),
     description: receiptDescription(r),
-    amount: round2(receiptGrossAmount(r)),
+    amount: receiptPhpGrossAmount(r),
   }));
   const byId = new Map(entries.map((e) => [e.sourceId, e]));
   const removedSet = new Set(Array.isArray(previousRemovedIds) ? previousRemovedIds.map(String) : []);

@@ -102,5 +102,22 @@ return [
         'timeout'                  => (int) env('TS_SERVICE_TIMEOUT', 10),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Exchange Rate API (Multi-Currency FX to PHP)
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for fetching live FX rates (default: ExchangeRate-API
+    | Open Access endpoint with PHP as base) and cache staleness TTL.
+    |
+    */
+
+    'exchange_rate' => [
+        'url'       => env('EXCHANGE_RATE_API_URL', 'https://open.er-api.com/v6/latest/PHP'),
+        'api_key'   => env('EXCHANGE_RATE_API_KEY'),
+        'timeout'   => (int) env('EXCHANGE_RATE_API_TIMEOUT', 8),
+        'ttl_hours' => (int) env('EXCHANGE_RATE_TTL_HOURS', 24),
+    ],
+
 ];
 

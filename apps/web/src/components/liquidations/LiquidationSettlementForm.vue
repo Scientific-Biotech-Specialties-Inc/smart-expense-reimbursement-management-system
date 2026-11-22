@@ -21,7 +21,13 @@ import BaseReceiptDetailModal from "@/components/base/BaseReceiptDetailModal.vue
 import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor.vue";
 import { useLiquidationStore } from "@/stores/liquidation";
 import { useReportExport } from "@/composables/useReportExport";
-import { formatPeso, formatDate } from "@/utils/formatters";
+import {
+  useCurrencyRates,
+  useReceiptCurrencyWatcher,
+  resolveReceiptExchangeRate,
+  extractReceiptFxSnapshot,
+} from "@/composables/useCurrencyRates";
+import { formatPeso, formatDate, formatAmount } from "@/utils/formatters";
 import {
   sumPenaltyRecords,
   resolveAdvanceBalance,
@@ -135,6 +141,9 @@ const emit = defineEmits([
 const localTemplateData = ref(props.reportTemplateData);
 const localManualMode = ref(props.isManualMode);
 const localManualAttachment = ref(null);
+
+const { isForeignCurrency, formatPhpConversionLabel } = useCurrencyRates();
+useReceiptCurrencyWatcher(() => props.receipts);
 
 watch(
   [() => props.reportAttachment, () => props.existingLiquidation?.id],
@@ -541,6 +550,14 @@ const normalizedViewReceipt = computed(() => {
   const rawPath = r.filePath || r.file_path;
   const imageUrl = rawPath ? getFileUrl(rawPath) : (r.thumbnail || r.preview || r.file_url || null);
   const vatClass = r.vatClassification || r.vat_classification || "VAT";
+  const currency = r.currency || r.ocrData?.currency || "PHP";
+  const fxSource =
+    r.exchangeRate != null ||
+    r.exchange_rate != null ||
+    r.convertedPhpAmount != null ||
+    r.converted_php_amount != null
+      ? r
+      : (r.ocrData || r);
   return {
     imageUrl,
     fileType: r.fileType || r.file_type || "",
@@ -551,7 +568,8 @@ const normalizedViewReceipt = computed(() => {
     tin: r.tin || r.tinNumber || r.tin_number || r.ocrData?.tin || "—",
     location: r.location || r.ocrData?.location || "--",
     vatClassification: vatClass,
-    currency: r.currency || "PHP",
+    currency,
+    ...extractReceiptFxSnapshot(fxSource, currency),
     items: r.items || [],
     amount: getReceiptAmount(r),
     vat: Number(r.vat ?? r.vat_amount ?? r.ocrData?.vat ?? 0),
@@ -744,9 +762,16 @@ const normalizedViewReceipt = computed(() => {
                   <span
                     class="rounded-full bg-slate-800/45 backdrop-blur-sm border border-white/15 px-3 py-1 text-xs font-semibold text-white shrink-0"
                   >
-                    {{ formatPeso(getReceiptAmount(receipt)) }}
+                    {{ formatAmount(getReceiptAmount(receipt), receipt.currency || "PHP") }}
                   </span>
                 </div>
+                <p
+                  v-if="isForeignCurrency(receipt.currency)"
+                  data-testid="liquidation-card-php-conversion"
+                  class="text-[11px] font-medium text-slate-200/95 truncate"
+                >
+                  {{ formatPhpConversionLabel(getReceiptAmount(receipt), receipt.currency, resolveReceiptExchangeRate(receipt)) }}
+                </p>
 
                 <div class="flex items-center">
                   <StatusBadge

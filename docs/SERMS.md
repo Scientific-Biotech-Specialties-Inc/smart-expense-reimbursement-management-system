@@ -120,10 +120,11 @@ SBSI granted permission for their on-premises / dedicated server to be used for 
 - **No Hallucinations / No Fabrications:** Financial amounts, approval states, penalty calculations, and OCR outputs must never be guessed or fabricated. Missing fields require explicit clarification.
 
 ### 4.2 Functional Domain Workflows
-- **Expense Reimbursement Submission:** User uploads receipts (JPEG, PNG, PDF <= 2MB). Files are uploaded to Supabase Bucket -> OCR Queue Job dispatches -> external AI processes receipt -> BIR VAT classification and 90-day duplicate check run -> user confirms and submits the reimbursement request.
+- **Expense Reimbursement Submission:** User uploads receipts (JPEG, PNG, PDF <= 2MB). Files are uploaded to Supabase Bucket -> OCR Queue Job dispatches -> external AI processes receipt -> BIR VAT classification, 90-day duplicate check, and system-locked multi-currency FX snapshot conversion to `PHP` run -> user confirms and submits the reimbursement request (with `reimbursements.amount` computed authoritatively in `PHP`).
 - **Multi-Receipt Auto-Split & Isolation:** Across all Multi Receipt upload entry points (Reimbursements, My Expense, and Liquidations, up to 6 files), `ocr-pipeline` automatically determines whether the uploaded files represent 1 long multi-segment receipt or multiple distinct receipts (including mixed batches). Single-receipt multi-segment uploads continue rendering as 1 stacked card (`StackedReceiptDeck`) when `split_receipts` is absent. When `split_receipts` is returned during OCR polling, SERMS expands the placeholder into separate individual receipt cards, surfaces an info toast (`Detected N separate receipts — split into individual receipt cards.`), assigns each card only its own `segment_indices` image(s) (preserving single-image vs multi-segment preview behavior), and isolates quality/duplicate/OCR rejections per card without discarding valid sibling cards. Selecting 1 file in Multi Receipt mode falls back cleanly to standard single-receipt upload.
+- **Multi-Currency Receipt FX Conversion to PHP:** Foreign-currency receipts preserve their original ISO 4217 `currency` (`char(3)`, defaulting to `PHP`) and `total_amount` on `receipts`, while SERMS resolves and system-locks the conversion snapshot (`exchange_rate`, `converted_php_amount`, `exchange_rate_date`, `exchange_rate_source`) against `currency_rates`. Employees cannot edit or override exchange rates. Live FX rates are synchronized daily via the `currencies:sync` Laravel Scheduler job from ExchangeRate-API Open Access (`https://open.er-api.com/v6/latest/PHP`); when a cached rate is missing or `>24h` old, SERMS performs an on-demand refresh with graceful fallback to the latest cached rate if the external API is unreachable, returning `422` only for unrecognized currency codes. UI receipt modals/cards display a read-only PHP conversion caption while keeping Reimbursement (`reimbursements.amount`) and Liquidation (`liquidations.total_expense_amount`) summary totals strictly in `PHP`.
 - **Cash Advance & Routing:** Employee submits purpose, amount, expected disbursement, and liquidation dates -> request routes through active `approval_thresholds` -> Finance/Admin disburses funds via the shared `GrantPayoutModal` (recording `granted_by`, `payout_method` [`Cash`, `E-wallet`, `Card`, `Visa`, `Other`], optional `payout_method_other`, `granter_signature`, auto-generated `CA-{id}-{YmdHis}` reference fallback, and password re-verification, while preserving legacy `{ channel, reference, password }` support) -> employee acknowledges receipt via signature in Cash Advances or the unified Payout module (`PayoutView.vue`, supporting both `Reimbursement` and `Cash Advance` payout types) -> status transitions to `signed` / `unliquidated`.
-- **Advance Liquidation & Variance:** Employee submits liquidation report with matching receipts whose `total_expense_amount` is equal to or greater than the cash advance's current `outstanding_balance` (including accrued overdue penalties). Submissions or updates with `total_expense_amount < outstanding_balance` are strictly blocked at both the UI and API (`422` validation error) layers; excess expenses beyond the balance are tracked as overpayment for reimbursement forwarding -> accounting audits and approves -> status marked `liquidated`.
+- **Advance Liquidation & Variance:** Employee submits liquidation report with matching receipts whose server-computed PHP `total_expense_amount` (summed from attached receipts' `converted_php_amount`) is equal to or greater than the cash advance's current `outstanding_balance` (including accrued overdue penalties). Submissions or updates with `total_expense_amount < outstanding_balance` are strictly blocked at both the UI and API (`422` validation error) layers; excess expenses beyond the balance are tracked as overpayment for reimbursement forwarding -> accounting audits and approves -> status marked `liquidated`.
 - **Daily Overdue Penalties:** Nightly queued job scans unliquidated cash advances past their 7-day grace period -> applies configured daily penalty (PHP 50.00/day) -> writes immutable penalty records.
 - **90-Day Duplicate Detection:** Receipts matching Vendor, Date, Total Amount, or Invoice Number within 90 days are flagged. Submitting an override requires a minimum 20-character justification and generates a dedicated audit log.
 
@@ -158,6 +159,7 @@ graph TD
         Supabase[(Supabase Bucket\nS3-compatible Storage)]
         AiOcrService[ocr-pipeline AI Service\n1.5B LLM + Tesseract]
         MongoDb[(MongoDB - Overridden\nocr-pipeline store)]
+        ExchangeRateApi[ExchangeRate-API Open Access\nopen.er-api.com/v6/latest/PHP]
     end
 
     SPA -->|Encrypts Payload| Encrypt
@@ -170,6 +172,7 @@ graph TD
     PHP -->|Dispatch jobs| MySQL
     PHP -->|File upload / URL generation| Supabase
     PHP -->|JWT token validation proxy| AuthModule
+    PHP -->|Daily currencies:sync & >24h FX refresh| ExchangeRateApi
     Worker -->|Process Penalties & DB Queues| MySQL
     Worker -->|POST status update| PrsModule
     Worker -->|POST TS reimbursement status| TsModule
@@ -188,14 +191,14 @@ graph TD
 | Module | Route Prefix / Namespace | Key Controllers & Services | Key Jobs & Workers | Responsibility |
 |---|---|---|---|---|
 | **`CashAdvances`** | `/api/cash-advances`<br>`App\Modules\CashAdvances` | `CashAdvanceController`<br>`CashAdvanceService` | `CalculateOverdueCashAdvancesJob` | Lifecycle of cash advances: request, threshold verification, manager approval, Grant Payout disbursement logging (`granted_by`, `payout_method`, `granter_signature`), unified `payout` hydration via `CashAdvanceEnrichmentService`, and employee acknowledgment. |
-| **`Reimbursements`** | `/api/reimbursements`<br>`App\Modules\Reimbursements` | `ReimbursementController`<br>`ReceiptController`<br>`ExpenseCategoryController`<br>`PrsReimbursementRequestController`<br>`PrsWebhookController`<br>`OcrCallbackController`<br>`ReimbursementService`<br>`ReceiptService`<br>`TsReimbursementImportService` | `UpdatePrsReimbursementStatusJob`<br>`UpdateTsReimbursementStatusJob`<br>`DispatchReceiptToAiService` | Reimbursement claim submission, multi-receipt uploading & OCR dispatch, 90-day duplicate checking, BIR VAT classification, PRS status sync (`source_system === 'prs'` guarded), TS ticket reimbursement ingestion (`ticket_id`, `ticket_number`, `reference_no`), TS status sync, and approval workflows. |
+| **`Reimbursements`** | `/api/reimbursements`<br>`App\Modules\Reimbursements` | `ReimbursementController`<br>`ReceiptController`<br>`ExpenseCategoryController`<br>`PrsReimbursementRequestController`<br>`PrsWebhookController`<br>`OcrCallbackController`<br>`ReimbursementService`<br>`ReceiptService`<br>`TsReimbursementImportService` | `UpdatePrsReimbursementStatusJob`<br>`UpdateTsReimbursementStatusJob`<br>`DispatchReceiptToAiService` | Reimbursement claim submission, multi-receipt uploading & OCR dispatch, 90-day duplicate checking, BIR VAT classification, system-locked multi-currency receipt FX snapshot persistence (`converted_php_amount`) and PHP-authoritative claim totals (`reimbursements.amount`), PRS status sync (`source_system === 'prs'` guarded), TS ticket reimbursement ingestion (`ticket_id`, `ticket_number`, `reference_no`), TS status sync, and approval workflows. |
 | **`Expenses`** | `/api/expenses`<br>`App\Modules\Expenses` | `ExpenseController`<br>`ExpenseService` | — | Generic expense logging, line-item recording, receipt linkage, and expense category association. |
-| **`Liquidations`** | `/api/liquidations`<br>`App\Modules\Liquidations` | `LiquidationController` | `CalculateDailyPenaltiesJob` | Cash advance liquidation reports, receipt item matching & scanning, variance/shortfall computation, accounting audit verification, and daily penalty accruals. |
+| **`Liquidations`** | `/api/liquidations`<br>`App\Modules\Liquidations` | `LiquidationController` | `CalculateDailyPenaltiesJob` | Cash advance liquidation reports, receipt item matching & scanning, PHP-normalized `total_expense_amount` aggregation from attached receipts' `converted_php_amount`, variance/shortfall computation, accounting audit verification, and daily penalty accruals. |
 | **`AuditLogs`** | `App\Modules\AuditLogs` | `AuditLogService` | — | Centralized append-only audit trail logging (`AuditLogService::log()`) and compliance export action tracking. |
 | **`Notifications`** | `App\Modules\Notifications` | `NotificationDeliveryService` | — | Template-based in-app notification dispatching, failed attempt logging, and role-based hierarchy resolution. |
 | **`Ai`** | `App\Modules\Ai` | `AiServiceOcrEngine`<br>`TesseractOcrEngine` | — | OCR contract bindings (`OcrEngineInterface`, `AsyncOcrEngineInterface`), external OCR service communication, payload signing, and webhook validation. |
 | **`Users`** | `/api/profile`<br>`App\Modules\Users` | `ProfileController`<br>`ProfileService`<br>`User` Model & Providers | — | User identity mapping, profile management (personal/contact details Dual-Sync with `capstone-auth-module`), Supabase avatar and hybrid signature storage, client-encrypted password updates, and user-scoped audit activity logs. |
-| **`Shared`** | `/api/crypto`<br>`/api/auth`<br>`/api/internal`<br>`/api/cms`<br>`/api/ts`<br>`App\Modules\Shared` | `CryptoController`<br>`AuthController`<br>`InternalCmsController`<br>`InternalTsController`<br>`CmsController`<br>`TsController`<br>`PayloadDecryptionService`<br>`PasswordVerificationService`<br>`CmsClientService`<br>`CmsContractExpenseService`<br>`CmsVendorVerificationService`<br>`CmsRecurringExpenseService`<br>`TsClientService` | — | Cryptographic public key distribution (`GET /api/crypto/key`), client payload pre-encryption decryption middleware (`DecryptPayloadMiddleware`), external auth SSO proxying (`/api/auth/me`), password re-verification, internal service-to-service endpoints (`X-Internal-Secret`), and CMS / TS bi-directional integration proxies/sync. |
+| **`Shared`** | `/api/crypto`<br>`/api/auth`<br>`/api/internal`<br>`/api/cms`<br>`/api/ts`<br>`App\Modules\Shared` | `CryptoController`<br>`AuthController`<br>`InternalCmsController`<br>`InternalTsController`<br>`CmsController`<br>`TsController`<br>`PayloadDecryptionService`<br>`PasswordVerificationService`<br>`CmsClientService`<br>`CmsContractExpenseService`<br>`CmsVendorVerificationService`<br>`CmsRecurringExpenseService`<br>`TsClientService` | `currencies:sync` (Daily Scheduler) | Cryptographic public key distribution (`GET /api/crypto/key`), client payload pre-encryption decryption middleware (`DecryptPayloadMiddleware`), external auth SSO proxying (`/api/auth/me`), password re-verification, internal service-to-service endpoints (`X-Internal-Secret`), CMS / TS bi-directional integration proxies/sync, and centralized multi-currency FX rate caching (`currency_rates`) & PHP conversion. |
 
 ### 6.2 Client-Side Pre-Encryption Architecture
 To prevent shoulder theft, network snooping, and plaintext leakage of sensitive PII/financial mutations:
@@ -269,6 +272,44 @@ To integrate field service ticket reimbursements and ticket lifecycle lookups be
    - Fixed `ReimbursementService::approveReimbursement()` and `grantReimbursement()` so `UpdatePrsReimbursementStatusJob` is strictly guarded by `$reimbursement->source_system === 'prs'`, preventing TS or manual claims from firing PRS webhooks.
 6. **Environment Configuration (`config/services.php` `services.ts`, `.env.example`, `docker-compose.yml`):**
    - `TS_API_URL`, `TS_REIMBURSEMENT_STATUS_URL`, `TS_INTERNAL_SECRET`, `TS_SERVICE_TIMEOUT` (default `10`), and `INTERNAL_SERVICE_SECRET` (local test defaults must be rotated to strong 32+ byte secrets in production).
+
+### 6.7 Multi-Currency Receipt FX Conversion & Rate Synchronization
+To support receipts denominated in foreign currencies while enforcing `PHP` financial normalization across claims, liquidations, audits, and payouts:
+
+1. **`currency_rates` Table Schema:**
+
+   | Column | Type / Constraints | Description |
+   |---|---|---|
+   | `id` | `bigint unsigned` PK | Auto-increment primary key |
+   | `currency_code` | `char(3)` `unique` | Uppercase ISO 4217 3-letter currency code (e.g., `PHP`, `USD`, `SGD`, `JPY`) |
+   | `rate_to_php` | `decimal(16, 6)` | Conversion multiplier to Philippine Peso (`1 {currency_code} = rate_to_php PHP`; `PHP` fixed at `1.000000`) |
+   | `effective_date` | `date` | Calendar date the exchange rate applies to |
+   | `source` | `string` (default `'open.er-api.com'`) | Provider/seed origin identifier (`open.er-api.com`, `baseline-seed`, `system`) |
+   | `fetched_at` | `timestamp` `nullable` | Timestamp of last provider refresh; governs 24-hour cache freshness |
+   | `created_at` / `updated_at` | `timestamps` | Standard Eloquent timestamps |
+
+2. **`receipts` FX Snapshot Columns (System-Locked Conversion):**
+   - Original extracted/verified receipt fields (`currency` `char(3)` defaulting to `PHP`, and `total_amount` `decimal(15, 2)`) are preserved unmodified on `receipts`.
+   - Every receipt creation, manual edit, resubmission, OCR callback (`OcrCallbackService`), reimbursement inline update, and liquidation receipt sync writes a system-locked FX snapshot alongside the original fields:
+
+     | Column | Type / Constraints | Description |
+     |---|---|---|
+     | `exchange_rate` | `decimal(16, 6)` (default `1.000000`) | System-resolved `rate_to_php` locked at receipt save/update time |
+     | `converted_php_amount` | `decimal(15, 2)` `nullable` | Authoritative converted amount in `PHP` (`round(total_amount * exchange_rate, 2)`) |
+     | `exchange_rate_date` | `date` `nullable` | Effective date of the locked exchange rate |
+     | `exchange_rate_source` | `string` `nullable` | Source identifier of the locked exchange rate |
+
+   - Employees cannot supply, edit, or override `exchange_rate` or `converted_php_amount`; updating a receipt's `currency` or `total_amount` automatically re-resolves and system-locks the FX snapshot on the server.
+   - Frontend receipt forms, cards, and detail modals display a read-only PHP conversion breakdown (`≈ ... PHP (1 {CODE} = ...)`) for foreign-currency receipts.
+
+3. **Scheduled Synchronization, On-Demand Refresh & Fallback Rules:**
+   - **Daily Scheduler (`currencies:sync`):** Registered in `apps/api/routes/console.php` via `Schedule::command('currencies:sync')->daily()`. Fetches ExchangeRate-API Open Access (`https://open.er-api.com/v6/latest/PHP`) inside an explicit `try-catch` boundary (logging and failing explicitly without silent swallowing). Since the provider returns `1 PHP = X foreign`, positive rates are inverted (`round(1 / foreign_per_php, 6)`) and upserted into `currency_rates` while pinning `PHP` to `1.000000`.
+   - **On-Demand >24h Refresh & Graceful Cached Fallback:** When resolving a non-`PHP` currency whose `currency_rates` row is missing or stale (`fetched_at` is `null` or `> 24` hours old), SERMS triggers an on-demand provider sync. If the external API is unreachable or returns an error, SERMS logs a warning and **gracefully falls back to the latest cached rate** in `currency_rates` so valid expense workflows remain operational offline.
+   - **422 Rejection Rule:** HTTP `422 Unprocessable Entity` is raised **only** when a submitted currency code is unrecognized (present neither in the refreshed provider response nor in the `currency_rates` cache).
+
+4. **Authoritative PHP Totals on Reimbursements & Liquidations:**
+   - **Reimbursements (`reimbursements.amount`):** Computed server-side as the rounded `PHP` sum of all attached receipts' `converted_php_amount` (using `total_amount` when `PHP` and preserving legacy fallback only when attached receipts are `PHP` with null/zero amounts). Reimbursement summary views remain fixed in `PHP`.
+   - **Liquidations (`liquidations.total_expense_amount`):** Computed server-side as the rounded `PHP` sum of attached liquidation receipts' `converted_php_amount` **before** enforcing `total_expense_amount >= outstanding_balance` (`422` guard) and persisting the liquidation record. Liquidation expense summaries and settlement totals remain normalized in `PHP`.
 
 ---
 
@@ -400,6 +441,7 @@ A curated set of real-world receipt image fixtures is located in **[`docs/receip
 2. **Job Queuing:** `ProcessReceiptOcrJob` dispatched; vendor, date, amount, VAT, TIN, and invoice numbers extracted.
 3. **Confidence Scoring:** `ocr_confidence_score` stored. If `< 0.80`, `ocr_flagged = true` is set and UI shows `[Low Confidence — Please Verify]`.
 4. **Duplicate Detection:** Re-uploading within 90 days triggers duplicate warning and requires a 20+ character override justification.
+5. **Multi-Currency FX Snapshot & PHP Totals:** Non-`PHP` receipts preserve original `currency` and `total_amount` while locking `exchange_rate`, `converted_php_amount`, `exchange_rate_date`, and `exchange_rate_source` server-side; stale (`>24h`) rates trigger on-demand refresh with fallback to the latest cached rate when the API is unreachable (`422` only for unrecognized currency codes); and `reimbursements.amount` / `liquidations.total_expense_amount` match the sum of attached receipts' `converted_php_amount` in `PHP`.
 
 ---
 

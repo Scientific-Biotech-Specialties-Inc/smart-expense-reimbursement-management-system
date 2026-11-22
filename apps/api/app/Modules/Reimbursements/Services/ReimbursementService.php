@@ -9,6 +9,7 @@ use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Jobs\UpdatePrsReimbursementStatusJob;
 use App\Modules\Reimbursements\Jobs\UpdateTsReimbursementStatusJob;
+use App\Modules\Shared\Services\CurrencyConversionService;
 use App\Modules\Shared\Services\PasswordVerificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -29,6 +30,49 @@ class ReimbursementService
         }
 
         Receipt::whereIn('id', $receiptIds)->update($data);
+    }
+
+    /**
+     * Persist inline receipt metadata edits and lock FX conversion snapshots.
+     */
+    private function syncInlineReceipts(User $user, array $receiptsData, bool $rejectIfRejectedStatus = false): void
+    {
+        $conversionService = app(CurrencyConversionService::class);
+
+        foreach ($receiptsData as $receiptData) {
+            $receipt = Receipt::find($receiptData['id']);
+            if (!$receipt || $receipt->uploaded_by !== $user->id) {
+                continue;
+            }
+
+            if ($rejectIfRejectedStatus && $receipt->isRejectedStatus()) {
+                throw ValidationException::withMessages([
+                    'receipts' => ['Rejected receipts cannot be edited or attached to a reimbursement.'],
+                ]);
+            }
+
+            $updatePayload = $conversionService->enrichReceiptPayload([
+                'expense_category_id' => $receiptData['expense_category_id'] ?? $receipt->expense_category_id,
+                'event_type' => $receiptData['event_type'] ?? $receipt->event_type,
+                'vendor_name' => $receiptData['vendor_name'] ?? $receipt->vendor_name,
+                'transaction_date' => $receiptData['transaction_date'] ?? $receipt->transaction_date,
+                'total_amount' => $receiptData['total_amount'] ?? $receipt->total_amount,
+                'subtotal' => $receiptData['subtotal'] ?? $receipt->subtotal,
+                'vat_amount' => $receiptData['vat_amount'] ?? $receipt->vat_amount,
+                'vat_classification' => $receiptData['vat_classification'] ?? $receipt->vat_classification,
+                'currency' => $receiptData['currency'] ?? $receipt->currency,
+                'tin' => $receiptData['tin'] ?? $receipt->tin,
+                'invoice_number' => $receiptData['invoice_number'] ?? $receipt->invoice_number,
+                'location' => $receiptData['location'] ?? $receipt->location,
+            ], $receipt);
+
+            $receipt->update($updatePayload);
+
+            if (isset($receiptData['items'])) {
+                $receipt->items()->delete();
+                $receipt->items()->createMany($receiptData['items']);
+            }
+        }
     }
 
     /**
@@ -89,30 +133,14 @@ class ReimbursementService
             }
 
             if (!empty($validated['receipts'])) {
-                foreach ($validated['receipts'] as $receiptData) {
-                    $receipt = Receipt::find($receiptData['id']);
-                    if ($receipt && $receipt->uploaded_by === $user->id) {
-                        $receipt->update([
-                            'expense_category_id' => $receiptData['expense_category_id'] ?? $receipt->expense_category_id,
-                            'event_type' => $receiptData['event_type'] ?? $receipt->event_type,
-                            'vendor_name' => $receiptData['vendor_name'] ?? $receipt->vendor_name,
-                            'transaction_date' => $receiptData['transaction_date'] ?? $receipt->transaction_date,
-                            'total_amount' => $receiptData['total_amount'] ?? $receipt->total_amount,
-                            'subtotal' => $receiptData['subtotal'] ?? $receipt->subtotal,
-                            'vat_amount' => $receiptData['vat_amount'] ?? $receipt->vat_amount,
-                            'vat_classification' => $receiptData['vat_classification'] ?? $receipt->vat_classification,
-                            'tin' => $receiptData['tin'] ?? $receipt->tin,
-                            'invoice_number' => $receiptData['invoice_number'] ?? $receipt->invoice_number,
-                            'location' => $receiptData['location'] ?? $receipt->location,
-                        ]);
-
-                        if (isset($receiptData['items'])) {
-                            $receipt->items()->delete();
-                            $receipt->items()->createMany($receiptData['items']);
-                        }
-                    }
-                }
+                $this->syncInlineReceipts($user, $validated['receipts']);
             }
+
+            $authoritativeAmount = app(CurrencyConversionService::class)->resolveAuthoritativePhpTotal(
+                $receiptIds,
+                (float) $validated['amount'],
+                backfillMissing: true
+            );
 
             $expenseCategoryId = $validated['expense_category_id']
                 ?? Receipt::whereIn('id', $receiptIds)->whereNotNull('expense_category_id')->value('expense_category_id');
@@ -132,7 +160,7 @@ class ReimbursementService
                 'ticket_id' => $validated['ticket_id'] ?? null,
                 'ticket_number' => $validated['ticket_number'] ?? null,
                 'event_type' => $validated['event_type'] ?? null,
-                'amount' => $validated['amount'],
+                'amount' => $authoritativeAmount,
                 'date' => $validated['date'],
                 'report_file_path' => $reportPath,
                 'report_template_data' => $validated['report_template_data'] ?? null,
@@ -630,37 +658,11 @@ class ReimbursementService
 
             // Update receipt data if provided
             if (!empty($data['receipts'])) {
-                foreach ($data['receipts'] as $receiptData) {
-                    $receipt = Receipt::find($receiptData['id']);
-                    if ($receipt && $receipt->uploaded_by === $user->id) {
-                        if ($receipt->isRejectedStatus()) {
-                            throw ValidationException::withMessages([
-                                'receipts' => ['Rejected receipts cannot be edited or attached to a reimbursement.'],
-                            ]);
-                        }
-                        $receipt->update([
-                            'expense_category_id' => $receiptData['expense_category_id'] ?? $receipt->expense_category_id,
-                            'event_type' => $receiptData['event_type'] ?? $receipt->event_type,
-                            'vendor_name' => $receiptData['vendor_name'] ?? $receipt->vendor_name,
-                            'transaction_date' => $receiptData['transaction_date'] ?? $receipt->transaction_date,
-                            'total_amount' => $receiptData['total_amount'] ?? $receipt->total_amount,
-                            'subtotal' => $receiptData['subtotal'] ?? $receipt->subtotal,
-                            'vat_amount' => $receiptData['vat_amount'] ?? $receipt->vat_amount,
-                            'vat_classification' => $receiptData['vat_classification'] ?? $receipt->vat_classification,
-                            'tin' => $receiptData['tin'] ?? $receipt->tin,
-                            'invoice_number' => $receiptData['invoice_number'] ?? $receipt->invoice_number,
-                            'location' => $receiptData['location'] ?? $receipt->location,
-                        ]);
-
-                        if (isset($receiptData['items'])) {
-                            $receipt->items()->delete();
-                            $receipt->items()->createMany($receiptData['items']);
-                        }
-                    }
-                }
+                $this->syncInlineReceipts($user, $data['receipts'], true);
             }
 
             // Sync receipt associations if provided
+            $newReceiptIds = null;
             if (!empty($data['receipt_ids'])) {
                 $currentReceiptIds = $reimbursement->receipts()->pluck('receipts.id')->all();
                 $newReceiptIds = array_values(array_unique($data['receipt_ids']));
@@ -700,6 +702,21 @@ class ReimbursementService
                 'date' => $data['date'] ?? null,
                 'report_file_path' => $reportPath,
             ], fn($v) => $v !== null);
+
+            if (!empty($data['receipts']) || !empty($data['receipt_ids']) || array_key_exists('amount', $data)) {
+                $activeReceiptIds = $newReceiptIds ?? $reimbursement->receipts()->pluck('receipts.id')->all();
+                $fallbackAmount = array_key_exists('amount', $data)
+                    ? (float) $data['amount']
+                    : (float) $reimbursement->amount;
+                $authoritativeAmount = app(CurrencyConversionService::class)->resolveAuthoritativePhpTotal(
+                    $activeReceiptIds,
+                    $fallbackAmount,
+                    backfillMissing: true
+                );
+                if ($authoritativeAmount !== null) {
+                    $updatePayload['amount'] = $authoritativeAmount;
+                }
+            }
 
             if (array_key_exists('user_comment', $data)) {
                 $updatePayload['user_comment'] = $data['user_comment'];

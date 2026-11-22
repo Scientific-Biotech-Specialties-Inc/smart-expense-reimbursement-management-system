@@ -5,6 +5,10 @@ import { useNotificationStore } from "./notification";
 import { apiFetch } from "../utils/apiFetch";
 import { getFileUrl } from "../utils/fileUtils";
 import { canEditReceipt, firstFilePathField } from "../utils/receiptUtils";
+import {
+  clearReceiptExchangeRateSnapshot,
+  extractReceiptFxSnapshot,
+} from "../composables/useCurrencyRates";
 
 export const useReceiptStore = defineStore("receipts", () => {
   const auth = useAuthStore();
@@ -221,6 +225,7 @@ export const useReceiptStore = defineStore("receipts", () => {
       invoiceNumber: r.invoice_number,
       vatClassification: r.vat_classification,
       currency: r.currency || null,
+      ...extractReceiptFxSnapshot(r, r.currency || ""),
       location: r.location || null,
       ocrConfidenceScore: r.ocr_confidence_score,
       ocrFlagged: r.ocr_flagged,
@@ -456,6 +461,15 @@ export const useReceiptStore = defineStore("receipts", () => {
         return rx;
       }
 
+      const nextCurrency = metadata.currency || rx.currency;
+      const currencyChanged =
+        metadata.currency &&
+        String(metadata.currency).trim().toUpperCase() !==
+          String(rx.currency || "").trim().toUpperCase();
+      if (currencyChanged) {
+        clearReceiptExchangeRateSnapshot(rx);
+      }
+
       Object.assign(rx, {
         vendorName: metadata.vendor_name || rx.vendorName,
         date: metadata.transaction_date || rx.date,
@@ -470,7 +484,7 @@ export const useReceiptStore = defineStore("receipts", () => {
         tin: metadata.tin || rx.tin,
         invoiceNumber: metadata.invoice_number || rx.invoiceNumber,
         vatClassification: metadata.vat_classification || rx.vatClassification,
-        currency: metadata.currency || rx.currency,
+        currency: nextCurrency,
         location: metadata.location || rx.location,
         categoryId: metadata.expense_category_id || rx.categoryId,
         eventType:

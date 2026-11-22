@@ -6,6 +6,16 @@ Please refer to [**`DOC_CHANGELOG.md`**](DOC_CHANGELOG.md) for the complete vers
 
 ---
 
+## [Unreleased] - Nov 22, 2026
+
+### Added
+- **Multi-Currency Receipt FX Conversion to PHP Specification (`docs/SERMS.md`):**
+  - Updated `docs/SERMS.md` (§4.2, §5, §6.1, §6.7, §10.3) to specify multi-currency receipt FX conversion to `PHP`:
+    - **`currency_rates` Schema & Daily Sync:** Defined the `currency_rates` table (`currency_code` `char(3)` unique, `rate_to_php` `decimal(16,6)`, `effective_date` `date`, `source`, `fetched_at`) and the daily `currencies:sync` Laravel Scheduler job fetching ExchangeRate-API Open Access (`https://open.er-api.com/v6/latest/PHP`) with rate inversion (`1 / foreign_per_php`) and explicit boundary error handling.
+    - **On-Demand Refresh, Offline Fallback & Validation:** Specified automatic on-demand refresh when a cached rate is `>24h` old, graceful fallback to the latest cached rate when the external API is unreachable, and HTTP `422` rejection exclusively for unrecognized currency codes absent from both the provider and cache.
+    - **System-Locked `receipts` FX Snapshot:** Documented `receipts` FX snapshot columns (`exchange_rate`, `converted_php_amount`, `exchange_rate_date`, `exchange_rate_source`) preserving original `currency` and `total_amount` while locking conversion rates server-side and displaying read-only PHP conversion captions in the UI.
+    - **Authoritative PHP Totals:** Specified server-computed `PHP` normalization for `reimbursements.amount` and `liquidations.total_expense_amount` from attached receipts' `converted_php_amount` (evaluated prior to the liquidation minimum-balance check).
+
 ## [Unreleased] - Nov 21, 2026
 
 ### Added
