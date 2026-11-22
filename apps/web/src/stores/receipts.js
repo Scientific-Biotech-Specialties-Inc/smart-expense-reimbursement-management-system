@@ -146,6 +146,8 @@ export const useReceiptStore = defineStore("receipts", () => {
         "automatic-rejected",
         "processing",
         "final-rejected",
+        "flagged",
+        "failed",
       ].includes(normalizedStatus)
     ) {
       return normalizedStatus;
