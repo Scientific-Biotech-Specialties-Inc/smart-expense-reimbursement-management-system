@@ -61,6 +61,7 @@ class UpdateReimbursementRequest extends FormRequest
             'receipts.*.subtotal' => 'nullable|numeric|min:0',
             'receipts.*.vat_amount' => 'nullable|numeric|min:0',
             'receipts.*.vat_classification' => 'nullable|string|in:vat,non-vat',
+            'receipts.*.currency' => 'nullable|string|max:3',
             'receipts.*.tin' => 'nullable|string|max:50',
             'receipts.*.invoice_number' => 'nullable|string|max:100',
             'receipts.*.location' => 'nullable|string|max:255',

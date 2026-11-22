@@ -16,14 +16,15 @@ import BaseButton from "@/components/base/BaseButton.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import SbsiReportPreviewModal from "@/components/base/SbsiReportPreviewModal.vue";
 import { useToast } from "@/composables/useToast";
+import { useCurrencyRates } from "@/composables/useCurrencyRates";
 import sbsiLogo from "@/assets/sbsi-logo.webp";
-import { receiptGrossAmount } from "@/utils/receiptUtils";
 import {
   SBSI_FOOTER_CONTACT,
   buildTemplateParagraphs,
   createDefaultTemplateData,
   formatMediumDate,
   formatPhp,
+  receiptPhpGrossAmount,
   resetBreakdownFromReceipts,
   syncTemplateWithContext,
 } from "@/utils/sbsiReportTemplateUtils";
@@ -60,6 +61,8 @@ const emit = defineEmits([
 ]);
 
 const { addToast } = useToast();
+const { ratesMap, fetchRates } = useCurrencyRates();
+fetchRates();
 const MAX_BYTES = 2 * 1024 * 1024;
 const VALID_MIMES = [
   "application/pdf",
@@ -128,8 +131,10 @@ const safeSignatureUrl = computed(() => {
 const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
 const receiptsTotal = computed(() => {
+  // Touch ratesMap so live FX updates trigger reactive recalculation.
+  void ratesMap.value;
   if (Array.isArray(props.receipts) && props.receipts.length) {
-    return round2(props.receipts.reduce((s, r) => s + receiptGrossAmount(r), 0));
+    return round2(props.receipts.reduce((s, r) => s + receiptPhpGrossAmount(r), 0));
   }
   return round2(props.type === "liquidation" ? props.utilizedAmount : props.totalAmount);
 });
@@ -204,6 +209,7 @@ watch(
     props.disbursementDate,
     props.liquidationDeadline,
     props.recordId,
+    ratesMap.value,
   ],
   (
     [, , , , , nextPurpose, nextDisbursement, nextLiquidation],

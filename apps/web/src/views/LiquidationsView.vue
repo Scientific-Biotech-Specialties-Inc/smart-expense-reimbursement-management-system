@@ -35,6 +35,11 @@ import {
   serializeTemplateData,
 } from "@/composables/useRevisionGuard";
 import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
+import {
+  useCurrencyRates,
+  useReceiptCurrencyWatcher,
+  extractReceiptFxSnapshot,
+} from "@/composables/useCurrencyRates";
 import { formatPeso, formatDate, truncateText } from "@/utils/formatters";
 import { numberOrZero } from "@/utils/numbers";
 import {
@@ -68,6 +73,7 @@ const receiptStore = useReceiptStore();
 const auth = useAuthStore();
 const router = useRouter();
 const { addToast } = useToast();
+const { fetchRates, sumReceiptsPhpAmount } = useCurrencyRates();
 
 /** Refresh both stores in parallel — balance is now authoritative in the DB */
 async function refreshAll() {
@@ -75,11 +81,13 @@ async function refreshAll() {
     liqStore.fetchSettlements(),
     store.fetchAll(),
     receiptStore.fetchCategories(),
+    fetchRates(),
   ]);
 }
 
 const selectedAdvance = ref(null);
 const receipts = ref([]);
+useReceiptCurrencyWatcher(receipts);
 const reportAttachment = ref(null);
 const reportTemplateData = ref(null);
 const isReportManualMode = ref(false);
@@ -209,11 +217,17 @@ const defaultReceiptCategoryId = computed(() => {
   return Number(preferredCategory?.id ?? categories[0]?.id ?? null) || null;
 });
 
+function resolveLiquidationReceiptAmount(receipt) {
+  if (!receipt) return 0;
+  const ocrAmt = receipt.ocrData?.amount;
+  if (ocrAmt !== undefined && ocrAmt !== null && ocrAmt !== "") {
+    return numberOrZero(ocrAmt);
+  }
+  return numberOrZero(receipt.amount ?? receipt.total_amount);
+}
+
 const totalExpenseAmount = computed(() =>
-  receipts.value.reduce(
-    (sum, receipt) => sum + numberOrZero(receipt.ocrData?.amount),
-    0,
-  ),
+  sumReceiptsPhpAmount(receipts.value, resolveLiquidationReceiptAmount),
 );
 
 const isReceiptOcrProcessing = computed(() =>
@@ -445,6 +459,8 @@ const sourceCases = computed(() => {
         transactionDate: r.transaction_date || r.created_at,
         tinNumber: r.tin || "N/A",
         items: r.items || [],
+        currency: r.currency || "PHP",
+        ...extractReceiptFxSnapshot(r, r.currency || "PHP"),
         amount: Number(r.total_amount || 0),
         subtotal,
         vat: Number(r.vat_amount || 0),
@@ -1244,6 +1260,7 @@ function selectAdvance(adv) {
             invoiceNumber: r.invoice_number || "",
             location: r.location || "",
             currency: r.currency || "PHP",
+            ...extractReceiptFxSnapshot(r, r.currency || "PHP"),
             vatClassification: vatClass,
             subtotal: subtotal.toFixed(2),
             tax: Number(r.vat_amount || 0).toFixed(2),
@@ -1267,6 +1284,7 @@ function selectAdvance(adv) {
               tin: r.tin,
               invoiceNumber: r.invoice_number,
               location: r.location || "",
+              currency: r.currency || "PHP",
               file_path: r.file_path,
             },
           };
@@ -1467,10 +1485,10 @@ function clearReportAttachment() {
 }
 
 function acceptedReceiptTotal(row, receipts) {
-  return receipts.reduce((sum, receipt) => {
-    if (receipt.decision !== "accepted") return sum;
-    return sum + Number(receipt.amount || 0);
-  }, 0);
+  return sumReceiptsPhpAmount(
+    (receipts || []).filter((receipt) => receipt.decision === "accepted"),
+    (receipt) => Number(receipt.amount || 0),
+  );
 }
 
 function calculateLiquidationStatus(row, acceptedTotal) {

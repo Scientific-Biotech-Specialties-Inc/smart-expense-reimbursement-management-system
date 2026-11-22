@@ -1,4 +1,5 @@
 import { truncateDecimal } from "./formatters";
+import { extractReceiptFxSnapshot } from "../composables/useCurrencyRates";
 
 export const DISCOUNT_TYPE_OPTIONS = [
   { value: "none", label: "None" },
@@ -238,6 +239,7 @@ export function buildPrefilledReceiptDraft({
     discountType,
     vatClassification: amounts.vatClassification,
     currency: receiptData.currency || "",
+    ...extractReceiptFxSnapshot(receiptData, receiptData.currency || ""),
     date: formatDateForInput(receiptData.transaction_date || receiptData.date),
     category: categoryName,
     categoryId: receiptData.expense_category_id || null,

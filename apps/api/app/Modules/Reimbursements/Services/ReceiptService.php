@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
 use App\Modules\Shared\Services\CmsVendorVerificationService;
+use App\Modules\Shared\Services\CurrencyConversionService;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
 use App\Modules\Ai\Contracts\AsyncOcrEngineInterface;
 
@@ -123,31 +124,38 @@ class ReceiptService
 
             $isDraft = (bool) ($validated['is_draft'] ?? false);
 
-            $receipt = Receipt::create([
-                'uploaded_by'          => $user->id,
-                'file_path'            => $storedFile['file_path'],
-                'file_hash'            => $storedFile['file_hash'],
-                'file_type'            => $storedFile['file_type'],
-                'file_size_bytes'      => $storedFile['file_size_bytes'],
-                'expense_category_id'  => $validated['expense_category_id'] ?? null,
-                'vendor_name'          => $validated['vendor_name'] ?? null,
-                'transaction_date'     => $validated['transaction_date'] ?? null,
-                'total_amount'         => $validated['total_amount'] ?? null,
-                'subtotal'             => $validated['subtotal'] ?? null,
-                'vat_amount'           => $validated['vat_amount'] ?? null,
-                'discount_amount'      => $validated['discount_amount'] ?? 0,
-                'discount_type'        => $validated['discount_type'] ?? 'none',
-                'tin'                  => $validated['tin'] ?? null,
-                'invoice_number'       => $validated['invoice_number'] ?? null,
-                'vat_classification'   => $validated['vat_classification'] ?? null,
-                'currency'             => $validated['currency'] ?? null,
-                'location'             => $validated['location'] ?? null,
-                'ocr_confidence_score' => null,
-                'ocr_flagged'          => false,
-                'is_archived'          => false,
-                'is_draft'             => $isDraft,
-                'status'               => 'processing',
-            ]);
+            try {
+                $receiptPayload = app(CurrencyConversionService::class)->enrichReceiptPayload([
+                    'uploaded_by'          => $user->id,
+                    'file_path'            => $storedFile['file_path'],
+                    'file_hash'            => $storedFile['file_hash'],
+                    'file_type'            => $storedFile['file_type'],
+                    'file_size_bytes'      => $storedFile['file_size_bytes'],
+                    'expense_category_id'  => $validated['expense_category_id'] ?? null,
+                    'vendor_name'          => $validated['vendor_name'] ?? null,
+                    'transaction_date'     => $validated['transaction_date'] ?? null,
+                    'total_amount'         => $validated['total_amount'] ?? null,
+                    'subtotal'             => $validated['subtotal'] ?? null,
+                    'vat_amount'           => $validated['vat_amount'] ?? null,
+                    'discount_amount'      => $validated['discount_amount'] ?? 0,
+                    'discount_type'        => $validated['discount_type'] ?? 'none',
+                    'tin'                  => $validated['tin'] ?? null,
+                    'invoice_number'       => $validated['invoice_number'] ?? null,
+                    'vat_classification'   => $validated['vat_classification'] ?? null,
+                    'currency'             => $validated['currency'] ?? null,
+                    'location'             => $validated['location'] ?? null,
+                    'ocr_confidence_score' => null,
+                    'ocr_flagged'          => false,
+                    'is_archived'          => false,
+                    'is_draft'             => $isDraft,
+                    'status'               => 'processing',
+                ]);
+
+                $receipt = Receipt::create($receiptPayload);
+            } catch (\Throwable $e) {
+                $this->cleanupStoredFiles($storedFile['file_path']);
+                throw $e;
+            }
 
             if (!empty($validated['items'])) {
                 $receipt->items()->createMany($validated['items']);
@@ -217,7 +225,8 @@ class ReceiptService
             // 'processed' to correct a poor OCR result, but no other status change
             // is permitted. An attached receipt must keep mirroring its
             // reimbursement, so the promotion is ignored for attached receipts.
-            $updateData = collect($data);
+            $updateData = collect($data)
+                ->except(['exchange_rate', 'converted_php_amount', 'exchange_rate_date', 'exchange_rate_source']);
             if (!$canManage) {
                 $updateData = $updateData->except(['admin_notes']);
                 if ($updateData->has('status')) {
@@ -244,6 +253,21 @@ class ReceiptService
             // Normalize vat_classification to lowercase when present.
             if (array_key_exists('vat_classification', $updateData)) {
                 $updateData['vat_classification'] = strtolower((string) $updateData['vat_classification']);
+            }
+
+            $amountChanged = array_key_exists('total_amount', $updateData)
+                && (
+                    ($updateData['total_amount'] === null) !== ($receipt->total_amount === null)
+                    || ($updateData['total_amount'] !== null && round((float) $updateData['total_amount'], 2) !== round((float) $receipt->total_amount, 2))
+                );
+            $currencyChanged = array_key_exists('currency', $updateData)
+                && $updateData['currency'] !== null
+                && trim((string) $updateData['currency']) !== ''
+                && strtoupper(trim((string) $updateData['currency'])) !== strtoupper((string) ($receipt->currency ?? 'PHP'));
+            $needsBackfill = $receipt->converted_php_amount === null && $receipt->total_amount !== null;
+
+            if ($amountChanged || $currencyChanged || $needsBackfill) {
+                $updateData = app(CurrencyConversionService::class)->enrichReceiptPayload($updateData, $receipt);
             }
 
             $beforeState = $receipt->toArray();
@@ -358,7 +382,7 @@ class ReceiptService
             }
 
             $updateData = collect($data)
-                ->except(['file', 'items'])
+                ->except(['file', 'items', 'exchange_rate', 'converted_php_amount', 'exchange_rate_date', 'exchange_rate_source'])
                 ->toArray();
 
             if (array_key_exists('vat_classification', $updateData)) {
@@ -368,6 +392,8 @@ class ReceiptService
             // Metadata-only edit (no replacement file).
             $updateData['status'] = 'processed';
             $updateData['ocr_flagged'] = false;
+
+            $updateData = app(CurrencyConversionService::class)->enrichReceiptPayload($updateData, $receipt);
 
             $beforeState = $receipt->toArray();
 

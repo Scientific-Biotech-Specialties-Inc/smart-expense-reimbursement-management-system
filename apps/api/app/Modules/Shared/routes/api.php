@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Modules\Shared\Http\Controllers\AuthController;
 use App\Modules\Shared\Http\Controllers\CmsController;
 use App\Modules\Shared\Http\Controllers\CryptoController;
+use App\Modules\Shared\Http\Controllers\CurrencyRateController;
 use App\Modules\Shared\Http\Controllers\InternalCmsController;
 use App\Modules\Shared\Http\Controllers\InternalTsController;
 use App\Modules\Shared\Http\Controllers\ReportController;
@@ -38,5 +39,8 @@ Route::prefix('api')->group(function () {
 
         // Ticketing System (TS) integration proxy
         Route::get('/ts/tickets', [TsController::class, 'tickets']);
+
+        // Multi-currency FX rates (PHP base)
+        Route::get('/currencies/rates', [CurrencyRateController::class, 'index']);
     });
 });

@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
 import { formatDate } from "@/utils/formatters";
+import { extractReceiptFxSnapshot } from "@/composables/useCurrencyRates";
 import BaseReceiptDetailModal from "@/components/base/BaseReceiptDetailModal.vue";
 import { CheckCircle, XCircle } from "lucide-vue-next";
 
@@ -24,8 +25,9 @@ const normalizedReceipt = computed(() => {
     vendor: props.receipt.merchantName || "Unknown Vendor",
     category: props.receipt.category || "—",
     tin: props.receipt.tinNumber || "—",
-    vatClassification: "VAT",
-    currency: "PHP",
+    vatClassification: props.receipt.vatClassification ?? props.receipt.vat_classification ?? "VAT",
+    currency: props.receipt.currency || "PHP",
+    ...extractReceiptFxSnapshot(props.receipt, props.receipt.currency || "PHP"),
     items: props.receipt.items || [],
     amount: props.receipt.amount || 0,
     vat: props.receipt.vat || 0,
