@@ -12,6 +12,7 @@ import {
   formatMediumDate,
   formatPhp,
   generateSystemRefId,
+  resetBreakdownFromReceipts,
   syncTemplateWithContext,
   validateTemplateData,
 } from "@/utils/sbsiReportTemplateUtils";
@@ -178,6 +179,77 @@ describe("sbsiReportTemplateUtils", () => {
     });
     ok.breakdownItems[0].description = "Fuel";
     expect(validateTemplateData(ok)).toEqual({ valid: true, errors: [] });
+  });
+
+  it("reconciles receipt additions/removals while preserving custom rows, manual edits, and removedSourceIds", () => {
+    const base = createDefaultTemplateData("reimbursement", { receipts });
+    base.breakdownItems[0].description = "Team lunch";
+    base.breakdownItems[0].descriptionEdited = true;
+    base.breakdownItems[0].amount = 300;
+    base.breakdownItems[0].amountEdited = true;
+    base.breakdownItems.push({ description: "Toll fee", amount: 150 });
+    base.removedSourceIds = ["2"];
+    base.breakdownItems = base.breakdownItems.filter((item) => item.sourceId !== "2");
+
+    // Receipt 2 still exists in receipts, receipt 3 is added -> 2 stays deleted, 3 is appended, custom & edited kept
+    const afterAdd = syncTemplateWithContext(base, {
+      receipts: [
+        { ...receipts[0], total_amount: 999 },
+        receipts[1],
+        { id: 3, category: "Supplies", vendor_name: "National Book Store", total_amount: 200 },
+      ],
+    });
+    expect(afterAdd.breakdownItems).toEqual([
+      { sourceId: "1", description: "Team lunch", descriptionEdited: true, amount: 300, amountEdited: true },
+      { description: "Toll fee", amount: 150 },
+      { sourceId: "3", description: "Supplies - National Book Store", descriptionEdited: false, amount: 200, amountEdited: false },
+    ]);
+    expect(afterAdd.totalAmount).toBe(650);
+    expect(afterAdd.removedSourceIds).toEqual(["2"]);
+
+    // Receipt 2 is actually removed from receipts, receipt 3 is removed -> 3 drops, removedSourceIds prunes "2"
+    const afterRemove = syncTemplateWithContext(afterAdd, { receipts: [receipts[0]] });
+    expect(afterRemove.breakdownItems).toEqual([
+      { sourceId: "1", description: "Team lunch", descriptionEdited: true, amount: 300, amountEdited: true },
+      { description: "Toll fee", amount: 150 },
+    ]);
+    expect(afterRemove.totalAmount).toBe(450);
+    expect(afterRemove.removedSourceIds).toEqual([]);
+
+    // Reset restores clean 1-to-1 from receipts
+    const reset = resetBreakdownFromReceipts(afterRemove, { receipts });
+    expect(reset.breakdownItems.map((i) => ({ sourceId: i.sourceId, amount: i.amount }))).toEqual([
+      { sourceId: "1", amount: 250 },
+      { sourceId: "2", amount: 1000 },
+    ]);
+    expect(reset.totalAmount).toBe(1250);
+    expect(reset.removedSourceIds).toEqual([]);
+  });
+
+  it("does not duplicate legacy breakdownItems lacking sourceId when syncing with receipts, while keeping isCustom rows", () => {
+    const legacy = {
+      type: "liquidation",
+      allocatedAmount: 1000,
+      breakdownItems: [{ qty: 1, description: "Meals - Jollibee", amount: 250 }],
+    };
+    const synced = syncTemplateWithContext(legacy, {
+      receipts: [receipts[0]],
+    });
+    expect(synced.breakdownItems).toHaveLength(1);
+    expect(synced.breakdownItems[0].sourceId).toBe("1");
+    expect(synced.utilizedAmount).toBe(250);
+
+    // Explicit isCustom row is kept even when no sourceId rows exist
+    const customOnly = {
+      type: "reimbursement",
+      breakdownItems: [{ description: "Custom Toll", amount: 120, isCustom: true }],
+    };
+    const syncedCustom = syncTemplateWithContext(customOnly, { receipts: [receipts[0]] });
+    expect(syncedCustom.breakdownItems.map((i) => i.description)).toEqual([
+      "Custom Toll",
+      "Meals - Jollibee",
+    ]);
+    expect(syncedCustom.totalAmount).toBe(370);
   });
 });
 
@@ -604,6 +676,87 @@ describe("SbsiReportDocumentEditor", () => {
     expect(text.endsWith("%%EOF")).toBe(true);
     expect(text).not.toContain("/Subtype /Image");
     warnSpy.mockRestore();
+  });
+
+  it("allows editing amounts, adding custom rows, removing rows, and resetting from receipts in reimbursement", async () => {
+    const wrapper = mountEditor({ type: "reimbursement", receipts, totalAmount: 1250 });
+    await nextTick();
+
+    // Amounts and Add/Remove controls are editable for reimbursement
+    const amount0 = wrapper.find('[data-testid="breakdown-amount-0"]');
+    expect(amount0.exists()).toBe(true);
+    await amount0.setValue(400);
+    await nextTick();
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].totalAmount).toBe(1400);
+    expect(wrapper.emitted("update:totalAmount")).toBeUndefined();
+
+    // Mismatch warning appears because 1400 !== 1250
+    expect(wrapper.find('[data-testid="breakdown-mismatch-warning"]').exists()).toBe(true);
+
+    // Add custom row
+    await wrapper.find('[data-testid="breakdown-add"]').trigger("click");
+    await nextTick();
+    await wrapper.find('[data-testid="breakdown-description-2"]').setValue("Parking");
+    await wrapper.find('[data-testid="breakdown-amount-2"]').setValue(100);
+    await nextTick();
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].totalAmount).toBe(1500);
+
+    // Remove receipt-linked row 1 (Grab); stays removed when a new receipt is added
+    await wrapper.find('[data-testid="breakdown-remove-1"]').trigger("click");
+    await nextTick();
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].breakdownItems).toHaveLength(2);
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].totalAmount).toBe(500);
+
+    await wrapper.setProps({
+      receipts: [...receipts, { id: 3, category: "Supplies", vendor_name: "NBS", total_amount: 50 }],
+      totalAmount: 1300,
+    });
+    await nextTick();
+    const descriptionsAfterAdd = wrapper
+      .findAll('[data-testid^="breakdown-description-"]')
+      .map((el) => el.element.value);
+    expect(descriptionsAfterAdd.some((d) => d.includes("Grab"))).toBe(false);
+    expect(descriptionsAfterAdd.some((d) => d.includes("NBS"))).toBe(true);
+    expect(descriptionsAfterAdd).toContain("Parking");
+
+    // Reset from receipts restores 1-to-1 sync and clears mismatch warning
+    await wrapper.find('[data-testid="breakdown-reset"]').trigger("click");
+    await nextTick();
+    const resetItems = wrapper.emitted("update:modelValue").at(-1)[0].breakdownItems;
+    expect(resetItems).toHaveLength(3);
+    expect(wrapper.emitted("update:modelValue").at(-1)[0].totalAmount).toBe(1300);
+    expect(wrapper.find('[data-testid="breakdown-mismatch-warning"]').exists()).toBe(false);
+  });
+
+  it("removes linked row when a receipt is removed and enforces minimum 1 row in reimbursement and liquidation", async () => {
+    const wrapper = mountEditor({ type: "reimbursement", receipts, totalAmount: 1250 });
+    await nextTick();
+
+    // Add custom row, then remove receipt 2 from props.receipts
+    await wrapper.find('[data-testid="breakdown-add"]').trigger("click");
+    await wrapper.find('[data-testid="breakdown-description-2"]').setValue("Extra");
+    await wrapper.find('[data-testid="breakdown-amount-2"]').setValue(50);
+    await wrapper.setProps({ receipts: [receipts[0]], totalAmount: 250 });
+    await nextTick();
+
+    const items = wrapper.emitted("update:modelValue").at(-1)[0].breakdownItems;
+    expect(items.map((i) => i.amount)).toEqual([250, 50]);
+
+    // Removing down to 1 row hides the remove button on the last row
+    await wrapper.find('[data-testid="breakdown-remove-1"]').trigger("click");
+    await nextTick();
+    expect(wrapper.find('[data-testid="breakdown-remove-0"]').exists()).toBe(false);
+
+    // Liquidation also supports editing amounts, adding/removing rows, and resetting
+    const liqWrapper = mountEditor({ type: "liquidation", receipts, allocatedAmount: 2000, utilizedAmount: 1250 });
+    await nextTick();
+    await liqWrapper.find('[data-testid="breakdown-amount-0"]').setValue(500);
+    await nextTick();
+    expect(liqWrapper.emitted("update:modelValue").at(-1)[0].utilizedAmount).toBe(1500);
+    expect(liqWrapper.emitted("update:modelValue").at(-1)[0].variance).toBe(500);
+    expect(liqWrapper.find('[data-testid="breakdown-mismatch-warning"]').exists()).toBe(true);
+    expect(liqWrapper.find('[data-testid="breakdown-add"]').exists()).toBe(true);
+    expect(liqWrapper.find('[data-testid="breakdown-reset"]').exists()).toBe(true);
   });
 });
 

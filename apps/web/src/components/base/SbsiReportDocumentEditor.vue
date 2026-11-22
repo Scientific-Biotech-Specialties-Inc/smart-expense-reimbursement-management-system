@@ -10,18 +10,21 @@ import {
   Plus,
   Trash2,
   CalendarDays,
+  RotateCcw,
 } from "lucide-vue-next";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import SbsiReportPreviewModal from "@/components/base/SbsiReportPreviewModal.vue";
 import { useToast } from "@/composables/useToast";
 import sbsiLogo from "@/assets/sbsi-logo.webp";
+import { receiptGrossAmount } from "@/utils/receiptUtils";
 import {
   SBSI_FOOTER_CONTACT,
   buildTemplateParagraphs,
   createDefaultTemplateData,
   formatMediumDate,
   formatPhp,
+  resetBreakdownFromReceipts,
   syncTemplateWithContext,
 } from "@/utils/sbsiReportTemplateUtils";
 
@@ -124,14 +127,47 @@ const safeSignatureUrl = computed(() => {
 });
 const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100;
 
+const receiptsTotal = computed(() => {
+  if (Array.isArray(props.receipts) && props.receipts.length) {
+    return round2(props.receipts.reduce((s, r) => s + receiptGrossAmount(r), 0));
+  }
+  return round2(props.type === "liquidation" ? props.utilizedAmount : props.totalAmount);
+});
+
+const breakdownTotal = computed(() =>
+  round2((templateData.value?.breakdownItems || []).reduce((s, i) => s + (Number(i.amount) || 0), 0)),
+);
+
+const hasBreakdownMismatch = computed(
+  () =>
+    !isCashAdvance.value &&
+    Array.isArray(props.receipts) &&
+    props.receipts.length > 0 &&
+    Math.abs(breakdownTotal.value - receiptsTotal.value) > 0.005,
+);
+
 function publishTemplateModel(data) {
+  const sum = round2((data.breakdownItems || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
   if (isCashAdvance.value) {
-    const sum = round2(data.breakdownItems.reduce((s, i) => s + (Number(i.amount) || 0), 0));
     if (sum !== data.totalAmount) {
       data.totalAmount = sum;
       return; // re-triggers once with the normalised value
     }
     if (sum !== round2(props.totalAmount)) emit("update:totalAmount", sum);
+  } else if (props.type === "reimbursement") {
+    if (data.breakdownItems.length && sum !== data.totalAmount) {
+      data.totalAmount = sum;
+      return;
+    }
+  } else if (props.type === "liquidation") {
+    if (data.breakdownItems.length) {
+      const nextVariance = round2((Number(data.allocatedAmount) || 0) - sum);
+      if (sum !== data.utilizedAmount || nextVariance !== data.variance) {
+        data.utilizedAmount = sum;
+        data.variance = nextVariance;
+        return;
+      }
+    }
   }
   const json = JSON.stringify(data);
   if (json !== lastEmitted) {
@@ -282,10 +318,25 @@ const manualName = computed(() => {
 });
 
 function addRow() {
-  templateData.value.breakdownItems.push({ description: "", amount: 0 });
+  templateData.value.breakdownItems.push(
+    isCashAdvance.value ? { description: "", amount: 0 } : { description: "", amount: 0, isCustom: true },
+  );
 }
 function removeRow(i) {
-  if (templateData.value.breakdownItems.length > 1) templateData.value.breakdownItems.splice(i, 1);
+  if (templateData.value.breakdownItems.length <= 1) return;
+  const [removed] = templateData.value.breakdownItems.splice(i, 1);
+  if (removed?.sourceId) {
+    const existing = Array.isArray(templateData.value.removedSourceIds)
+      ? templateData.value.removedSourceIds
+      : [];
+    const sid = String(removed.sourceId);
+    if (!existing.includes(sid)) {
+      templateData.value.removedSourceIds = [...existing, sid];
+    }
+  }
+}
+function resetFromReceipts() {
+  templateData.value = resetBreakdownFromReceipts(templateData.value, context());
 }
 
 const fieldWidth = (value, placeholder) => `${Math.max(String(value || placeholder || "").length + 1, 8)}ch`;
@@ -547,7 +598,7 @@ const CHEVRON = "polygon(100% 0, 50% 0, 0 50%, 50% 100%, 100% 100%, 50% 50%)";
                     />
                     <span v-else class="flex-1">{{ item.description }}</span>
                     <input
-                      v-if="editable && isCashAdvance"
+                      v-if="editable"
                       v-model.number="item.amount"
                       type="number"
                       min="0"
@@ -555,10 +606,11 @@ const CHEVRON = "polygon(100% 0, 50% 0, 0 50%, 50% 100%, 100% 100%, 50% 50%)";
                       :class="[PILL, 'w-28 text-right']"
                       :aria-label="`Breakdown ${i + 1} amount`"
                       :data-testid="`breakdown-amount-${i}`"
+                      @input="!isCashAdvance && (item.amountEdited = true)"
                     />
                     <strong v-else>{{ formatPhp(item.amount) }}</strong>
                     <BaseButton
-                      v-if="editable && isCashAdvance && templateData.breakdownItems.length > 1"
+                      v-if="editable && templateData.breakdownItems.length > 1"
                       variant="ghost"
                       size="sm"
                       :aria-label="`Remove breakdown ${i + 1}`"
@@ -572,9 +624,26 @@ const CHEVRON = "polygon(100% 0, 50% 0, 0 50%, 50% 100%, 100% 100%, 50% 50%)";
                     <span>TOTAL</span>
                     <span>{{ formatPhp(type === 'liquidation' ? templateData.utilizedAmount : templateData.totalAmount) }}</span>
                   </div>
-                  <div v-if="editable && isCashAdvance" class="pl-3">
+                  <div
+                    v-if="hasBreakdownMismatch"
+                    role="status"
+                    data-testid="breakdown-mismatch-warning"
+                    class="ml-3 rounded border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800"
+                  >
+                    Breakdown total ({{ formatPhp(breakdownTotal) }}) differs from attached receipts total ({{ formatPhp(receiptsTotal) }}). Claim payout remains receipt-backed.
+                  </div>
+                  <div v-if="editable" class="flex flex-wrap items-center gap-2 pl-3">
                     <BaseButton data-testid="breakdown-add" variant="outline" size="sm" @click="addRow">
                       <Plus class="h-4 w-4" /> Add row
+                    </BaseButton>
+                    <BaseButton
+                      v-if="!isCashAdvance && receipts.length > 0"
+                      data-testid="breakdown-reset"
+                      variant="ghost"
+                      size="sm"
+                      @click="resetFromReceipts"
+                    >
+                      <RotateCcw class="h-4 w-4" /> Reset from receipts
                     </BaseButton>
                   </div>
                 </div>

@@ -97,18 +97,53 @@ function userFields(user) {
 
 const sumItems = (items) => round2((items || []).reduce((s, i) => s + num(i.amount), 0));
 
-function itemsFromReceipts(receipts, previous = []) {
-  return receipts.map((r, i) => {
-    const sourceId = receiptKey(r, i);
-    const auto = receiptDescription(r);
-    const prev = previous.find((p) => p.sourceId === sourceId);
-    return {
-      sourceId,
-      description: prev?.descriptionEdited ? prev.description : auto,
-      descriptionEdited: !!prev?.descriptionEdited,
-      amount: round2(receiptGrossAmount(r)),
-    };
-  });
+function reconcileBreakdownItems(receipts, previous = [], previousRemovedIds = []) {
+  const entries = receipts.map((r, i) => ({
+    sourceId: receiptKey(r, i),
+    description: receiptDescription(r),
+    amount: round2(receiptGrossAmount(r)),
+  }));
+  const byId = new Map(entries.map((e) => [e.sourceId, e]));
+  const removedSet = new Set(Array.isArray(previousRemovedIds) ? previousRemovedIds.map(String) : []);
+  const nextRemovedIds = [...removedSet].filter((id) => byId.has(id));
+  const hasTrackedFormat =
+    removedSet.size > 0 || (previous || []).some((item) => item?.sourceId || item?.isCustom);
+  const seen = new Set();
+  const nextItems = [];
+
+  for (const item of previous || []) {
+    if (!item || typeof item !== "object") continue;
+    if (item.isCustom || (!item.sourceId && hasTrackedFormat)) {
+      nextItems.push({ ...item });
+      continue;
+    }
+    if (!item.sourceId) continue; // legacy unlinked item: rebuild cleanly from receipts
+    const sid = String(item.sourceId);
+    const entry = byId.get(sid);
+    if (!entry || removedSet.has(sid) || seen.has(sid)) continue;
+    seen.add(sid);
+    nextItems.push({
+      ...item,
+      sourceId: sid,
+      description: item.descriptionEdited ? item.description : entry.description,
+      descriptionEdited: !!item.descriptionEdited,
+      amount: item.amountEdited ? round2(item.amount) : entry.amount,
+      amountEdited: !!item.amountEdited,
+    });
+  }
+
+  for (const entry of entries) {
+    if (seen.has(entry.sourceId) || removedSet.has(entry.sourceId)) continue;
+    nextItems.push({
+      sourceId: entry.sourceId,
+      description: entry.description,
+      descriptionEdited: false,
+      amount: entry.amount,
+      amountEdited: false,
+    });
+  }
+
+  return { breakdownItems: nextItems, removedSourceIds: nextRemovedIds };
 }
 
 function baseTemplate(type) {
@@ -132,6 +167,7 @@ function baseTemplate(type) {
     utilizedAmount: 0,
     variance: 0,
     breakdownItems: [],
+    removedSourceIds: [],
     additionalNotes: "",
     signatoryName: "",
     signatoryRole: "",
@@ -142,12 +178,18 @@ function baseTemplate(type) {
 
 /**
  * Update context-driven fields (receipts, amounts, dates, purpose, ref id) on a template
- * without touching user-authored narrative, recipient, subject or signatory edits.
+ * without touching user-authored narrative, recipient, subject, custom rows, or manual breakdown edits.
  * Returns a new object.
  */
 export function syncTemplateWithContext(templateData, context = {}) {
   const type = templateData?.type;
-  const next = { ...templateData, breakdownItems: (templateData?.breakdownItems || []).map((i) => ({ ...i })) };
+  const next = {
+    ...templateData,
+    breakdownItems: (templateData?.breakdownItems || []).map((i) => ({ ...i })),
+    removedSourceIds: Array.isArray(templateData?.removedSourceIds)
+      ? templateData.removedSourceIds.map(String)
+      : [],
+  };
 
   if (typeof context.purpose === "string" && context.purpose !== "") next.purpose = context.purpose;
   if (context.disbursementDate) next.disbursementDate = String(context.disbursementDate).slice(0, 10);
@@ -158,7 +200,9 @@ export function syncTemplateWithContext(templateData, context = {}) {
 
   if (type === "reimbursement" || type === "liquidation") {
     if (Array.isArray(context.receipts)) {
-      next.breakdownItems = itemsFromReceipts(context.receipts, next.breakdownItems);
+      const reconciled = reconcileBreakdownItems(context.receipts, next.breakdownItems, next.removedSourceIds);
+      next.breakdownItems = reconciled.breakdownItems;
+      next.removedSourceIds = reconciled.removedSourceIds;
       if (!next.expenseDate) next.expenseDate = receiptDate(context.receipts);
     }
     const sum = sumItems(next.breakdownItems);
@@ -166,7 +210,11 @@ export function syncTemplateWithContext(templateData, context = {}) {
       next.totalAmount = next.breakdownItems.length ? sum : num(context.totalAmount ?? next.totalAmount);
     } else {
       if (context.allocatedAmount !== undefined) next.allocatedAmount = round2(context.allocatedAmount);
-      next.utilizedAmount = num(context.utilizedAmount) > 0 ? round2(context.utilizedAmount) : sum;
+      next.utilizedAmount = next.breakdownItems.length
+        ? sum
+        : num(context.utilizedAmount) > 0
+          ? round2(context.utilizedAmount)
+          : sum;
       next.variance =
         next.allocatedAmount || next.utilizedAmount
           ? round2(next.allocatedAmount - next.utilizedAmount)
@@ -187,6 +235,21 @@ export function syncTemplateWithContext(templateData, context = {}) {
     next.systemRefIdAuto = true;
   }
   return next;
+}
+
+/**
+ * Rebuild breakdownItems 1-to-1 from `context.receipts`, clearing custom rows,
+ * removedSourceIds, and manual description/amount overrides.
+ */
+export function resetBreakdownFromReceipts(templateData, context = {}) {
+  return syncTemplateWithContext(
+    {
+      ...templateData,
+      breakdownItems: [],
+      removedSourceIds: [],
+    },
+    context,
+  );
 }
 
 /**

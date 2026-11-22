@@ -133,14 +133,15 @@ describe("useRevisionGuard", () => {
     expect(base).not.toEqual(discountEdited);
   });
 
-  it("ignores transient descriptionEdited UI flags when serializing template data", () => {
+  it("ignores transient descriptionEdited/amountEdited UI flags and empty removedSourceIds when serializing template data", () => {
     const original = serializeTemplateData({
       purpose: "Field Audit",
       breakdownItems: [{ description: "Flight", amount: 5000 }],
     });
     const reverted = serializeTemplateData({
       purpose: "Field Audit",
-      breakdownItems: [{ description: "Flight", amount: 5000, descriptionEdited: true }],
+      removedSourceIds: [],
+      breakdownItems: [{ description: "Flight", amount: 5000, descriptionEdited: true, amountEdited: true }],
     });
     expect(canonicalizeSnapshot(original)).toEqual(canonicalizeSnapshot(reverted));
   });
