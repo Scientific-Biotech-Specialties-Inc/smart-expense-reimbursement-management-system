@@ -104,6 +104,57 @@ describe("ScannedReceiptsList — Required Field Highlighting", () => {
     expect(eventSelect.classes()).not.toContain("input-error");
   });
 
+  it("shows required asterisk and missing-field error on Type of Event when requireEventType is true (default)", () => {
+    const receipt = {
+      ...baseReceipt,
+      hasOcrReturned: true,
+      categoryId: 1,
+      eventType: "",
+    };
+    const wrapper = mount(ScannedReceiptsList, {
+      props: {
+        receipts: [receipt],
+        categories: [{ id: 1, name: "Meals" }],
+      },
+    });
+
+    const eventSelect = wrapper.find("[data-testid='receipt-event-type-select']");
+    const eventWrapper = eventSelect.element.closest(".input-wrapper");
+    expect(eventWrapper.querySelector(".input-label").textContent).toContain("*");
+    expect(eventSelect.classes()).toContain("input-error");
+    expect(wrapper.text()).toContain("Type of event is required");
+    expect(eventSelect.find("option[value='']").attributes("disabled")).toBeDefined();
+  });
+
+  it("hides required asterisk and suppresses missing-field error on Type of Event when requireEventType is false", async () => {
+    const receipt = {
+      ...baseReceipt,
+      hasOcrReturned: true,
+      categoryId: 1,
+      eventType: "",
+    };
+    const wrapper = mount(ScannedReceiptsList, {
+      props: {
+        receipts: [receipt],
+        categories: [{ id: 1, name: "Meals" }],
+        requireEventType: false,
+      },
+    });
+
+    const eventSelect = wrapper.find("[data-testid='receipt-event-type-select']");
+    const eventWrapper = eventSelect.element.closest(".input-wrapper");
+    expect(eventWrapper.querySelector(".input-label").textContent).not.toContain("*");
+    expect(eventSelect.classes()).not.toContain("input-error");
+    expect(wrapper.text()).not.toContain("Type of event is required");
+    expect(eventSelect.find("option[value='']").attributes("disabled")).toBeUndefined();
+
+    // Can also select and clear back to empty
+    await eventSelect.setValue("Client Meeting");
+    expect(receipt.eventType).toBe("Client Meeting");
+    await eventSelect.setValue("");
+    expect(receipt.eventType).toBe("");
+  });
+
   it("keeps subtotal and total independent when user inputs values", async () => {
     const receipt = {
       ...baseReceipt,

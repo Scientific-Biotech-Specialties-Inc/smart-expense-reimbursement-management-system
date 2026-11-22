@@ -504,4 +504,33 @@ class ReceiptOwnerUpdateTest extends TestCase
         $this->assertCount(1, $afterList->json('data'));
         $this->assertSame($receipt->id, $afterList->json('data.0.id'));
     }
+
+    public function test_owner_can_update_event_type_and_subtotal(): void
+    {
+        $receipt = Receipt::create([
+            'uploaded_by' => $this->employee->id,
+            'file_path' => ['receipts/owner_event_type.png'],
+            'file_hash' => [str_repeat('i', 64)],
+            'file_type' => ['png'],
+            'file_size_bytes' => [1024],
+            'status' => 'processed',
+        ]);
+
+        $response = $this->patchAs($this->employee, $receipt->id, [
+            'event_type' => 'Training',
+            'subtotal' => 500.00,
+            'vat_amount' => 60.00,
+            'total_amount' => 560.00,
+        ]);
+
+        $response->assertStatus(200)
+            ->assertJsonPath('data.event_type', 'Training')
+            ->assertJsonPath('data.subtotal', '500.00');
+
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receipt->id,
+            'event_type' => 'Training',
+            'subtotal' => '500.00',
+        ]);
+    }
 }

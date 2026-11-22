@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ref } from "vue";
 import { mount } from "@vue/test-utils";
 import ReceiptUploadModal from "@/components/expenses/ReceiptUploadModal.vue";
+import ScannedReceiptsList from "@/components/reimbursements/ScannedReceiptsList.vue";
 
 // Mock the stores/composables the component pulls in at setup so the test focuses
 // on the component's own logic (buildUpdatePayload / saveReceipt) without hitting
@@ -33,6 +34,7 @@ const {
   mockClearDraftReceipts,
   mockAbortSessionReceipts,
   mockHandleConfirmLeave,
+  mockUnsavedState,
 } = vi.hoisted(() => ({
   mockLocalReceipts: { ref: null },
   mockQualityRejection: { ref: null },
@@ -40,6 +42,7 @@ const {
   mockClearDraftReceipts: vi.fn(),
   mockAbortSessionReceipts: vi.fn(),
   mockHandleConfirmLeave: vi.fn(),
+  mockUnsavedState: { isDirtyRef: null, isSubmittedRef: null },
 }));
 
 vi.mock("@/composables/reimbursements/useReceiptUploads", async () => {
@@ -67,12 +70,16 @@ vi.mock("@/composables/reimbursements/useReceiptUploads", async () => {
 });
 
 vi.mock("@/composables/useUnsavedChanges", () => ({
-  useUnsavedChanges: () => ({
-    showConfirmModal: false,
-    handleConfirmLeave: mockHandleConfirmLeave,
-    handleCancelLeave: vi.fn(),
-    dismissWithConfirm: (cb) => cb(),
-  }),
+  useUnsavedChanges: (isDirtyRef, isSubmittedRef) => {
+    mockUnsavedState.isDirtyRef = isDirtyRef;
+    mockUnsavedState.isSubmittedRef = isSubmittedRef;
+    return {
+      showConfirmModal: false,
+      handleConfirmLeave: mockHandleConfirmLeave,
+      handleCancelLeave: vi.fn(),
+      dismissWithConfirm: (cb) => cb(),
+    };
+  },
 }));
 
 const stubs = {
@@ -96,7 +103,7 @@ function mountModal(props = {}) {
 }
 
 describe("ReceiptUploadModal — BUG 2 (OCR auto-trigger)", () => {
-  it("buildUpdatePayload does NOT force status='processed'", () => {
+  it("buildUpdatePayload does NOT force status='processed' and maps subtotal & event_type", () => {
     const wrapper = mountModal();
     const fakeReceipt = {
       id: "temp-1",
@@ -106,6 +113,8 @@ describe("ReceiptUploadModal — BUG 2 (OCR auto-trigger)", () => {
       tin: "123-456-789",
       merchantName: "Vendor",
       categoryId: 2,
+      eventType: "Client Meeting",
+      subtotal: 89.29,
       amount: 100,
       tax: 12,
       vatClassification: "vat",
@@ -120,8 +129,37 @@ describe("ReceiptUploadModal — BUG 2 (OCR auto-trigger)", () => {
     // async OCR callback is applied instead of being skipped by the replay guard.
     expect(payload.status).toBeUndefined();
     expect(payload).not.toHaveProperty("status", "processed");
+    expect(payload.subtotal).toBe("89.29");
+    expect(payload.event_type).toBe("Client Meeting");
+    expect(payload.location).toBe("Manila");
   });
 });
+
+function makeEditableReceipt(overrides = {}) {
+  return {
+    id: "RCPT-2026-001",
+    dbId: 1,
+    status: "processed",
+    fileName: "receipt.png",
+    fileType: "image/png",
+    invoiceNumber: "INV-1",
+    date: "2026-06-01",
+    tin: "123-456-789-000",
+    vendorName: "Vendor",
+    location: "Manila",
+    categoryId: 2,
+    eventType: "",
+    vatClassification: "vat",
+    discountType: "none",
+    discountAmount: 0,
+    subtotal: 89.29,
+    vatAmount: 10.71,
+    amount: 100,
+    currency: "PHP",
+    items: [{ name: "Meal", qty: 2, price: 50 }],
+    ...overrides,
+  };
+}
 
 describe("ReceiptUploadModal — BUG 1 (duplicate surfaced in edit modal)", () => {
   beforeEach(() => {
@@ -143,27 +181,7 @@ describe("ReceiptUploadModal — BUG 1 (duplicate surfaced in edit modal)", () =
     mockStore.resubmitReceipt.mockResolvedValue(duplicateReceipt);
 
     const wrapper = mountModal({
-      receiptToEdit: {
-        id: "RCPT-2026-001",
-        dbId: 1,
-        status: "processing",
-      },
-    });
-
-    // Simulate the user having selected a replacement file (edit-mode file branch).
-    wrapper.vm.uploadFile = new File(["x"], "r.png", { type: "image/png" });
-
-    // Fill the required form fields so isFormValid passes.
-    Object.assign(wrapper.vm.uploadForm, {
-      invoice_number: "INV-1",
-      transaction_date: "2026-06-01",
-      tin: "123-456-789-000",
-      vendor_name: "Vendor",
-      expense_category_id: 2,
-      vat_classification: "vat",
-      total_amount: 100,
-      vat_amount: 12,
-      items: [],
+      receiptToEdit: makeEditableReceipt({ status: "processing" }),
     });
 
     const events = [];
@@ -175,6 +193,14 @@ describe("ReceiptUploadModal — BUG 1 (duplicate surfaced in edit modal)", () =
     window.removeEventListener("receipt-duplicate-detected", handler);
 
     expect(mockStore.resubmitReceipt).toHaveBeenCalledTimes(1);
+    expect(mockStore.resubmitReceipt).toHaveBeenCalledWith(
+      "RCPT-2026-001",
+      expect.objectContaining({
+        subtotal: "89.29",
+        event_type: null,
+      }),
+      null,
+    );
     expect(events).toHaveLength(1);
     expect(events[0].detail.receiptId).toBe(1);
     expect(events[0].detail.message.toLowerCase()).toContain("duplicate");
@@ -193,20 +219,7 @@ describe("ReceiptUploadModal — BUG 1 (duplicate surfaced in edit modal)", () =
     });
 
     const wrapper = mountModal({
-      receiptToEdit: { id: "RCPT-2026-001", dbId: 1, status: "processing" },
-    });
-
-    wrapper.vm.uploadFile = new File(["x"], "r.png", { type: "image/png" });
-    Object.assign(wrapper.vm.uploadForm, {
-      invoice_number: "INV-1",
-      transaction_date: "2026-06-01",
-      tin: "123-456-789-000",
-      vendor_name: "Vendor",
-      expense_category_id: 2,
-      vat_classification: "vat",
-      total_amount: 100,
-      vat_amount: 12,
-      items: [],
+      receiptToEdit: makeEditableReceipt({ status: "processing" }),
     });
 
     const events = [];
@@ -217,6 +230,7 @@ describe("ReceiptUploadModal — BUG 1 (duplicate surfaced in edit modal)", () =
 
     window.removeEventListener("receipt-duplicate-detected", handler);
 
+    expect(mockStore.resubmitReceipt).toHaveBeenCalledTimes(1);
     expect(events).toHaveLength(0);
   });
 });
@@ -411,5 +425,171 @@ describe("ReceiptUploadModal — strict rejection gating and modal close", () =>
 
     expect(mockAbortSessionReceipts).toHaveBeenCalledTimes(1);
     expect(mockHandleConfirmLeave).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ReceiptUploadModal — Edit Mode (ScannedReceiptsList reuse)", () => {
+  beforeEach(() => {
+    mockStore.resubmitReceipt.mockReset();
+    mockStore.retryOcr.mockReset();
+    mockStore.fetchCategories.mockReset();
+    mockAbortSessionReceipts.mockReset();
+  });
+
+  it("renders ScannedReceiptsList with allowRemove=false and requireEventType=false and removes legacy inclusive/exclusive text", () => {
+    const wrapper = mountModal({
+      categories: [{ id: 2, name: "Meals" }],
+      receiptToEdit: makeEditableReceipt(),
+    });
+
+    const list = wrapper.findComponent(ScannedReceiptsList);
+    expect(list.exists()).toBe(true);
+    expect(list.props("allowRemove")).toBe(false);
+    expect(list.props("requireEventType")).toBe(false);
+    expect(list.props("receipts")).toHaveLength(1);
+
+    const text = wrapper.text();
+    expect(text).not.toContain("VAT-Inclusive");
+    expect(text).not.toContain("VAT-Exclusive");
+    expect(text).not.toContain("Inclusive VAT Amount");
+    expect(text).not.toContain("Incl. VAT");
+    expect(text).not.toContain("Expense Summary");
+  });
+
+  it("shows Cancel instead of Discard All and keeps Retry OCR in Edit Mode", async () => {
+    mockStore.retryOcr.mockResolvedValue({ id: 1, status: "processing" });
+    const wrapper = mountModal({
+      categories: [{ id: 2, name: "Meals" }],
+      receiptToEdit: makeEditableReceipt({ status: "processed" }),
+    });
+
+    const buttons = wrapper.findAll("button");
+    const cancelBtn = buttons.find((b) => b.text().trim() === "Cancel");
+    const discardBtn = buttons.find((b) => b.text().includes("Discard All"));
+    const retryBtn = buttons.find((b) => b.text().includes("Retry OCR"));
+
+    expect(cancelBtn).toBeDefined();
+    expect(discardBtn).toBeUndefined();
+    expect(retryBtn).toBeDefined();
+
+    await retryBtn.trigger("click");
+    expect(mockStore.retryOcr).toHaveBeenCalledWith(1);
+  });
+
+  it("does NOT mark form dirty (Unsaved Changes) when untouched in Edit Mode, and marks dirty when edited", async () => {
+    const wrapper = mountModal({
+      categories: [{ id: 2, name: "Meals" }],
+      receiptToEdit: makeEditableReceipt(),
+    });
+
+    expect(wrapper.vm.isDirty).toBe(false);
+    expect(mockUnsavedState.isDirtyRef.value).toBe(false);
+
+    const cancelBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().trim() === "Cancel");
+    await cancelBtn.trigger("click");
+    expect(wrapper.emitted("update:modelValue")?.[0]).toEqual([false]);
+
+    // Remount and mutate a draft field -> isDirty becomes true
+    const dirtyWrapper = mountModal({
+      categories: [{ id: 2, name: "Meals" }],
+      receiptToEdit: makeEditableReceipt(),
+    });
+    dirtyWrapper.vm.editReceipts[0].merchantName = "Changed Merchant";
+    await dirtyWrapper.vm.$nextTick();
+
+    expect(dirtyWrapper.vm.isDirty).toBe(true);
+    expect(mockUnsavedState.isDirtyRef.value).toBe(true);
+  });
+
+  it("validates core fields and allows saving without eventType", async () => {
+    mockStore.resubmitReceipt.mockResolvedValue({
+      id: "RCPT-2026-001",
+      dbId: 1,
+      status: "processed",
+    });
+
+    const wrapper = mountModal({
+      categories: [{ id: 2, name: "Meals" }],
+      receiptToEdit: makeEditableReceipt({ eventType: "", location: "" }),
+    });
+
+    const saveBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("Save Receipt"));
+    // Missing required core field `location` disables Save Receipt
+    expect(saveBtn.attributes("disabled")).toBeDefined();
+
+    await wrapper.vm.saveReceipt();
+    expect(mockStore.resubmitReceipt).not.toHaveBeenCalled();
+
+    // Fill `location` while keeping `eventType` empty -> valid and submittable
+    wrapper.vm.editReceipts[0].location = "Makati";
+    await wrapper.vm.$nextTick();
+    expect(saveBtn.attributes("disabled")).toBeUndefined();
+
+    await saveBtn.trigger("click");
+    expect(mockStore.resubmitReceipt).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends subtotal, currency, location, event_type, and items with quantity via resubmitReceipt", async () => {
+    mockStore.resubmitReceipt.mockResolvedValue({
+      id: "RCPT-2026-001",
+      dbId: 1,
+      status: "processed",
+    });
+
+    const wrapper = mountModal({
+      categories: [{ id: 2, name: "Meals" }],
+      receiptToEdit: makeEditableReceipt({
+        eventType: "Client Meeting",
+        currency: "USD",
+        location: "BGC, Taguig",
+        subtotal: 200,
+        vatAmount: 24,
+        amount: 224,
+        items: [{ name: "Lunch", qty: 3, price: 224 }],
+      }),
+    });
+
+    await wrapper.vm.saveReceipt();
+
+    expect(mockStore.resubmitReceipt).toHaveBeenCalledWith(
+      "RCPT-2026-001",
+      expect.objectContaining({
+        expense_category_id: 2,
+        vendor_name: "Vendor",
+        transaction_date: "2026-06-01",
+        subtotal: "200.00",
+        vat_amount: "24.00",
+        total_amount: "224.00",
+        currency: "USD",
+        location: "BGC, Taguig",
+        event_type: "Client Meeting",
+        items: [{ name: "Lunch", quantity: 3, price: 224 }],
+      }),
+      null,
+    );
+  });
+
+  it("constrains modal card height within viewport margins so header and footer do not clip", () => {
+    const wrapper = mountModal({
+      categories: [{ id: 2, name: "Meals" }],
+      receiptToEdit: makeEditableReceipt(),
+    });
+    const overlay = wrapper.find(".fixed.inset-0");
+    expect(overlay.exists()).toBe(true);
+    expect(overlay.classes()).toContain("p-4");
+    expect(overlay.classes()).toContain("sm:p-6");
+
+    const card = overlay.find(".card");
+    expect(card.exists()).toBe(true);
+    expect(card.classes()).toContain("flex");
+    expect(card.classes()).toContain("flex-col");
+    expect(card.classes()).toContain("max-h-[calc(100vh-2rem)]");
+
+    const scrollBody = card.find(".flex-1.min-h-0.overflow-y-auto");
+    expect(scrollBody.exists()).toBe(true);
   });
 });

@@ -27,9 +27,11 @@ class ResubmitReceiptRequest extends FormRequest
             // accepts metadata edits. Any `file` present is rejected at the boundary.
             'file' => 'prohibited',
             'expense_category_id' => 'nullable|exists:expense_categories,id',
+            'event_type' => 'nullable|string|max:100',
             'vendor_name' => 'nullable|string|max:255',
             'transaction_date' => 'nullable|date',
             'total_amount' => 'nullable|numeric|min:0',
+            'subtotal' => 'nullable|numeric|min:0',
             'vat_amount' => 'nullable|numeric|min:0',
             'discount_amount' => 'nullable|numeric|min:0',
             'discount_type' => 'nullable|string|in:none,senior,pwd,student,promo,employee,other',
@@ -37,10 +39,11 @@ class ResubmitReceiptRequest extends FormRequest
             'invoice_number' => 'nullable|string|max:255',
             'location' => 'nullable|string|max:255',
             'vat_classification' => 'nullable|in:vat,non-vat,VAT,Non-VAT',
+            'currency' => 'nullable|string|max:10',
             'items' => 'nullable|array',
             'items.*.name' => 'required_with:items|string|max:255',
             'items.*.quantity' => 'required_with:items|integer|min:1',
-            'items.*.price' => 'required_with:items|numeric|gt:0',
+            'items.*.price' => 'required_with:items|numeric|min:0',
         ];
     }
 }

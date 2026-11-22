@@ -36,6 +36,7 @@ class StoreReceiptRequest extends FormRequest
             'files' => 'nullable|array',
             'files.*' => 'nullable|file|mimes:jpeg,png,pdf|max:2048',
             'expense_category_id' => 'nullable|exists:expense_categories,id',
+            'event_type' => 'nullable|string|max:100',
             'vendor_name' => 'nullable|string|max:255',
             'transaction_date' => 'nullable|date',
             'total_amount' => 'nullable|numeric|min:0',

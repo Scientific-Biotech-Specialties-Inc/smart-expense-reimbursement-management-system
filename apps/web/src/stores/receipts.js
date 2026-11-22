@@ -166,6 +166,19 @@ export const useReceiptStore = defineStore("receipts", () => {
     );
     const fileUrl =
       firstFilePathField(r.file_url) || firstFilePathField(r.file_path) || "";
+    const rawFiles =
+      Array.isArray(r.file_url) && r.file_url.length > 1
+        ? r.file_url
+        : Array.isArray(r.file_path) && r.file_path.length > 1
+          ? r.file_path
+          : null;
+    const multiImages = rawFiles
+      ? rawFiles.map((f, i) => ({
+          id: `seg-${r.id}-${i}`,
+          url: getFileUrl(f),
+          name: `Segment ${i + 1}`,
+        }))
+      : null;
 
     return {
       id: `RCPT-2026-${String(r.id).padStart(3, "0")}`,
@@ -177,8 +190,10 @@ export const useReceiptStore = defineStore("receipts", () => {
       fileSize: Number(firstFilePathField(r.file_size_bytes)) || 0,
       date: r.transaction_date || r.created_at,
       amount: Number(r.total_amount) || 0,
+      subtotal: r.subtotal != null ? Number(r.subtotal) : null,
       category: r.category?.name || "Uncategorized",
       categoryId: r.expense_category_id || null,
+      eventType: r.event_type || "",
       status: complianceStatus,
       complianceStatus,
       complianceReason:
@@ -193,6 +208,8 @@ export const useReceiptStore = defineStore("receipts", () => {
       adminNotes: r.admin_notes || "",
       hash: firstFilePathField(r.file_hash),
       thumbnail: getFileUrl(fileUrl) || null,
+      images: multiImages,
+      isMultiReceipt: Boolean(multiImages),
       isDeleted: !!r.deleted_at,
       reimbursementCount,
       isReimbursed: reimbursementCount > 0,
@@ -443,14 +460,23 @@ export const useReceiptStore = defineStore("receipts", () => {
         vendorName: metadata.vendor_name || rx.vendorName,
         date: metadata.transaction_date || rx.date,
         amount: Number(metadata.total_amount) || rx.amount,
+        subtotal:
+          metadata.subtotal != null && metadata.subtotal !== ""
+            ? Number(metadata.subtotal)
+            : rx.subtotal,
         vatAmount: Number(metadata.vat_amount) || 0,
         discountAmount: Number(metadata.discount_amount) || 0,
         discountType: metadata.discount_type || rx.discountType || "none",
         tin: metadata.tin || rx.tin,
         invoiceNumber: metadata.invoice_number || rx.invoiceNumber,
         vatClassification: metadata.vat_classification || rx.vatClassification,
+        currency: metadata.currency || rx.currency,
         location: metadata.location || rx.location,
         categoryId: metadata.expense_category_id || rx.categoryId,
+        eventType:
+          metadata.event_type !== undefined
+            ? metadata.event_type || ""
+            : rx.eventType || "",
         items: metadata.items || rx.items,
         ...payload,
       });
@@ -565,6 +591,7 @@ export const useReceiptStore = defineStore("receipts", () => {
       "vendor_name",
       "transaction_date",
       "total_amount",
+      "subtotal",
       "vat_amount",
       "discount_amount",
       "discount_type",
@@ -573,6 +600,7 @@ export const useReceiptStore = defineStore("receipts", () => {
       "vat_classification",
       "currency",
       "location",
+      "event_type",
       "status",
     ];
     for (const field of scalarFields) {

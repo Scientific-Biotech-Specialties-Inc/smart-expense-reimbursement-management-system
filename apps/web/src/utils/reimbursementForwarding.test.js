@@ -20,6 +20,7 @@ vi.mock("@/utils/receiptUtils", () => ({
 import {
   canForwardToReimbursement,
   getForwardingBlockReason,
+  mapReceiptToReimbursement,
 } from "@/utils/reimbursementForwarding";
 
 // A freshly uploaded, un-attached receipt as it arrives from the store's
@@ -103,5 +104,43 @@ describe("reimbursementForwarding block reasons", () => {
     expect(getForwardingBlockReason([])).toBe(
       "Select at least one receipt to forward.",
     );
+  });
+});
+
+describe("mapReceiptToReimbursement", () => {
+  it("preserves eventType and subtotal when present on the receipt", () => {
+    const mapped = mapReceiptToReimbursement({
+      id: "RCPT-2026-010",
+      dbId: 10,
+      vendorName: "Bistro",
+      date: "2026-06-01",
+      amount: 112,
+      subtotal: 100.5,
+      vatAmount: 12,
+      vatClassification: "vat",
+      eventType: "Client Meeting",
+      location: "Makati",
+      items: [],
+    });
+
+    expect(mapped.eventType).toBe("Client Meeting");
+    expect(mapped.subtotal).toBe("100.50");
+    expect(mapped.location).toBe("Makati");
+  });
+
+  it("defaults eventType to empty string and falls back to computed subtotal when subtotal is missing", () => {
+    const mapped = mapReceiptToReimbursement({
+      id: "RCPT-2026-011",
+      dbId: 11,
+      vendorName: "Cafe",
+      date: "2026-06-02",
+      amount: 0,
+      subtotal: null,
+      vatClassification: "vat",
+      items: [],
+    });
+
+    expect(mapped.eventType).toBe("");
+    expect(mapped.subtotal).toBe("0.00");
   });
 });
