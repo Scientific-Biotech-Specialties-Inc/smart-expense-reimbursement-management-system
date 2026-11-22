@@ -144,6 +144,13 @@ function handleRetake() {
   }, 100);
 }
 
+function handleCloseQualityRejection() {
+  clearQualityRejection();
+  if (!isEditMode.value && receipts.value.length === 0 && !ticketId.value) {
+    router?.push("/reimbursements");
+  }
+}
+
 function triggerUpload(mode = 'single') {
   uploadMode.value = mode;
   if (receiptInput.value) receiptInput.value.value = "";
@@ -797,7 +804,7 @@ function dismiss() {
         showSegmentedUpload = true;
         clearQualityRejection();
       "
-      @close="clearQualityRejection"
+      @close="handleCloseQualityRejection"
     />
   </div>
 </template>

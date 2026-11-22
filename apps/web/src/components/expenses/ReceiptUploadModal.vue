@@ -144,6 +144,14 @@ function handleRetake() {
   setTimeout(() => receiptInput.value?.click(), 100);
 }
 
+function handleCloseQualityRejection() {
+  if (!isEditMode.value && localReceipts.value.length === 0) {
+    close();
+    return;
+  }
+  clearQualityRejection();
+}
+
 // Never open the quality modal for OCR-offline failures. Toast is enough.
 const showQualityModal = computed(
   () =>
@@ -899,6 +907,6 @@ defineExpose({ buildUpdatePayload, saveReceipt, editReceipts, isDirty });
       showSegmentedUpload = true;
       clearQualityRejection();
     "
-    @close="clearQualityRejection"
+    @close="handleCloseQualityRejection"
   />
 </template>

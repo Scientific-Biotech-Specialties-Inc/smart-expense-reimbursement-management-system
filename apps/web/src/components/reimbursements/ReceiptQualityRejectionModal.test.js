@@ -47,10 +47,20 @@ describe("ReceiptQualityRejectionModal", () => {
       expect(wrapper.text()).toContain(expectedBadge);
       expect(wrapper.text()).toContain(`Reason for ${code}`);
       expect(wrapper.text()).not.toContain("Continue Anyway");
-      expect(wrapper.text()).toContain("cannot be overridden");
+      expect(wrapper.text()).not.toContain("cannot be overridden");
 
       const buttons = wrapper.findAll("button");
       expect(buttons.some((b) => b.text().toLowerCase().includes("continue"))).toBe(false);
+
+      const closeBtn = buttons.find((b) => b.text().trim() === "Close");
+      const retakeBtn = buttons.find((b) => b.text().includes("Upload New Receipt"));
+      expect(closeBtn).toBeDefined();
+      expect(retakeBtn).toBeDefined();
+      expect(closeBtn.classes()).toContain("h-9");
+      expect(retakeBtn.classes()).toContain("h-9");
+      expect(closeBtn.classes()).toContain("px-3.5");
+      expect(retakeBtn.classes()).toContain("px-4");
+      expect(closeBtn.classes()).not.toContain("w-full");
     },
   );
 
@@ -105,6 +115,13 @@ describe("ReceiptQualityRejectionModal", () => {
       rejectionCode: "unreadable",
       rejectionReason: "Cannot read critical fields.",
     });
+
+    const footer = wrapper.find("footer");
+    const buttonGroup = footer.find("div.flex");
+    expect(buttonGroup.exists()).toBe(true);
+    expect(buttonGroup.classes()).toContain("items-center");
+    expect(buttonGroup.classes()).toContain("justify-end");
+    expect(buttonGroup.classes()).not.toContain("grid");
 
     const closeBtn = wrapper
       .findAll("button")

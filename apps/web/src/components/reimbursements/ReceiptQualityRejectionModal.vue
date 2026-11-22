@@ -113,19 +113,6 @@ const badgeLabel = computed(() => {
   }
 });
 
-const footerNotice = computed(() => {
-  if (isDuplicate.value) {
-    return "Duplicate receipts cannot be overridden. Please upload a new receipt.";
-  }
-  if (isFaded.value) {
-    return "Faded receipts cannot be overridden. Please upload a clearer receipt.";
-  }
-  if (isUnreadable.value) {
-    return "Unreadable receipts cannot be overridden. Please upload a clearer receipt.";
-  }
-  return "Rejected receipts cannot be overridden. Please upload a clearer receipt.";
-});
-
 const tips = computed(() => {
   switch (props.rejectionCode) {
     case "not_a_receipt":
@@ -306,18 +293,12 @@ const tips = computed(() => {
 
         <!-- Footer Actions -->
         <footer
-          class="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4"
+          class="flex items-center justify-end border-t border-slate-100 bg-slate-50 px-6 py-4"
         >
-          <div class="text-xs text-slate-500 font-medium">
-            {{ footerNotice }}
-          </div>
-
-          <div
-            class="flex flex-wrap items-center justify-end gap-2 w-full sm:w-auto"
-          >
+          <div class="flex flex-wrap items-center justify-end gap-2">
             <button
               type="button"
-              class="inline-flex h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-100 transition-colors"
+              class="inline-flex h-9 items-center justify-center rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-100 transition-colors whitespace-nowrap"
               @click="emit('close')"
             >
               Close
@@ -326,7 +307,7 @@ const tips = computed(() => {
             <button
               v-if="canUploadSegmented"
               type="button"
-              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-accent/30 bg-white px-3.5 text-xs font-bold text-accent shadow-sm hover:bg-accent-50 transition-colors"
+              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl border border-accent/30 bg-white px-3.5 text-xs font-bold text-accent shadow-sm hover:bg-accent-50 transition-colors whitespace-nowrap"
               @click="emit('upload-segmented')"
             >
               <Layers class="h-3.5 w-3.5" />
@@ -335,7 +316,7 @@ const tips = computed(() => {
 
             <button
               type="button"
-              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-danger px-4 text-xs font-bold text-white shadow-md hover:bg-red-700 transition-colors"
+              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-danger px-4 text-xs font-bold text-white shadow-md hover:bg-red-700 transition-colors whitespace-nowrap"
               @click="emit('retake')"
             >
               <RefreshCw class="h-3.5 w-3.5" />

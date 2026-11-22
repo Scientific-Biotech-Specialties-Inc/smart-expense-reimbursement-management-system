@@ -154,8 +154,9 @@ describe("ReimbursementFormView — duplicate Upload New One cancel goes to /rei
     expect(text).not.toContain("Drag and drop receipt images here");
   });
 
-  it("wires @close on ReceiptQualityRejectionModal to clearQualityRejection", async () => {
+  it("wires @close on ReceiptQualityRejectionModal to clearQualityRejection and navigates to /reimbursements when no receipts remain", async () => {
     clearQualityRejectionMock.mockClear();
+    receiptsState.value = [];
     qualityRejectionState.value = {
       receiptId: "temp-1",
       file: null,
@@ -171,6 +172,28 @@ describe("ReimbursementFormView — duplicate Upload New One cancel goes to /rei
 
     await modal.vm.$emit("close");
     expect(clearQualityRejectionMock).toHaveBeenCalledTimes(1);
+    expect(routerPushMock).toHaveBeenCalledWith("/reimbursements");
+    qualityRejectionState.value = null;
+  });
+
+  it("keeps user on ReimbursementFormView when @close fires on ReceiptQualityRejectionModal with existing receipts", async () => {
+    clearQualityRejectionMock.mockClear();
+    receiptsState.value = [
+      { id: "1", amount: 100, date: "2026-09-01", categoryId: 1 },
+    ];
+    qualityRejectionState.value = {
+      receiptId: "temp-2",
+      file: null,
+      rejectionCode: "blurry",
+      rejectionReason: "Image is blurry.",
+    };
+    const wrapper = mountForm();
+    await wrapper.vm.$nextTick();
+
+    const modal = wrapper.findComponent({ name: "ReceiptQualityRejectionModal" });
+    await modal.vm.$emit("close");
+    expect(clearQualityRejectionMock).toHaveBeenCalledTimes(1);
+    expect(routerPushMock).not.toHaveBeenCalled();
     qualityRejectionState.value = null;
   });
 
