@@ -23,7 +23,10 @@ class ApproveCashAdvanceRequest extends FormRequest
     {
         return [
             'comment' => 'nullable|string',
-            'password' => 'required|string',
+            'password' => 'required_without_all:encryptedKey,iv,ciphertext|nullable|string',
+            'encryptedKey' => 'nullable|string',
+            'iv' => 'nullable|string',
+            'ciphertext' => 'nullable|string',
         ];
     }
 }

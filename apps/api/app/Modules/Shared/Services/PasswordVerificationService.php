@@ -53,9 +53,16 @@ class PasswordVerificationService
             return false;
         }
 
+        $hasEnvelope = $request->has(['encryptedKey', 'iv', 'ciphertext']);
+
+        if (!$hasEnvelope && (app()->environment('production') || config('services.crypto.require_envelope', false))) {
+            Log::warning('Password verification rejected: client-side encrypted envelope is required.');
+            return false;
+        }
+
         // Resolve the plaintext password: decrypt the envelope if the client sent one.
         try {
-            if ($request->has(['encryptedKey', 'iv', 'ciphertext'])) {
+            if ($hasEnvelope) {
                 $password = PayloadDecryptionService::decryptEnvelope(
                     $request->only(['encryptedKey', 'iv', 'ciphertext'])
                 );

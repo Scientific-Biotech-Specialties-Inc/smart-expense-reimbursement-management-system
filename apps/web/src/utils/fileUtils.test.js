@@ -1,7 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getFileUrl } from "./fileUtils";
 
 describe("getFileUrl", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
   it("returns empty string for null or undefined or empty inputs", () => {
     expect(getFileUrl(null)).toBe("");
     expect(getFileUrl(undefined)).toBe("");
@@ -44,5 +47,15 @@ describe("getFileUrl", () => {
   it("handles array with null or empty elements safely", () => {
     expect(getFileUrl([null])).toBe("");
     expect(getFileUrl([""])).toBe("");
+  });
+
+  it("uses VITE_SUPABASE_STORAGE_BASE_URL and strips trailing slashes", () => {
+    vi.stubEnv(
+      "VITE_SUPABASE_STORAGE_BASE_URL",
+      "https://custom-storage.example.com/storage/v1/object/public///",
+    );
+    expect(getFileUrl("receipts/sample.jpg", "receipts")).toBe(
+      "https://custom-storage.example.com/storage/v1/object/public/receipts/receipts/sample.jpg",
+    );
   });
 });

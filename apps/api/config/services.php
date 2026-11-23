@@ -34,6 +34,7 @@ return [
     'crypto' => [
         'private_key_path' => env('CRYPTO_PRIVATE_KEY_PATH', storage_path('crypto/private.pem')),
         'public_key_path'  => env('CRYPTO_PUBLIC_KEY_PATH', storage_path('crypto/public.pem')),
+        'require_envelope' => filter_var(env('CRYPTO_REQUIRE_ENVELOPE', false), FILTER_VALIDATE_BOOLEAN),
     ],
 
     'prs' => [

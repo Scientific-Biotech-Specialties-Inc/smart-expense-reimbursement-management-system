@@ -163,7 +163,7 @@ class CashAdvanceController extends Controller
                 $advance,
                 $request->user(),
                 $request->validated('comment'),
-                $request->validated('password'),
+                (string) ($request->validated('password') ?? ''),
                 $request
             );
 
@@ -204,7 +204,7 @@ class CashAdvanceController extends Controller
                 $request->user(),
                 $request->validated('comment'),
                 $request->validated('action', 'revise'),
-                $request->validated('password'),
+                (string) ($request->validated('password') ?? ''),
                 $request
             );
 
@@ -242,8 +242,8 @@ class CashAdvanceController extends Controller
 
         try {
             $validated = $request->validated();
-            $password = $validated['password'];
-            unset($validated['password']);
+            $password = (string) ($validated['password'] ?? '');
+            unset($validated['password'], $validated['encryptedKey'], $validated['iv'], $validated['ciphertext']);
 
             $advance = $this->service->disburseAdvance(
                 $advance,

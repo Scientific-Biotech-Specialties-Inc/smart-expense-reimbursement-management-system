@@ -116,3 +116,34 @@ export async function encryptPayload(plaintext) {
     ciphertext: arrayBufferToBase64(ciphertextBuffer),
   };
 }
+
+/**
+ * Encrypt a password into a SERMS crypto envelope and merge it into a request payload.
+ * Removes any plaintext `password` property from the returned object when encrypted.
+ * Falls back to `{ ...payload, password }` only if Web Crypto Subtle is unavailable
+ * (e.g. JSDOM unit-test environments).
+ *
+ * @param {string|null|undefined} password - The confirmation password.
+ * @param {Record<string, any>} [payload={}] - Base request payload.
+ * @returns {Promise<Record<string, any>>}
+ */
+export async function withEncryptedPassword(password, payload = {}) {
+  const base = payload && typeof payload === 'object' ? { ...payload } : {};
+  delete base.password;
+
+  if (password === undefined || password === null || password === '') {
+    return password === undefined ? base : { ...base, password };
+  }
+
+  if (!globalThis.crypto?.subtle) {
+    return { ...base, password };
+  }
+
+  const { encryptedKey, iv, ciphertext } = await encryptPayload(String(password));
+  return {
+    ...base,
+    encryptedKey,
+    iv,
+    ciphertext,
+  };
+}

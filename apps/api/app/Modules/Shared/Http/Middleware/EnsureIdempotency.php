@@ -39,15 +39,16 @@ class EnsureIdempotency
         $request->attributes->set('__idempotency_processed', true);
 
         $userId = $request->user()?->id;
+        $scope = $userId === null ? $this->resolveUnauthenticatedScope($request) : null;
+        $scopedKey = $userId === null ? hash('sha256', $scope . '|' . $key) : $key;
         $path = $request->path();
-        $requestHash = $this->computeRequestHash($method, $path, $request->all());
+        $requestHash = $this->computeRequestHash($method, $path, $request->all(), $scope);
 
         // 3. Acquire atomic pending lock or check existing record
-        $existing = IdempotencyKey::where('idempotency_key', $key)
+        $existing = IdempotencyKey::where('idempotency_key', $scopedKey)
             ->when(
                 $userId !== null,
-                fn ($q) => $q->where('user_id', $userId),
-                fn ($q) => $q->whereNull('user_id')
+                fn ($q) => $q->where('user_id', $userId)
             )
             ->first();
 
@@ -76,7 +77,7 @@ class EnsureIdempotency
         try {
             $ledger = IdempotencyKey::create([
                 'user_id' => $userId,
-                'idempotency_key' => $key,
+                'idempotency_key' => $scopedKey,
                 'request_method' => $method,
                 'request_path' => $path,
                 'request_hash' => $requestHash,
@@ -117,14 +118,33 @@ class EnsureIdempotency
     }
 
     /**
+     * Derive a deterministic scope for requests evaluated before route-level auth runs.
+     */
+    protected function resolveUnauthenticatedScope(Request $request): string
+    {
+        $token = $request->bearerToken();
+
+        if (!$token && $request->hasCookie('access_token')) {
+            $token = urldecode((string) $request->cookie('access_token'));
+        }
+
+        if (!empty($token)) {
+            return 'token:' . hash('sha256', $token);
+        }
+
+        return 'ip:' . hash('sha256', (string) ($request->ip() ?? 'unknown'));
+    }
+
+    /**
      * Compute deterministic hash for request path and body (including uploaded files).
      */
-    protected function computeRequestHash(string $method, string $path, array $payload): string
+    protected function computeRequestHash(string $method, string $path, array $payload, ?string $scope = null): string
     {
         ksort($payload);
         $normalized = $this->normalizePayloadForHash($payload);
+        $prefix = $scope !== null ? $scope . '|' : '';
 
-        return hash('sha256', $method . '|' . $path . '|' . json_encode($normalized, JSON_INVALID_UTF8_SUBSTITUTE));
+        return hash('sha256', $prefix . $method . '|' . $path . '|' . json_encode($normalized, JSON_INVALID_UTF8_SUBSTITUTE));
     }
 
     /**

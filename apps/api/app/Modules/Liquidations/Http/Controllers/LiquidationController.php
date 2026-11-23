@@ -17,6 +17,8 @@ use App\Modules\Reimbursements\Jobs\DispatchReceiptToAiService;
 use App\Modules\Shared\Traits\HandlesReportTemplateData;
 use App\Modules\Shared\Traits\HydratesSplitReceipts;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
+use App\Modules\Users\Models\User;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -77,7 +79,7 @@ class LiquidationController extends Controller
      *
      * @return int[]
      */
-    private function syncLiquidationReceipts(array $receiptsData): array
+    private function syncLiquidationReceipts(array $receiptsData, User $user): array
     {
         $conversionService = app(CurrencyConversionService::class);
         $receiptIds = [];
@@ -86,6 +88,9 @@ class LiquidationController extends Controller
                 continue;
             }
             $receipt = Receipt::findOrFail($receiptData['id']);
+            if ((int) $receipt->uploaded_by !== (int) $user->id) {
+                throw new AuthorizationException('Forbidden. You do not own one or more selected receipts.');
+            }
             if ($receipt->isRejectedStatus()) {
                 throw ValidationException::withMessages([
                     'receipts' => ['Rejected receipts cannot be submitted in a liquidation. Please remove the rejected receipt and upload a clearer copy.'],
@@ -447,7 +452,8 @@ class LiquidationController extends Controller
 
         $this->decodeReportTemplateData($request);
 
-        return DB::transaction(function () use ($user, $request) {
+        try {
+            return DB::transaction(function () use ($user, $request) {
             $validated = $request->validate([
                 ...self::reportTemplateDataRules(),
                 'cash_advance_id' => 'required|exists:cash_advances,id',
@@ -490,7 +496,7 @@ class LiquidationController extends Controller
             $currentOutstandingBalance = (float) ($advance->outstanding_balance ?? $advance->amount);
 
             // Sync receipts and lock FX snapshots first so balance validation uses converted PHP total
-            $receiptIds = $this->syncLiquidationReceipts($receiptsData);
+            $receiptIds = $this->syncLiquidationReceipts($receiptsData, $user);
             $effectiveExpense = (float) app(CurrencyConversionService::class)->resolveAuthoritativePhpTotal(
                 $receiptIds,
                 (float) $validated['total_expense_amount']
@@ -585,7 +591,10 @@ class LiquidationController extends Controller
                 'message' => 'Liquidation settlement submitted for audit successfully.',
                 'data' => $liquidation,
             ], 210);
-        });
+            });
+        } catch (AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        }
     }
 
     /**
@@ -625,13 +634,16 @@ class LiquidationController extends Controller
 
         $validated = $request->validate([
             'status' => 'required|in:approved,revise,rejected',
-            'password' => 'required|string',
+            'password' => 'required_without_all:encryptedKey,iv,ciphertext|nullable|string',
+            'encryptedKey' => 'nullable|string',
+            'iv' => 'nullable|string',
+            'ciphertext' => 'nullable|string',
             'admin_note' => 'nullable|string|min:10|required_if:status,revise|required_if:status,rejected',
         ]);
 
         return DB::transaction(function () use ($user, $id, $validated, $request) {
             // Verify password against external auth service
-            if (!PasswordVerificationService::verify($request, $validated['password'])) {
+            if (!PasswordVerificationService::verify($request, (string) ($validated['password'] ?? ''))) {
                 throw ValidationException::withMessages([
                     'password' => ['Invalid password. Please try again.']
                 ]);
@@ -790,7 +802,8 @@ class LiquidationController extends Controller
             'shortfall_explanation' => 'nullable|string',
         ]);
 
-        return DB::transaction(function () use ($user, $liquidation, $validated, $request) {
+        try {
+            return DB::transaction(function () use ($user, $liquidation, $validated, $request) {
             $wasRevise = $liquidation->status === 'revise';
             $beforeState = $liquidation->toArray();
 
@@ -814,7 +827,7 @@ class LiquidationController extends Controller
                     return response()->json(['message' => 'Invalid receipts data format.'], 422);
                 }
 
-                $receiptIds = $this->syncLiquidationReceipts($receiptsData);
+                $receiptIds = $this->syncLiquidationReceipts($receiptsData, $user);
                 $liquidation->reimbursement_ids = $receiptIds;
                 $effectiveExpense = (float) app(CurrencyConversionService::class)->resolveAuthoritativePhpTotal(
                     $receiptIds,
@@ -885,7 +898,10 @@ class LiquidationController extends Controller
                 'message' => 'Liquidation updated successfully.',
                 'data' => $liquidation,
             ]);
-        });
+            });
+        } catch (AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
+        }
     }
 
     /**
@@ -905,17 +921,20 @@ class LiquidationController extends Controller
         }
 
         $validated = $request->validate([
-            'password' => 'required|string',
+            'password' => 'required_without_all:encryptedKey,iv,ciphertext|nullable|string',
+            'encryptedKey' => 'nullable|string',
+            'iv' => 'nullable|string',
+            'ciphertext' => 'nullable|string',
         ]);
 
         // Verify password
-        if (!PasswordVerificationService::verify($request, $validated['password'])) {
+        if (!PasswordVerificationService::verify($request, (string) ($validated['password'] ?? ''))) {
             throw ValidationException::withMessages([
                 'password' => ['Invalid password. Please try again.']
             ]);
         }
 
-        return DB::transaction(function () use ($liquidation) {
+        return DB::transaction(function () use ($liquidation, $user, $request) {
             $advance = CashAdvance::findOrFail($liquidation->cash_advance_id);
 
             // Remove report file from storage
@@ -933,7 +952,20 @@ class LiquidationController extends Controller
                 'changed_by' => auth()->id(),
             ]);
 
+            $beforeState = $liquidation->toArray();
+            $liquidationId = $liquidation->id;
             $liquidation->delete();
+
+            AuditLogService::log(
+                actorId: $user->id,
+                actorRole: $user->role ?? 'employee',
+                actionType: 'LIQUIDATION_DELETED',
+                entityType: 'liquidation',
+                entityId: $liquidationId,
+                beforeState: $beforeState,
+                afterState: null,
+                ipAddress: $request->ip()
+            );
 
             return response()->json([
                 'message' => 'Liquidation deleted successfully.',

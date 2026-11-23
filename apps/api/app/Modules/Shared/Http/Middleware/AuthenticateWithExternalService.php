@@ -26,7 +26,10 @@ class AuthenticateWithExternalService
         }
 
         if (!$token) {
-            \Illuminate\Support\Facades\Log::error("No token found. Header: " . ($authorizationHeader ?: 'null') . " Cookie: " . ($request->cookie('access_token') ?: 'null'));
+            \Illuminate\Support\Facades\Log::error('No token found.', [
+                'has_auth_header' => !empty($authorizationHeader),
+                'has_cookie' => $request->hasCookie('access_token'),
+            ]);
             return response()->json([
                 'message' => 'Unauthorized. Bearer token or cookie missing.',
             ], 401);
@@ -48,8 +51,14 @@ class AuthenticateWithExternalService
             $publicKey = file_get_contents($keyPath);
             $decoded = \Firebase\JWT\JWT::decode($token, new \Firebase\JWT\Key($publicKey, 'RS256'));
 
+            $jti = isset($decoded->jti) ? trim((string) $decoded->jti) : '';
+            if ($jti === '') {
+                \Illuminate\Support\Facades\Log::error('Token payload missing jti.');
+                return response()->json(['message' => 'Unauthorized. Invalid token payload (missing jti).'], 401);
+            }
+
             // Check if the JWT ID (jti) is blacklisted in Redis
-            if (\Illuminate\Support\Facades\Cache::has("jwt_blacklist:{$decoded->jti}")) {
+            if (\Illuminate\Support\Facades\Cache::has("jwt_blacklist:{$jti}")) {
                 return response()->json(['message' => 'Unauthorized. Token has been revoked.'], 401);
             }
 

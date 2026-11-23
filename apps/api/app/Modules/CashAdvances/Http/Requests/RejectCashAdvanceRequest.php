@@ -24,7 +24,10 @@ class RejectCashAdvanceRequest extends FormRequest
         return [
             'comment' => 'required|string|min:5',
             'action' => 'sometimes|string|in:revise,reject',
-            'password' => 'required|string',
+            'password' => 'required_without_all:encryptedKey,iv,ciphertext|nullable|string',
+            'encryptedKey' => 'nullable|string',
+            'iv' => 'nullable|string',
+            'ciphertext' => 'nullable|string',
         ];
     }
 }

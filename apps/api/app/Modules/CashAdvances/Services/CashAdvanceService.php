@@ -142,7 +142,8 @@ class CashAdvanceService
     public function rejectAdvance(CashAdvance $advance, User $user, string $comment, string $action = 'revise', string $password = '', Request $requestContext = null)
     {
         return DB::transaction(function () use ($advance, $user, $comment, $action, $password, $requestContext) {
-            if ($requestContext === null || $password === '' || !PasswordVerificationService::verify($requestContext, $password)) {
+            $hasEnvelope = $requestContext !== null && $requestContext->has(['encryptedKey', 'iv', 'ciphertext']);
+            if ($requestContext === null || ($password === '' && !$hasEnvelope) || !PasswordVerificationService::verify($requestContext, $password)) {
                 throw ValidationException::withMessages([
                     'password' => ['Invalid password. Please try again.'],
                 ]);

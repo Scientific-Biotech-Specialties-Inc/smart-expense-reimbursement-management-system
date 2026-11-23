@@ -63,6 +63,7 @@ tests/TestCase.php.bak
 .stylelintcache
 .prettiercache
 storage/*.key
+/apps/api/storage/crypto/*.pem
 storage/pail/
 _ide_helper.php
 Homestead.json

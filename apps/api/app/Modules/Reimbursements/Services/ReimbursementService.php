@@ -254,7 +254,7 @@ class ReimbursementService
     {
         return DB::transaction(function () use ($user, $id, $password, $ipAddress, $requestContext, $secondaryAuditConfirmed, $secondaryAuditNote) {
             // Verify password against external auth service if provided
-            if (!empty($password) && !PasswordVerificationService::verify($requestContext, $password)) {
+            if ((!empty($password) || $requestContext->has(['encryptedKey', 'iv', 'ciphertext'])) && !PasswordVerificationService::verify($requestContext, (string) ($password ?? ''))) {
                 throw ValidationException::withMessages([
                     'password' => ['Invalid password. Please try again.']
                 ]);
@@ -339,7 +339,7 @@ class ReimbursementService
     {
         return DB::transaction(function () use ($user, $id, $comment, $password, $ipAddress, $requestContext, $action) {
             // Verify password against external auth service if provided
-            if (!empty($password) && !PasswordVerificationService::verify($requestContext, $password)) {
+            if ((!empty($password) || $requestContext->has(['encryptedKey', 'iv', 'ciphertext'])) && !PasswordVerificationService::verify($requestContext, (string) ($password ?? ''))) {
                 throw ValidationException::withMessages([
                     'password' => ['Invalid password. Please try again.']
                 ]);
@@ -419,7 +419,7 @@ class ReimbursementService
     {
         return DB::transaction(function () use ($user, $id, $password, $ipAddress, $requestContext, $payoutData) {
             // Verify password against external auth service if provided
-            if (!empty($password) && !PasswordVerificationService::verify($requestContext, $password)) {
+            if ((!empty($password) || $requestContext->has(['encryptedKey', 'iv', 'ciphertext'])) && !PasswordVerificationService::verify($requestContext, (string) ($password ?? ''))) {
                 throw ValidationException::withMessages([
                     'password' => ['Invalid password. Please try again.']
                 ]);

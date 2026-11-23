@@ -21,6 +21,9 @@ class ApproveReimbursementRequest extends FormRequest
     {
         return [
             'password' => 'nullable|string',
+            'encryptedKey' => 'nullable|string',
+            'iv' => 'nullable|string',
+            'ciphertext' => 'nullable|string',
             'secondary_audit_confirmed' => 'nullable|boolean',
             'secondary_audit_note' => 'nullable|string|max:500',
         ];
