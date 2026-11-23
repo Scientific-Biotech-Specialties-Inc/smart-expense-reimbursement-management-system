@@ -113,6 +113,8 @@ export function useReimbursementFilters(store) {
           row.reference_no,
           row.ticket_number,
           row.ticket_id,
+          row.prs_activity_id,
+          row.source_submission_id,
           row.source_system,
           row.reportDescription,
           row.category,

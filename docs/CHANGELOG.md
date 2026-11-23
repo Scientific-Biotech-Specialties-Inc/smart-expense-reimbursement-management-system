@@ -6,6 +6,14 @@ Please refer to [**`DOC_CHANGELOG.md`**](DOC_CHANGELOG.md) for the complete vers
 
 ---
 
+## [Unreleased] - Nov 23, 2026
+
+### Added
+- **Bi-Directional PRS ↔ SERMS Integration (`docs/SERMS.md`, `docs/PRS_INTEGRATION_HANDOFF.md`, `apps/api`, `apps/web`):**
+  - **Documentation & Handoff:** Created `docs/PRS_INTEGRATION_HANDOFF.md` and added `§6.8 PRS ↔ SERMS Bi-Directional Integration Architecture` to `docs/SERMS.md`, detailing Flow 1 (Activity Reimbursement with GD image normalization & OCR PHP amount auto-update), Flow 2 (Planned Activity Cash Advance with proceed gating & pre-disbursement removal), `X-Internal-Secret` / `INTERNAL_SERVICE_SECRET` authentication, local port-forwarding / Cloudflare tunnel setup, Azure Container Apps env vars, and `curl` verification steps.
+  - **Backend (`apps/api`):** Added `2026_11_24_000001_add_prs_integration_fields_to_reimbursements_and_cash_advances.php` (`reimbursements.prs_activity_id`, `cash_advances.source_system`, `cash_advances.itinerary_id`), expanded `services.prs` & `AuthenticateInternalService` (`X-Internal-Secret` / `Bearer` fallback), added `ReceiptService::normalizeUploadedImageFile()` (GD conversion of `WEBP`/`GIF`/`BMP`/`JFIF` to PNG/JPEG `<= 2 MB`), created `PrsActivityReimbursementService`, `PrsCashAdvanceService`, `UpdatePrsCashAdvanceStatusJob`, and `InternalPrsController` (`/api/internal/prs/reimbursements*` & `/api/internal/prs/cash-advances*`), updated `OcrCallbackService` to auto-recalculate PHP `reimbursements.amount` (including `split_receipts`) and dispatch `UpdatePrsReimbursementStatusJob`, and wired `UpdatePrsReimbursementStatusJob` / `UpdatePrsCashAdvanceStatusJob` across `ReimbursementService`, `CashAdvanceService`, and `LiquidationController`.
+  - **Frontend (`apps/web`):** Added `From PRS`, `Activity #...`, and `Planned Activity #...` badges and search filtering across `ReimbursementsTable.vue`, `ReimbursementDetailsModal.vue`, `useReimbursementFilters.js`, `CashAdvanceTable.vue`, `CashAdvanceDetailsModal.vue`, and `CashAdvancesView.vue`, with Vitest coverage.
+
 ## [Unreleased] - Nov 22, 2026
 
 ### Added

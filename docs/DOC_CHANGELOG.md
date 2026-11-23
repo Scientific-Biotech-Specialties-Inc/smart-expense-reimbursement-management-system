@@ -22,6 +22,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
 
+## [Unreleased] - Nov 23, 2026
+
+### Added
+- **Bi-Directional PRS ↔ SERMS Integration (`docs/SERMS.md`, `docs/PRS_INTEGRATION_HANDOFF.md`, `apps/api`, `apps/web`):**
+  - Created `docs/PRS_INTEGRATION_HANDOFF.md` (mirroring `docs/TS_INTEGRATION_HANDOFF.md`) with the complete SERMS ↔ PRS contract for Flow 1 (Activity Reimbursement with GD image normalization & OCR PHP amount auto-update) and Flow 2 (Planned Activity Cash Advance with proceed gating `is_done`/`can_proceed`/`can_remove` & pre-disbursement removal), `X-Internal-Secret` / `INTERNAL_SERVICE_SECRET` auth, local port-forwarding / Cloudflare tunnel & Azure Container Apps configuration, and `curl` verification commands.
+  - Added `### 6.8 PRS ↔ SERMS Bi-Directional Integration Architecture` to `docs/SERMS.md` after `### 6.7`.
+  - Recorded backend (`PrsActivityReimbursementService`, `PrsCashAdvanceService`, `InternalPrsController`, `ReceiptService::normalizeUploadedImageFile()`, `OcrCallbackService`, `UpdatePrsReimbursementStatusJob`, `UpdatePrsCashAdvanceStatusJob`) and frontend (`From PRS`, `Activity #...`, `Planned Activity #...` badges & search filters) integration updates.
+
 ## [Unreleased] - Nov 21, 2026
 
 ### Added
