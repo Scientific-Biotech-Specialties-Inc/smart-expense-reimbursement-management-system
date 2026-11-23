@@ -85,4 +85,20 @@ describe("BaseUtilityToolbar — Sort By functionality", () => {
     expect(wrapper.emitted("update:sortValue")).toBeTruthy();
     expect(wrapper.emitted("update:sortValue")[0]).toEqual(["name-asc"]);
   });
+
+  it("renders extra-filters slot inside the filter popover", async () => {
+    const wrapper = mount(BaseUtilityToolbar, {
+      slots: {
+        "extra-filters": '<div data-testid="custom-filter">Custom Filter Content</div>',
+      },
+    });
+
+    const filterButton = wrapper.findAll("button").find((btn) => btn.text().includes("Filters"));
+    expect(filterButton).toBeDefined();
+
+    await filterButton.trigger("click");
+    expect(wrapper.find('[data-testid="custom-filter"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("Custom Filter Content");
+  });
 });
+

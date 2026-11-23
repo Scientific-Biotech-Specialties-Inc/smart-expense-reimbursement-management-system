@@ -23,7 +23,7 @@ SERMS solves the operational challenges of managing distributed financial transa
 - **AI-Powered OCR**: Asynchronous external AI service for automated extraction of vendor, date, and amount via webhook.
 - **VAT Classification**: Automated classification of receipts into VAT and NON-VAT categories.
 - **Duplicate Detection**: 90-day lookup for duplicate receipt submissions based on vendor, date, and amount.
-- **Submission Guardrails**: Mandatory receipt attachments and active cutoff period validation.
+- **Submission Guardrails**: Mandatory receipt attachments and report verification.
 
 ### Cash Advance & Liquidation Lifecycle
 - **Disbursement Tracking**: Comprehensive tracking of cash issued to employees for field operations.

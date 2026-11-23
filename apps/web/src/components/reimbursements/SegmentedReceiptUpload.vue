@@ -8,14 +8,15 @@ import {
   ArrowDown,
   X,
   CheckCircle2,
-  FileImage,
   Info,
 } from "lucide-vue-next";
+
+import BaseButton from "@/components/base/BaseButton.vue";
 
 const props = defineProps({
   maxSegments: {
     type: Number,
-    default: 4,
+    default: 6,
   },
 });
 
@@ -24,6 +25,7 @@ const emit = defineEmits(["submit-segments", "cancel"]);
 const stagedFiles = ref([]); // array of { id, file, url }
 const dragOver = ref(false);
 const fileInputRef = ref(null);
+const isStitching = ref(false);
 
 function handleFileSelect(e) {
   addFiles(e.target.files);
@@ -76,7 +78,8 @@ function moveDown(index) {
 const canSubmit = computed(() => stagedFiles.value.length >= 2);
 
 function handleSubmit() {
-  if (!canSubmit.value) return;
+  if (!canSubmit.value || isStitching.value) return;
+  isStitching.value = true;
   const rawFiles = stagedFiles.value.map((item) => item.file);
   emit("submit-segments", rawFiles);
 }
@@ -240,15 +243,16 @@ function handleSubmit() {
       >
         Cancel
       </button>
-      <button
-        type="button"
-        class="btn btn-primary min-h-[38px] text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-        :disabled="!canSubmit"
+      <BaseButton
+        variant="primary"
+        class="min-h-[38px] text-xs font-bold"
+        :disabled="!canSubmit || isStitching"
+        :loading="isStitching"
         @click="handleSubmit"
       >
-        <CheckCircle2 class="h-4 w-4" />
+        <CheckCircle2 class="h-4 w-4 mr-1.5" />
         Combine & Process as 1 Receipt
-      </button>
+      </BaseButton>
     </div>
   </div>
 </template>

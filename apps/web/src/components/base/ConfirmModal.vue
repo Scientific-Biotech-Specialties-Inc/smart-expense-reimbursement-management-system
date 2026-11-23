@@ -1,9 +1,10 @@
 <script setup>
+import { ref, watch } from "vue";
 import BaseModal from "./BaseModal.vue";
 import BaseButton from "./BaseButton.vue";
-import { AlertTriangle, CheckCircle, Info } from "lucide-vue-next";
+import { AlertTriangle, CheckCircle } from "lucide-vue-next";
 
-defineProps({
+const props = defineProps({
   isOpen: {
     type: Boolean,
     required: true,
@@ -35,6 +36,22 @@ defineProps({
 });
 
 const emit = defineEmits(["close", "confirm"]);
+const isClicked = ref(false);
+
+watch(
+  () => props.isOpen,
+  (newVal) => {
+    if (newVal) {
+      isClicked.value = false;
+    }
+  }
+);
+
+function handleConfirm() {
+  if (props.loading || isClicked.value) return;
+  isClicked.value = true;
+  emit("confirm");
+}
 </script>
 
 <template>
@@ -59,20 +76,22 @@ const emit = defineEmits(["close", "confirm"]);
         </div>
       </div>
 
-      <!-- Action Footer with BaseButton -->
-      <div class="flex gap-3 mt-8">
+      <!-- Right-Aligned Action Footer with BaseButton -->
+      <div class="flex items-center justify-end gap-3 mt-8">
         <BaseButton
           variant="secondary"
-          class="flex-1 min-h-10"
+          class="px-5 min-h-10"
+          :disabled="loading || isClicked"
           @click="$emit('close')"
         >
           {{ cancelText }}
         </BaseButton>
         <BaseButton
           :variant="danger ? 'destructive' : 'primary'"
-          :loading="loading"
-          class="flex-1 min-h-10"
-          @click="$emit('confirm')"
+          :loading="loading || isClicked"
+          :disabled="loading || isClicked"
+          class="px-5 min-h-10"
+          @click="handleConfirm"
         >
           {{ confirmText }}
         </BaseButton>

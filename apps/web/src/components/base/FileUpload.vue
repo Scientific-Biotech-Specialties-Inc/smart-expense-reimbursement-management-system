@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, nextTick, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import {
   AlertTriangle,
   FileText,
@@ -12,19 +12,38 @@ import {
   RefreshCw
 } from 'lucide-vue-next'
 import { apiFetch } from '../../utils/apiFetch'
-import { cleanName, tinFor, formatDateForInput } from '../../utils/receiptUtils'
+import {
+  formatDateForInput,
+  formatSplitReceiptsToastMessage,
+  hasSplitReceipts,
+  isDuplicateOcrResponse,
+  markOcrReturnedAndGetMissingWarning,
+  normalizeDiscountType,
+  normalizeVatClassification,
+  resolveSplitSegmentIndices,
+} from '../../utils/receiptUtils'
+import { useToast } from '../../composables/useToast'
+import { isOcrOfflineFailure } from '../../utils/ocrErrors'
+import ReceiptQualityRejectionModal from '../reimbursements/ReceiptQualityRejectionModal.vue'
 
 
 const props = defineProps({
   modelValue: { type: Array, default: () => [] },
   accept: { type: String, default: 'image/*,.pdf' },
   maxSizeMb: { type: Number, default: 2 },
-  emptyActionLabel: { type: String, default: 'Select Files' },
-  addActionLabel: { type: String, default: 'Add More Receipts' },
-  mockMode: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'ocr-result', 'upload-error'])
+const { addToast } = useToast()
+
+function notifyMissingFieldsAfterTick(entry) {
+  nextTick(() => {
+    const warning = markOcrReturnedAndGetMissingWarning(entry)
+    if (warning) {
+      addToast({ message: warning, type: 'warning' })
+    }
+  })
+}
 
 const isDragging = ref(false)
 const files = ref([...props.modelValue])
@@ -35,11 +54,105 @@ const uploadMode = ref('single')
 const showDropConfirmModal = ref(false)
 const pendingDropFiles = ref([])
 const isDropdownOpen = ref(false)
+const selectDropdownRef = ref(null)
+const addMoreDropdownRef = ref(null)
 const pollTimers = new Map()
+const qualityRejection = ref(null)
 
-const isProcessingAnyReceipt = computed(() =>
-  files.value.some((entry) => entry.ocrStatus === 'processing'),
-)
+function handleWindowClick(event) {
+  const isInsideSelect = selectDropdownRef.value && selectDropdownRef.value.contains(event.target)
+  const isInsideAddMore = addMoreDropdownRef.value && addMoreDropdownRef.value.contains(event.target)
+  if (!isInsideSelect && !isInsideAddMore) {
+    isDropdownOpen.value = false
+  }
+}
+
+function handleRemoveDuplicateEvent(event) {
+  const targetId = event?.detail?.receiptId
+  if (!targetId) return
+  const index = files.value.findIndex(
+    (entry) => String(entry?.id ?? '') === String(targetId) || String(entry?.localId ?? '') === String(targetId),
+  )
+  if (index !== -1) {
+    removeFile(index)
+  }
+}
+
+function handleOpenReceiptUpload() {
+  triggerFileInput(uploadMode.value || 'single')
+}
+
+function dispatchDuplicateDetected(entry) {
+  window.dispatchEvent(
+    new CustomEvent('receipt-duplicate-detected', {
+      detail: {
+        receiptId: entry.id || entry.localId,
+        source: 'liquidation',
+        message: entry.rejectionReason,
+      },
+    }),
+  )
+}
+
+onMounted(() => {
+  window.addEventListener('click', handleWindowClick)
+  window.addEventListener('remove-duplicate-receipt', handleRemoveDuplicateEvent)
+  window.addEventListener('open-receipt-upload', handleOpenReceiptUpload)
+})
+
+function clearQualityRejection() {
+  qualityRejection.value = null
+}
+
+function handleRetake() {
+  const rejectedEntry = qualityRejection.value?.entry
+  if (rejectedEntry) {
+    const idx = files.value.indexOf(rejectedEntry)
+    if (idx !== -1) {
+      removeFile(idx)
+    }
+  }
+  clearQualityRejection()
+  setTimeout(() => fileInput.value?.click(), 100)
+}
+
+function handleContinueAnyway() {
+  clearQualityRejection()
+}
+
+async function handleRejectedEntry(
+  entry,
+  { isDuplicate = false, rejectionCode = 'quality_failed', rejectionReason = 'Receipt rejected.' } = {},
+) {
+  entry.ocrStatus = 'rejected'
+  entry.rejectionCode = rejectionCode
+  entry.rejectionReason = rejectionReason
+  if (isDuplicate) {
+    dispatchDuplicateDetected(entry)
+  } else {
+    qualityRejection.value = {
+      entry,
+      file: entry.pages?.[0] || null,
+      rejectionCode,
+      rejectionReason,
+    }
+  }
+  emit('upload-error', {
+    type: isDuplicate ? 'duplicate' : 'quality',
+    message: rejectionReason,
+    code: rejectionCode,
+    entry,
+  })
+
+  const idx = files.value.findIndex(
+    (f) => f === entry || (entry.localId && f.localId === entry.localId) || (entry.id && f.id === entry.id),
+  )
+  if (idx !== -1) {
+    await removeFile(idx)
+  } else if (entry.id && !String(entry.id).startsWith('temp-')) {
+    await apiFetch(`/api/serms/reimbursements/receipts/${entry.id}`, { method: 'DELETE' }).catch(() => {})
+  }
+}
 
 watch(
   () => props.modelValue,
@@ -48,20 +161,6 @@ watch(
   },
   { deep: true },
 )
-
-function formatTinValue(value, { padLastBlock = false } = {}) {
-  let digits = String(value || '').replace(/\D/g, '').slice(0, 12)
-  if (padLastBlock && digits.length === 9) {
-    digits = `${digits}000`
-  }
-
-  const parts = []
-  if (digits.length > 0) parts.push(digits.slice(0, 3))
-  if (digits.length > 3) parts.push(digits.slice(3, 6))
-  if (digits.length > 6) parts.push(digits.slice(6, 9))
-  if (digits.length > 9) parts.push(digits.slice(9, 12))
-  return parts.join('-')
-}
 
 function buildPrefilledOcrData(file) {
   return {
@@ -83,6 +182,42 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function createUploadEntry(pages, displayName, size, existingPreviews = null) {
+  const previews =
+    Array.isArray(existingPreviews) && existingPreviews.length === pages.length
+      ? existingPreviews
+      : pages.map(f => (f?.type?.startsWith('image/') ? URL.createObjectURL(f) : null))
+  return {
+    localId: `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    pages,
+    name: displayName,
+    fileName: displayName,
+    fileType: pages[0]?.type || '',
+    size,
+    previews,
+    thumbnail: previews[0] || null,
+    ocrStatus: 'idle',
+    hasOcrReturned: false,
+    merchantName: '',
+    date: '',
+    tin: '',
+    invoiceNumber: '',
+    location: '',
+    category: '',
+    categoryId: null,
+    eventType: '',
+    currency: 'PHP',
+    vatClassification: 'vat',
+    discountType: 'none',
+    discountAmount: '0.00',
+    subtotal: '0.00',
+    tax: '0.00',
+    amount: 0,
+    items: [],
+    ocrData: buildPrefilledOcrData(pages[0]),
+  }
+}
+
 function processFiles(fileList, mode) {
   localError.value = null
 
@@ -102,56 +237,20 @@ function processFiles(fileList, mode) {
 
   if (validFiles.length === 0) return
 
-  if (mode === 'multi') {
-    const entry = {
-      pages: validFiles,
-      name: `Multi-page Receipt (${validFiles.length} pages)`,
-      fileName: `Multi-page Receipt (${validFiles.length} pages)`,
-      size: validFiles.reduce((acc, f) => acc + f.size, 0),
-      previews: validFiles.map(f => f.type.startsWith('image/') ? URL.createObjectURL(f) : null),
-      thumbnail: validFiles[0]?.type.startsWith('image/') ? URL.createObjectURL(validFiles[0]) : null,
-      ocrStatus: 'idle',
-      merchantName: '',
-      date: '',
-      tin: '',
-      invoiceNumber: '',
-      location: '',
-      currency: 'PHP',
-      vatClassification: 'vat',
-      subtotal: '0.00',
-      tax: '0.00',
-      amount: 0,
-      items: [],
-      ocrData: buildPrefilledOcrData(validFiles[0]),
-    }
-    files.value.push(entry)
+  if (mode === 'single') {
+    // When Single Receipt is chosen, strictly send only the first selected file to OCR
+    const file = validFiles[0]
+    files.value.push(createUploadEntry([file], file.name, file.size))
     simulateOCR(files.value[files.value.length - 1])
   } else {
-    for (const file of validFiles) {
-      const entry = {
-        pages: [file],
-        name: file.name,
-        fileName: file.name,
-        size: file.size,
-        previews: [file.type.startsWith('image/') ? URL.createObjectURL(file) : null],
-        thumbnail: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
-        ocrStatus: 'idle',
-        merchantName: '',
-        date: '',
-        tin: '',
-        invoiceNumber: '',
-        location: '',
-        currency: 'PHP',
-        vatClassification: 'vat',
-        subtotal: '0.00',
-        tax: '0.00',
-        amount: 0,
-        items: [],
-        ocrData: buildPrefilledOcrData(file),
-      }
-      files.value.push(entry)
-      simulateOCR(files.value[files.value.length - 1])
-    }
+    // Multi Receipt: all selected files (up to 6 segments) sent together to OCR
+    const segmentFiles = validFiles.slice(0, 6)
+    const displayName = segmentFiles.length > 1
+      ? `Multi-page Receipt (${segmentFiles.length} pages)`
+      : segmentFiles[0].name
+    const totalSize = segmentFiles.reduce((acc, f) => acc + f.size, 0)
+    files.value.push(createUploadEntry(segmentFiles, displayName, totalSize))
+    simulateOCR(files.value[files.value.length - 1])
   }
 
   emit('update:modelValue', files.value)
@@ -167,25 +266,40 @@ function handleConfirmDrop(mode) {
 
 function triggerFileInput(mode) {
   uploadMode.value = mode
-  fileInput.value?.click()
+  if (fileInput.value) {
+    fileInput.value.multiple = (mode === 'multi')
+    fileInput.value.value = ''
+    fileInput.value.click()
+  }
 }
 
 function hydrateEntry(entry, ocrData) {
   entry.ocrStatus = 'done'
+  entry.hasOcrReturned = true
   entry.id = ocrData.id
   // confidence from pipeline is 0-1; legacy fallback was 0-100
   let rawConf = ocrData.ocr_confidence_score ?? ocrData.confidence ?? 85
   if (rawConf > 0 && rawConf <= 1) rawConf = rawConf * 100
   const confidence = Math.round(rawConf)
+  const rawDiscount = Number(ocrData.discount_amount ?? ocrData.discountAmount ?? entry.discountAmount ?? 0) || 0
+  const discountType = normalizeDiscountType(ocrData.discount_type ?? ocrData.discountType ?? entry.discountType, rawDiscount)
+  const vatClassification = normalizeVatClassification(ocrData.vat_classification ?? entry.vatClassification)
+  const categoryId = ocrData.expense_category_id ? Number(ocrData.expense_category_id) : (entry.categoryId ?? null)
+  const eventType = ocrData.event_type ?? entry.eventType ?? ''
+
   entry.ocrData = {
     id: ocrData.id,
-    amount: ocrData.total_amount ?? ocrData.amount ?? entry.ocrData.amount ?? '',
-    vat: ocrData.vat_amount ?? ocrData.vat ?? entry.ocrData.vat ?? '',
-    tin: ocrData.tin ?? entry.ocrData.tin ?? '',
-    vendor: ocrData.vendor_name ?? ocrData.vendor ?? entry.ocrData.vendor ?? '',
-    invoiceNumber: ocrData.invoice_number ?? ocrData.invoiceNumber ?? entry.ocrData.invoiceNumber ?? '',
-    date: formatDateForInput(ocrData.transaction_date ?? ocrData.date ?? entry.ocrData.date),
+    amount: ocrData.total_amount ?? ocrData.amount ?? entry.ocrData?.amount ?? '',
+    vat: ocrData.vat_amount ?? ocrData.vat ?? entry.ocrData?.vat ?? '',
+    tin: ocrData.tin ?? entry.ocrData?.tin ?? '',
+    vendor: ocrData.vendor_name ?? ocrData.vendor ?? entry.ocrData?.vendor ?? '',
+    invoiceNumber: ocrData.invoice_number ?? ocrData.invoiceNumber ?? entry.ocrData?.invoiceNumber ?? '',
+    date: formatDateForInput(ocrData.transaction_date ?? ocrData.date ?? entry.ocrData?.date),
     location: ocrData.location ?? entry.location ?? '',
+    expense_category_id: categoryId,
+    event_type: eventType,
+    discount_amount: rawDiscount > 0 ? rawDiscount.toFixed(2) : '0.00',
+    discount_type: discountType,
     confidence,
     file_path: ocrData.file_path,
     file_hash: ocrData.file_hash,
@@ -199,9 +313,21 @@ function hydrateEntry(entry, ocrData) {
   entry.tin = entry.ocrData.tin
   entry.invoiceNumber = entry.ocrData.invoiceNumber
   entry.location = entry.ocrData.location
+  entry.categoryId = categoryId
+  entry.category = ocrData.category?.name ?? entry.category ?? ''
+  entry.eventType = eventType
+  entry.vatClassification = vatClassification
+  entry.currency = ocrData.currency || entry.currency || 'PHP'
+  entry.discountType = discountType
+  entry.discountAmount = entry.ocrData.discount_amount
   entry.amount = Number(entry.ocrData.amount) || 0
-  entry.tax = entry.ocrData.vat ? String(entry.ocrData.vat) : '0.00'
-  entry.subtotal = (Math.max(Number(entry.amount || 0) - Number(entry.tax || 0), 0)).toFixed(2)
+  entry.tax = vatClassification === 'non-vat'
+    ? '0.00'
+    : (entry.ocrData.vat !== '' && entry.ocrData.vat != null ? String(entry.ocrData.vat) : '0.00')
+  entry.subtotal = ocrData.subtotal != null && ocrData.subtotal !== ''
+    ? Number(ocrData.subtotal).toFixed(2)
+    : (Math.max(Number(entry.amount || 0) - Number(entry.tax || 0), 0)).toFixed(2)
+  entry.ocrData.subtotal = entry.subtotal
   if (Array.isArray(ocrData.items) && ocrData.items.length > 0) {
     entry.items = ocrData.items.map((item) => ({
       name: item.name || '',
@@ -212,6 +338,149 @@ function hydrateEntry(entry, ocrData) {
   entry.thumbnail = entry.previews?.[0] || null
   emit('ocr-result', entry.ocrData)
   emit('update:modelValue', files.value)
+  notifyMissingFieldsAfterTick(entry)
+}
+
+function buildGroupMeta(groupPages, payload, indexFallback) {
+  const displayName =
+    groupPages.length > 1
+      ? `Multi-page Receipt (${groupPages.length} pages)`
+      : (groupPages[0]?.name || payload?.vendor_name || `Receipt-${payload?.id ?? indexFallback + 1}`)
+  const size = groupPages.reduce((acc, f) => acc + (f?.size || 0), 0)
+  return { displayName, size }
+}
+
+async function applySingleOcrOutcome(targetEntry, payload) {
+  if (payload?.id) targetEntry.id = payload.id
+  const status = String(payload?.status || '').toLowerCase()
+  const reason = payload?.rejection_reason || payload?.error || ''
+
+  if (
+    status === 'failed' ||
+    (status === 'rejected' &&
+      isOcrOfflineFailure({
+        status,
+        rejectionCode: payload?.rejection_code,
+        rejectionReason: reason,
+      }))
+  ) {
+    targetEntry.ocrStatus = 'failed'
+    targetEntry.rejectionCode = payload?.rejection_code || 'ocr_failed'
+    targetEntry.rejectionReason =
+      reason || 'OCR processing failed. You can retry OCR.'
+    emit('update:modelValue', files.value)
+    emit('upload-error', {
+      type: 'failed',
+      message: targetEntry.rejectionReason,
+      code: targetEntry.rejectionCode,
+      entry: targetEntry,
+    })
+    return
+  }
+
+  if (status === 'rejected') {
+    const isDup = isDuplicateOcrResponse(payload)
+    await handleRejectedEntry(targetEntry, {
+      isDuplicate: isDup,
+      rejectionCode:
+        payload?.rejection_code || (isDup ? 'duplicate' : 'quality_failed'),
+      rejectionReason: reason || 'Receipt rejected.',
+    })
+    return
+  }
+
+  hydrateEntry(targetEntry, payload)
+}
+
+async function applySplitEntries(entry, data) {
+  const allPayloads = [data, ...data.split_receipts]
+  addToast({
+    message: formatSplitReceiptsToastMessage(allPayloads.length),
+    type: 'info',
+  })
+
+  const origPages = Array.isArray(entry.pages) ? entry.pages : []
+  const origPreviews = Array.isArray(entry.previews) ? entry.previews : []
+  const segmentIndexGroups = resolveSplitSegmentIndices(allPayloads, origPages.length)
+
+  const entryIdx = files.value.findIndex(
+    (f) =>
+      f === entry ||
+      (entry.localId && f.localId === entry.localId) ||
+      (entry.id != null && f.id === entry.id),
+  )
+  const primaryEntry = entryIdx !== -1 ? files.value[entryIdx] : entry
+
+  const targetEntries = []
+  const newEntries = []
+
+  allPayloads.forEach((payload, i) => {
+    const indices = segmentIndexGroups[i] || []
+    const groupPages = indices.map((idx) => origPages[idx]).filter(Boolean)
+    const groupPreviews = indices
+      .map((idx) => origPreviews[idx])
+      .filter((u) => u !== undefined)
+    const { displayName, size } = buildGroupMeta(groupPages, payload, i)
+
+    if (i === 0) {
+      primaryEntry.pages = groupPages
+      primaryEntry.previews =
+        groupPreviews.length === groupPages.length
+          ? groupPreviews
+          : groupPages.map((f) =>
+              f?.type?.startsWith('image/') ? URL.createObjectURL(f) : null,
+            )
+      primaryEntry.name = displayName
+      primaryEntry.fileName = displayName
+      primaryEntry.fileType = groupPages[0]?.type || primaryEntry.fileType || ''
+      primaryEntry.size = origPages.length > 0 ? size : primaryEntry.size
+      primaryEntry.thumbnail = primaryEntry.previews[0] || null
+      if (primaryEntry.previews.length > 1) {
+        primaryEntry.isMultiReceipt = true
+        primaryEntry.images = primaryEntry.previews
+      } else {
+        primaryEntry.isMultiReceipt = false
+        primaryEntry.images = undefined
+      }
+      if (payload?.id) primaryEntry.id = payload.id
+      targetEntries.push(primaryEntry)
+    } else {
+      const created = createUploadEntry(
+        groupPages,
+        displayName,
+        size,
+        groupPreviews.length === groupPages.length ? groupPreviews : null,
+      )
+      if (payload?.id) created.id = payload.id
+      if (created.previews.length > 1) {
+        created.isMultiReceipt = true
+        created.images = created.previews
+      } else {
+        created.isMultiReceipt = false
+      }
+      newEntries.push(created)
+      targetEntries.push(created)
+    }
+  })
+
+  if (entryIdx !== -1) {
+    files.value.splice(entryIdx + 1, 0, ...newEntries)
+  } else {
+    files.value.push(primaryEntry, ...newEntries)
+  }
+  emit('update:modelValue', files.value)
+
+  for (let i = 0; i < allPayloads.length; i++) {
+    await applySingleOcrOutcome(targetEntries[i], allPayloads[i])
+  }
+}
+
+async function resolveOcrPayload(entry, data) {
+  if (hasSplitReceipts(data)) {
+    await applySplitEntries(entry, data)
+    return
+  }
+  await applySingleOcrOutcome(entry, data)
 }
 
 function startPolling(entry) {
@@ -223,12 +492,14 @@ function startPolling(entry) {
       // Primary: reimbursement receipt endpoint (shared receipt table)
       let data = null
       let res = await apiFetch(`/api/serms/reimbursements/receipts/${entry.id}`, { method: 'GET' })
+      if (pollTimers.get(key) !== timer) return
       if (res.ok) {
         const json = await res.json()
         data = json.data ?? json
       } else {
         // Fallback: liquidation receipt endpoint
         const alt = await apiFetch(`/api/serms/liquidations/receipts/${entry.id}`, { method: 'GET' })
+        if (pollTimers.get(key) !== timer) return
         if (alt.ok) {
           const json = await alt.json()
           data = json.data ?? json
@@ -237,38 +508,13 @@ function startPolling(entry) {
         }
       }
 
+      if (pollTimers.get(key) !== timer) return
       const status = String(data.status || '').toLowerCase()
       if (status !== 'processing' && status !== 'pending-ocr' && status !== '') {
         clearInterval(timer)
         pollTimers.delete(key)
 
-        if (status === 'failed') {
-          entry.ocrStatus = 'failed'
-          entry.rejectionCode = data.rejection_code || 'ocr_failed'
-          entry.rejectionReason = data.rejection_reason || 'OCR processing failed. You can retry OCR.'
-          emit('update:modelValue', files.value)
-          emit('upload-error', { type: 'failed', message: entry.rejectionReason, code: entry.rejectionCode, entry })
-          return
-        }
-
-        if (status === 'rejected') {
-          const isDup =
-            data.rejection_code === 'duplicate' ||
-            data.is_duplicate === true ||
-            String(data.rejection_reason || '').toLowerCase().includes('duplicate')
-          entry.ocrStatus = 'rejected'
-          entry.rejectionCode = data.rejection_code || (isDup ? 'duplicate' : 'quality_failed')
-          entry.rejectionReason = data.rejection_reason || data.error || 'Receipt rejected.'
-          if (isDup) {
-            window.dispatchEvent(new CustomEvent('receipt-duplicate-detected', { detail: { receiptId: data.id, message: entry.rejectionReason } }))
-          }
-          emit('update:modelValue', files.value)
-          emit('upload-error', { type: isDup ? 'duplicate' : 'quality', message: entry.rejectionReason, code: entry.rejectionCode, entry })
-          return
-        }
-
-        // processed / flagged / pending — hydrate with OCR results
-        hydrateEntry(entry, data)
+        await resolveOcrPayload(entry, data)
       }
     } catch (e) {
       console.error('Polling error for liquidation receipt', entry.id, e)
@@ -280,6 +526,7 @@ function startPolling(entry) {
 async function retryOcr(entry) {
   if (!entry?.id) return
   entry.ocrStatus = 'processing'
+  entry.hasOcrReturned = false
   entry.rejectionCode = null
   entry.rejectionReason = null
   emit('update:modelValue', files.value)
@@ -307,15 +554,9 @@ async function simulateOCR(entry) {
     entry.pages.forEach(file => {
       formData.append('files[]', file)
     })
-    // Fast mock path — real file upload, instant mock data, skip OCR wait + polling.
-    if (props.mockMode) {
-      formData.append('is_mock', '1')
-    }
-
     const response = await apiFetch('/api/serms/liquidations/scan', {
       method: 'POST',
       body: formData,
-      headers: props.mockMode ? { 'X-Mock-OCR': '1' } : {},
     })
 
     if (!response.ok) {
@@ -327,21 +568,45 @@ async function simulateOCR(entry) {
         String(JSON.stringify(errorBody.errors || '')).toLowerCase().includes('duplicate')
 
       if (response.status === 422) {
-        if (hasDuplicate) {
-          entry.ocrStatus = 'rejected'
-          entry.rejectionCode = 'duplicate'
-          entry.rejectionReason = errorBody.message || errorBody?.errors?.file_hash?.[0] || 'Duplicate receipt detected.'
-          window.dispatchEvent(new CustomEvent('receipt-duplicate-detected', { detail: { receiptId: entry.id, message: entry.rejectionReason } }))
+        const reason422 = errorBody.rejection_reason || rawMsg || ''
+        if (
+          isOcrOfflineFailure({
+            rejectionCode: errorBody.rejection_code,
+            rejectionReason: reason422,
+          })
+        ) {
+          entry.ocrStatus = 'failed'
+          entry.rejectionCode = errorBody.rejection_code || 'ocr_failed'
+          entry.rejectionReason = reason422 || 'OCR processing failed. You can retry OCR.'
           emit('update:modelValue', files.value)
-          emit('upload-error', { type: 'duplicate', message: entry.rejectionReason, code: 'duplicate', entry })
+          emit('upload-error', { type: 'failed', message: entry.rejectionReason, code: entry.rejectionCode, entry })
           return
         }
-        // Quality or other validation rejection
-        entry.ocrStatus = 'rejected'
-        entry.rejectionCode = errorBody.rejection_code || 'quality_failed'
-        entry.rejectionReason = errorBody.rejection_reason || errorBody.message || 'Image quality is too low for accurate OCR.'
-        emit('update:modelValue', files.value)
-        emit('upload-error', { type: 'quality', message: entry.rejectionReason, code: entry.rejectionCode, entry })
+        const isDuplicate422 =
+          hasDuplicate ||
+          errorBody?.rejection_code === 'duplicate' ||
+          errorBody?.is_duplicate === true ||
+          String(errorBody?.rejection_reason || '').toLowerCase().includes('duplicate')
+        if (isDuplicate422) {
+          await handleRejectedEntry(entry, {
+            isDuplicate: true,
+            rejectionCode: 'duplicate',
+            rejectionReason:
+              errorBody.rejection_reason ||
+              errorBody.message ||
+              errorBody?.errors?.file_hash?.[0] ||
+              'Duplicate receipt detected.',
+          })
+          return
+        }
+        await handleRejectedEntry(entry, {
+          isDuplicate: false,
+          rejectionCode: errorBody.rejection_code || 'quality_failed',
+          rejectionReason:
+            errorBody.rejection_reason ||
+            errorBody.message ||
+            'Image quality is too low for accurate OCR.',
+        })
         return
       }
 
@@ -362,18 +627,7 @@ async function simulateOCR(entry) {
       return
     }
 
-    if (status === 'failed' || status === 'rejected') {
-      entry.id = ocrData.id
-      entry.ocrStatus = status === 'failed' ? 'failed' : 'rejected'
-      entry.rejectionCode = ocrData.rejection_code || (status === 'failed' ? 'ocr_failed' : 'quality_failed')
-      entry.rejectionReason = ocrData.rejection_reason || `Receipt ${status}.`
-      emit('update:modelValue', files.value)
-      emit('upload-error', { type: status === 'failed' ? 'failed' : 'quality', message: entry.rejectionReason, code: entry.rejectionCode, entry })
-      return
-    }
-
-    // Immediate data (should be rare — hydrates directly without polling)
-    hydrateEntry(entry, ocrData)
+    await resolveOcrPayload(entry, ocrData)
   } catch (error) {
     console.error('OCR processing failed:', error)
     // Keep entry but surface as failed so user can retry; preserve file previews
@@ -387,25 +641,70 @@ async function simulateOCR(entry) {
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener('click', handleWindowClick)
+  window.removeEventListener('remove-duplicate-receipt', handleRemoveDuplicateEvent)
+  window.removeEventListener('open-receipt-upload', handleOpenReceiptUpload)
   pollTimers.forEach(clearInterval)
   pollTimers.clear()
 })
 
-defineExpose({ retryOcr, startPolling, hydrateEntry })
+defineExpose({ retryOcr, startPolling, hydrateEntry, cleanupUploadedFiles })
 
-function removeFile(index) {
+async function removeFile(index) {
+  if (index < 0 || index >= files.value.length) return
   const entry = files.value[index]
   if (entry?.id && pollTimers.has(String(entry.id))) {
     clearInterval(pollTimers.get(String(entry.id)))
     pollTimers.delete(String(entry.id))
   }
-  if (entry?.previews) {
-    entry.previews.forEach(preview => {
-      if (preview) URL.revokeObjectURL(preview)
+  const isBlobUsedElsewhere = (url) => {
+    if (!url) return false
+    return files.value.some((other, otherIdx) => {
+      if (otherIdx === index || other === entry) return false
+      if (other.thumbnail === url) return true
+      return Array.isArray(other.previews) && other.previews.includes(url)
     })
   }
+  if (entry?.previews && typeof URL.revokeObjectURL === 'function') {
+    entry.previews.forEach(preview => {
+      if (preview && !isBlobUsedElsewhere(preview)) URL.revokeObjectURL(preview)
+    })
+  }
+  if (
+    entry?.thumbnail?.startsWith('blob:') &&
+    typeof URL.revokeObjectURL === 'function' &&
+    !isBlobUsedElsewhere(entry.thumbnail)
+  ) {
+    URL.revokeObjectURL(entry.thumbnail)
+  }
+  const receiptId = entry?.id
   files.value.splice(index, 1)
   emit('update:modelValue', files.value)
+
+  if (receiptId && !String(receiptId).startsWith('temp-')) {
+    try {
+      await apiFetch(`/api/serms/reimbursements/receipts/${receiptId}`, { method: 'DELETE' })
+    } catch (err) {
+      console.error('Failed to delete removed receipt draft:', err)
+    }
+  }
+}
+
+async function cleanupUploadedFiles() {
+  const idsToDelete = files.value
+    .map(f => f?.id)
+    .filter(id => id && !String(id).startsWith('temp-'))
+  if (idsToDelete.length === 0) return
+
+  await Promise.allSettled(
+    idsToDelete.map(async (id) => {
+      try {
+        await apiFetch(`/api/serms/reimbursements/receipts/${id}`, { method: 'DELETE' })
+      } catch (err) {
+        console.error(`Failed to delete receipt draft ${id}:`, err)
+      }
+    })
+  )
 }
 
 function onDrop(event) {
@@ -431,7 +730,7 @@ function onFileInput(event) {
       ref="fileInput"
       type="file"
       :accept="accept"
-      multiple
+      :multiple="uploadMode === 'multi'"
       class="hidden"
       @change="onFileInput"
     />
@@ -466,10 +765,10 @@ function onFileInput(event) {
           At least 1 receipt is required to proceed
         </p>
         <div class="mt-6">
-          <div class="relative inline-block text-left" @click.stop>
+          <div ref="selectDropdownRef" class="relative inline-block text-left" @click.stop>
             <div>
               <button
-                @click="isDropdownOpen = !isDropdownOpen"
+                @click.stop="isDropdownOpen = !isDropdownOpen"
                 class="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-bold text-white transition-colors hover:bg-primary/90 focus:outline-none"
               >
                 <UploadCloud class="h-3.5 w-3.5" />
@@ -496,14 +795,14 @@ function onFileInput(event) {
                     @click="triggerFileInput('single'); isDropdownOpen = false"
                   >
                     <UploadCloud class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
-                    Single Upload
+                    Single Receipt
                   </button>
                   <button
                     class="group flex w-full items-center rounded-md px-2 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white"
                     @click="triggerFileInput('multi'); isDropdownOpen = false"
                   >
                     <Layers class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
-                    Multiple Upload
+                    Multi Receipt
                   </button>
                 </div>
               </div>
@@ -519,10 +818,10 @@ function onFileInput(event) {
           <h3 class="text-sm font-semibold text-slate-700">Receipts ({{ files.length }})</h3>
         </div>
         <div class="flex items-center gap-2">
-          <div class="relative inline-block text-left" @click.stop>
+          <div ref="addMoreDropdownRef" class="relative inline-block text-left" @click.stop>
             <div>
               <button
-                @click="isDropdownOpen = !isDropdownOpen"
+                @click.stop="isDropdownOpen = !isDropdownOpen"
                 class="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-white border border-slate-300 px-3.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none"
               >
                 <PlusCircle class="h-3.5 w-3.5" />
@@ -548,14 +847,14 @@ function onFileInput(event) {
                     @click="triggerFileInput('single'); isDropdownOpen = false"
                   >
                     <UploadCloud class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
-                    Single Upload
+                    Single Receipt
                   </button>
                   <button
                     class="group flex w-full items-center rounded-md px-2 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white"
                     @click="triggerFileInput('multi'); isDropdownOpen = false"
                   >
                     <Layers class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
-                    Multiple Upload
+                    Multi Receipt
                   </button>
                 </div>
               </div>
@@ -595,7 +894,7 @@ function onFileInput(event) {
     <TransitionGroup v-if="files.length > 0" name="file-list" tag="div" class="flex flex-col gap-3">
       <div
         v-for="(entry, index) in files"
-        :key="entry.name + index"
+        :key="entry.localId || entry.id || (entry.name + index)"
         class="flex items-center gap-3 rounded-xl border border-accent/15 bg-accent-50/20 p-3"
       >
         <div class="relative flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white">
@@ -654,7 +953,7 @@ function onFileInput(event) {
 
         <div class="flex shrink-0 items-center gap-1.5">
           <button
-            v-if="entry.ocrStatus === 'failed' || entry.ocrStatus === 'rejected'"
+            v-if="entry.ocrStatus === 'failed'"
             class="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 text-xs font-bold text-amber-700 transition-colors hover:bg-amber-100"
             type="button"
             @click="retryOcr(entry)"
@@ -682,6 +981,16 @@ function onFileInput(event) {
       cancel-text="Separate Receipts"
       @confirm="handleConfirmDrop('multi')"
       @close="handleConfirmDrop('single')"
+    />
+
+    <ReceiptQualityRejectionModal
+      :is-open="!!qualityRejection"
+      :rejected-file="qualityRejection?.file ?? null"
+      :rejection-code="qualityRejection?.rejectionCode ?? ''"
+      :rejection-reason="qualityRejection?.rejectionReason ?? ''"
+      :show-segmented-option="false"
+      @retake="handleRetake"
+      @close="clearQualityRejection"
     />
   </div>
 </template>

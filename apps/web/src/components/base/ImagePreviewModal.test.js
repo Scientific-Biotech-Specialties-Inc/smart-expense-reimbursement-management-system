@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { describe, expect, it } from "vitest";
 
 describe("ImagePreviewModal calculations & state logic", () => {
@@ -112,3 +113,58 @@ describe("ImagePreviewModal calculations & state logic", () => {
     expect(screenX).toBe(700);
   });
 });
+
+import { mount } from "@vue/test-utils";
+import ImagePreviewModal from "./ImagePreviewModal.vue";
+
+describe("ImagePreviewModal Multi-Image Carousel", () => {
+  const images = [
+    "https://example.com/part1.jpg",
+    "https://example.com/part2.jpg",
+    "https://example.com/part3.jpg",
+  ];
+
+  it("renders part counter and navigation chevrons when multiple images are passed", () => {
+    const wrapper = mount(ImagePreviewModal, {
+      props: {
+        modelValue: true,
+        images,
+        initialIndex: 0,
+      },
+      attachTo: document.body,
+    });
+
+    expect(document.body.textContent).toContain("Part 1 of 3");
+    const prevBtn = document.body.querySelector("[data-testid='preview-prev-btn']");
+    const nextBtn = document.body.querySelector("[data-testid='preview-next-btn']");
+    expect(prevBtn).not.toBeNull();
+    expect(nextBtn).not.toBeNull();
+    wrapper.unmount();
+  });
+
+  it("navigates to next and previous images on button click", async () => {
+    const wrapper = mount(ImagePreviewModal, {
+      props: {
+        modelValue: true,
+        images,
+        initialIndex: 0,
+      },
+      attachTo: document.body,
+    });
+
+    const nextBtn = document.body.querySelector("[data-testid='preview-next-btn']");
+    nextBtn.click();
+    await wrapper.vm.$nextTick();
+    expect(document.body.textContent).toContain("Part 2 of 3");
+    const img = document.body.querySelector("img");
+    expect(img.getAttribute("src")).toBe(images[1]);
+
+    const prevBtn = document.body.querySelector("[data-testid='preview-prev-btn']");
+    prevBtn.click();
+    await wrapper.vm.$nextTick();
+    expect(document.body.textContent).toContain("Part 1 of 3");
+    expect(img.getAttribute("src")).toBe(images[0]);
+    wrapper.unmount();
+  });
+});
+

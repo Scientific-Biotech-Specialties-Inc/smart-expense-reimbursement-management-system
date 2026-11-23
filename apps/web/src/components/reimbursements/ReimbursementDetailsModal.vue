@@ -1,14 +1,22 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import { useAuthStore } from "@/stores/auth";
-import { formatAmount, formatDate, formatCutoffPeriod } from "@/utils/formatters";
+import { formatAmount, formatDate } from "@/utils/formatters";
+import BaseButton from "@/components/base/BaseButton.vue";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
+import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
+import SbsiReportPreviewModal from "@/components/base/SbsiReportPreviewModal.vue";
+import { useReportExport } from "@/composables/useReportExport";
+import { useHorizontalScroll } from "@/composables/useHorizontalScroll";
+import { useToast } from "@/composables/useToast";
+import { downloadSbsiReportPdf } from "@/utils/sbsiPdfGenerator";
 import {
   X,
   FileText,
   Download,
   Eye,
+  Ticket,
   Wallet,
 } from "lucide-vue-next";
 
@@ -16,10 +24,6 @@ const props = defineProps({
   viewingRecord: {
     type: Object,
     default: null,
-  },
-  receiptDetailsOpen: {
-    type: Boolean,
-    default: false,
   },
   modalLoading: {
     type: Boolean,
@@ -34,10 +38,51 @@ const emit = defineEmits([
   "approve",
   "grant",
   "edit",
-  "forward-receipts",
 ]);
 
 const auth = useAuthStore();
+const { isExporting, exportReport } = useReportExport();
+const { addToast } = useToast();
+const previewReportOpen = ref(false);
+
+watch(
+  () => props.viewingRecord,
+  () => {
+    previewReportOpen.value = false;
+  },
+);
+
+function handleDownloadGeneratedReport() {
+  if (!props.viewingRecord?.report_template_data) return;
+  try {
+    downloadSbsiReportPdf(
+      props.viewingRecord.report_template_data,
+      props.viewingRecord.id ? `SBSI-reimbursement-${props.viewingRecord.id}.pdf` : null,
+    );
+  } catch (error) {
+    console.error("Failed to download generated reimbursement report:", error);
+    addToast({
+      message: "Failed to generate PDF report for download.",
+      type: "error",
+    });
+  }
+}
+
+const scrollContainerRef = ref(null);
+const { canScrollLeft, canScrollRight, scrollToActive } = useHorizontalScroll(
+  scrollContainerRef,
+  {
+    activeSelector: '[aria-current="step"]',
+    autoScrollOnMount: true,
+  },
+);
+
+watch(
+  () => props.viewingRecord?.status,
+  () => {
+    scrollToActive();
+  },
+);
 
 const activeReceiptItems = computed(() => props.viewingRecord?.receipts || []);
 const isOwnSubmission = computed(() => {
@@ -71,21 +116,6 @@ function normalizeStatus(status) {
   return statusMap[normalized] || normalized;
 }
 
-function getCutoffPeriod(recordOrDate) {
-  if (!recordOrDate) return "--";
-  const val =
-    typeof recordOrDate === "object"
-      ? recordOrDate.cutoff_period ||
-        recordOrDate.cutoffPeriod ||
-        recordOrDate.date ||
-        recordOrDate.created_at ||
-        recordOrDate.dateSubmitted ||
-        recordOrDate.submitted_at
-      : recordOrDate;
-  const res = formatCutoffPeriod(val);
-  return res === "—" ? "--" : res;
-}
-
 function categoryName(record) {
   return record?.expense_category?.name || record?.category?.name || record?.category || "Uncategorized";
 }
@@ -115,10 +145,43 @@ function categoryName(record) {
             <div>
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">
                 Reimbursement Ref #{{ viewingRecord.id }}
+                <span
+                  v-if="viewingRecord.reference_no"
+                  class="ml-1.5 font-mono font-semibold text-slate-600"
+                >
+                  {{ viewingRecord.reference_no }}
+                </span>
               </p>
-              <h2 class="text-2xl font-bold text-slate-800">
-                {{ formatAmount(viewingRecord.amount || 0, viewingRecord.currency || 'PHP') }}
-              </h2>
+              <div class="flex flex-wrap items-center gap-2.5">
+                <h2 class="text-2xl font-bold text-slate-800">
+                  {{ formatAmount(viewingRecord.amount || 0, viewingRecord.currency || 'PHP') }}
+                </h2>
+                <span
+                  v-if="viewingRecord.source_system === 'ts' || viewingRecord.ticket_id"
+                  class="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700"
+                >
+                  <Ticket class="w-3 h-3" aria-hidden="true" />
+                  <span>From TS</span>
+                </span>
+                <span
+                  v-if="viewingRecord.ticket_id || viewingRecord.ticket_number"
+                  class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
+                >
+                  Ticket {{ viewingRecord.ticket_number || `#${viewingRecord.ticket_id}` }}
+                </span>
+                <span
+                  v-if="viewingRecord.fast_track_eligible"
+                  class="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700"
+                >
+                  [Fast-Track Eligible]
+                </span>
+                <span
+                  v-else-if="viewingRecord.vendor_audit_required && !viewingRecord.secondary_audit_confirmed_at"
+                  class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800"
+                >
+                  Secondary Audit Required
+                </span>
+              </div>
             </div>
             <StatusBadge :status="viewingRecord.status" />
           </div>
@@ -132,94 +195,129 @@ function categoryName(record) {
           </div>
 
           <template v-else>
-            <!-- Timeline -->
-            <section class="relative">
-              <!-- Horizontal line -->
-              <div class="absolute top-4 -translate-y-1/2 left-[16.66%] right-[16.66%] h-0.5 bg-slate-100"></div>
+            <!-- Timeline with horizontal scroll on narrow/overflow viewports -->
+            <section class="relative w-full" aria-label="Reimbursement Timeline">
+              <!-- Left dynamic edge fade (only when canScrollLeft) -->
+              <div
+                v-show="canScrollLeft"
+                class="pointer-events-none absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-white to-transparent z-20 transition-opacity duration-200"
+                aria-hidden="true"
+              ></div>
 
-              <div class="flex justify-between gap-2">
-                <!-- Step 1: Submitted -->
-                <div class="relative flex flex-col items-center text-center flex-1">
-                  <div class="h-8 w-8 rounded-full bg-emerald-500 text-white flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2">
-                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                  </div>
-                  <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Submitted</p>
-                  <p class="text-xs text-slate-700 font-medium truncate max-w-full px-1">
-                    {{ viewingRecord.user?.name || viewingRecord.submitted_by_name || "Employee" }}
-                  </p>
-                </div>
+              <!-- Right dynamic edge fade (only when canScrollRight) -->
+              <div
+                v-show="canScrollRight"
+                class="pointer-events-none absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-white to-transparent z-20 transition-opacity duration-200"
+                aria-hidden="true"
+              ></div>
 
-                <!-- Step 2: Under Review -->
-                <div class="relative flex flex-col items-center text-center flex-1">
+              <!-- Scrollable Viewport: only scrolls if content overflows container -->
+              <div
+                ref="scrollContainerRef"
+                class="relative w-full overflow-x-auto scrollbar-none py-1"
+                tabindex="0"
+                aria-label="Reimbursement steps roadmap"
+              >
+                <!-- Inner track with responsive min-width: fills full width on large screens, scrolls on narrow screens -->
+                <div class="relative flex items-start justify-between min-w-full" style="min-width: 440px;">
+                  <!-- Horizontal connector line -->
+                  <div class="pointer-events-none absolute top-4 -translate-y-1/2 left-[12.5%] right-[12.5%] h-0.5 bg-slate-100 z-0" aria-hidden="true"></div>
+
+                  <!-- Step 1: Submitted -->
                   <div
-                    :class="[
-                      'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
-                      ['approved', 'granted', 'rejected'].includes(normalizeStatus(viewingRecord.status))
-                        ? 'bg-emerald-500 text-white'
-                        : normalizeStatus(viewingRecord.status) === 'pending'
-                          ? 'bg-amber-400 text-white animate-pulse'
+                    class="relative flex flex-col items-center text-center flex-1 min-w-[110px] px-1 z-10"
+                    :aria-current="normalizeStatus(viewingRecord.status) === 'draft' ? 'step' : undefined"
+                  >
+                    <div class="h-8 w-8 rounded-full bg-emerald-500 text-white flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                    </div>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Submitted</p>
+                    <p class="text-xs text-slate-700 font-medium truncate max-w-full px-1">
+                      {{ viewingRecord.user?.name || viewingRecord.submitted_by_name || "Employee" }}
+                    </p>
+                  </div>
+
+                  <!-- Step 2: Under Review -->
+                  <div
+                    class="relative flex flex-col items-center text-center flex-1 min-w-[110px] px-1 z-10"
+                    :aria-current="normalizeStatus(viewingRecord.status) === 'pending' ? 'step' : undefined"
+                  >
+                    <div
+                      :class="[
+                        'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
+                        ['approved', 'granted', 'rejected'].includes(normalizeStatus(viewingRecord.status))
+                          ? 'bg-emerald-500 text-white'
+                          : normalizeStatus(viewingRecord.status) === 'pending'
+                            ? 'bg-amber-400 text-white animate-pulse'
+                            : 'bg-slate-200 text-slate-400'
+                      ]"
+                    >
+                      <svg v-if="['approved', 'granted', 'rejected'].includes(normalizeStatus(viewingRecord.status))" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      <svg v-else-if="normalizeStatus(viewingRecord.status) === 'pending'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3" /><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none" /></svg>
+                      <span v-else class="text-[10px] font-bold">2</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Review</p>
+                    <p class="text-xs font-medium truncate max-w-full px-1"
+                      :class="normalizeStatus(viewingRecord.status) === 'pending' ? 'text-amber-600' : 'text-slate-700'"
+                    >
+                      {{ normalizeStatus(viewingRecord.status) === 'pending' ? 'In Progress' : 'Reviewed' }}
+                    </p>
+                  </div>
+
+                  <!-- Step 3: Decision -->
+                  <div
+                    class="relative flex flex-col items-center text-center flex-1 min-w-[110px] px-1 z-10"
+                    :aria-current="['approved', 'rejected'].includes(normalizeStatus(viewingRecord.status)) ? 'step' : undefined"
+                  >
+                    <div
+                      :class="[
+                        'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
+                        normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted'
+                          ? 'bg-emerald-500 text-white'
+                          : normalizeStatus(viewingRecord.status) === 'rejected'
+                            ? 'bg-red-500 text-white'
+                            : 'bg-slate-200 text-slate-400'
+                      ]"
+                    >
+                      <svg v-if="normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      <svg v-else-if="normalizeStatus(viewingRecord.status) === 'rejected'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                      <span v-else class="text-[10px] font-bold">3</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Decision</p>
+                    <p class="text-xs font-medium truncate max-w-full px-1"
+                      :class="[
+                        normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted' ? 'text-emerald-600' : '',
+                        normalizeStatus(viewingRecord.status) === 'rejected' ? 'text-red-600' : '',
+                        normalizeStatus(viewingRecord.status) === 'pending' ? 'text-slate-400' : '',
+                      ]"
+                    >
+                      {{ normalizeStatus(viewingRecord.status) === 'approved' ? 'Approved' : normalizeStatus(viewingRecord.status) === 'granted' ? 'Granted' : normalizeStatus(viewingRecord.status) === 'rejected' ? 'Rejected' : 'Awaiting' }}
+                    </p>
+                  </div>
+
+                  <!-- Step 4: Released -->
+                  <div
+                    class="relative flex flex-col items-center text-center flex-1 min-w-[110px] px-1 z-10"
+                    :aria-current="normalizeStatus(viewingRecord.status) === 'granted' ? 'step' : undefined"
+                  >
+                    <div
+                      :class="[
+                        'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
+                        normalizeStatus(viewingRecord.status) === 'granted'
+                          ? 'bg-emerald-500 text-white'
                           : 'bg-slate-200 text-slate-400'
-                    ]"
-                  >
-                    <svg v-if="['approved', 'granted', 'rejected'].includes(normalizeStatus(viewingRecord.status))" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                    <svg v-else-if="normalizeStatus(viewingRecord.status) === 'pending'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3" /><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none" /></svg>
-                    <span v-else class="text-[10px] font-bold">2</span>
+                      ]"
+                    >
+                      <svg v-if="normalizeStatus(viewingRecord.status) === 'granted'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                      <span v-else class="text-[10px] font-bold">4</span>
+                    </div>
+                    <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Released</p>
+                    <p class="text-xs font-medium truncate max-w-full px-1"
+                      :class="normalizeStatus(viewingRecord.status) === 'granted' ? 'text-emerald-600' : 'text-slate-400'"
+                    >
+                      {{ normalizeStatus(viewingRecord.status) === 'granted' ? 'Disbursed' : 'Pending' }}
+                    </p>
                   </div>
-                  <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Review</p>
-                  <p class="text-xs font-medium truncate max-w-full px-1"
-                    :class="normalizeStatus(viewingRecord.status) === 'pending' ? 'text-amber-600' : 'text-slate-700'"
-                  >
-                    {{ normalizeStatus(viewingRecord.status) === 'pending' ? 'In Progress' : 'Reviewed' }}
-                  </p>
-                </div>
-
-                <!-- Step 3: Decision -->
-                <div class="relative flex flex-col items-center text-center flex-1">
-                  <div
-                    :class="[
-                      'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
-                      normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted'
-                        ? 'bg-emerald-500 text-white'
-                        : normalizeStatus(viewingRecord.status) === 'rejected'
-                          ? 'bg-red-500 text-white'
-                          : 'bg-slate-200 text-slate-400'
-                    ]"
-                  >
-                    <svg v-if="normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                    <svg v-else-if="normalizeStatus(viewingRecord.status) === 'rejected'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                    <span v-else class="text-[10px] font-bold">3</span>
-                  </div>
-                  <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Decision</p>
-                  <p class="text-xs font-medium truncate max-w-full px-1"
-                    :class="[
-                      normalizeStatus(viewingRecord.status) === 'approved' || normalizeStatus(viewingRecord.status) === 'granted' ? 'text-emerald-600' : '',
-                      normalizeStatus(viewingRecord.status) === 'rejected' ? 'text-red-600' : '',
-                      normalizeStatus(viewingRecord.status) === 'pending' ? 'text-slate-400' : '',
-                    ]"
-                  >
-                    {{ normalizeStatus(viewingRecord.status) === 'approved' ? 'Approved' : normalizeStatus(viewingRecord.status) === 'granted' ? 'Granted' : normalizeStatus(viewingRecord.status) === 'rejected' ? 'Rejected' : 'Awaiting' }}
-                  </p>
-                </div>
-
-                <!-- Step 4: Released -->
-                <div class="relative flex flex-col items-center text-center flex-1">
-                  <div
-                    :class="[
-                      'h-8 w-8 rounded-full flex items-center justify-center ring-4 ring-white z-10 shrink-0 mb-2',
-                      normalizeStatus(viewingRecord.status) === 'granted'
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-slate-200 text-slate-400'
-                    ]"
-                  >
-                    <svg v-if="normalizeStatus(viewingRecord.status) === 'granted'" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
-                    <span v-else class="text-[10px] font-bold">4</span>
-                  </div>
-                  <p class="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">Released</p>
-                  <p class="text-xs font-medium truncate max-w-full px-1"
-                    :class="normalizeStatus(viewingRecord.status) === 'granted' ? 'text-emerald-600' : 'text-slate-400'"
-                  >
-                    {{ normalizeStatus(viewingRecord.status) === 'granted' ? 'Disbursed' : 'Pending' }}
-                  </p>
                 </div>
               </div>
             </section>
@@ -230,21 +328,104 @@ function categoryName(record) {
                 <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Submitted By</p>
                 <p class="text-sm text-slate-700">{{ viewingRecord.user?.name || viewingRecord.submitted_by_name || "Employee" }}</p>
               </div>
-              <div>
-                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Period</p>
-                <p class="text-sm text-slate-700">{{ getCutoffPeriod(viewingRecord) }}</p>
+              <div v-if="viewingRecord.event_type">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Type of Event</p>
+                <p class="text-sm text-slate-700">{{ viewingRecord.event_type }}</p>
               </div>
-              <div v-if="viewingRecord.report_url || viewingRecord.report_file_path" class="col-span-2">
+              <div v-if="viewingRecord.contract_id" class="col-span-2">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Linked CMS Contract</p>
+                <p class="text-sm text-slate-700">
+                  {{ viewingRecord.client_name ? `${viewingRecord.client_name} (Contract #${viewingRecord.contract_id})` : `Contract #${viewingRecord.contract_id}` }}
+                </p>
+              </div>
+              <div v-if="viewingRecord.ticket_id || viewingRecord.ticket_number" class="col-span-2">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Linked Support Ticket (TS)</p>
+                <p class="text-sm text-slate-700 inline-flex items-center gap-2">
+                  <Ticket class="w-4 h-4 text-indigo-600 shrink-0" aria-hidden="true" />
+                  <span class="font-medium">
+                    {{ viewingRecord.ticket_number ? `Ticket ${viewingRecord.ticket_number}` : `Ticket #${viewingRecord.ticket_id}` }}
+                  </span>
+                  <span v-if="viewingRecord.ticket_id && viewingRecord.ticket_number" class="text-xs text-slate-400">
+                    (ID #{{ viewingRecord.ticket_id }})
+                  </span>
+                </p>
+              </div>
+              <div v-if="['approved', 'granted'].includes(normalizeStatus(viewingRecord.status)) || viewingRecord.approved_by">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Approved By</p>
+                <p class="text-sm text-slate-700">
+                  {{ viewingRecord.approved_by || "Approver" }}
+                  <span v-if="viewingRecord.approved_at" class="text-xs text-slate-400">
+                    &bull; {{ formatDate(viewingRecord.approved_at) }}
+                  </span>
+                </p>
+              </div>
+              <div
+                v-if="viewingRecord.secondary_audit_confirmed_at"
+                class="col-span-2 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3"
+              >
+                <p class="text-[11px] font-bold uppercase tracking-wide text-emerald-800 mb-0.5">
+                  Secondary Accounting Audit Completed
+                </p>
+                <p class="text-xs text-emerald-900">
+                  Verified by {{ viewingRecord.secondary_audit_by || "Accounting" }} &bull; {{ formatDate(viewingRecord.secondary_audit_confirmed_at) }}
+                </p>
+                <p v-if="viewingRecord.secondary_audit_note" class="mt-1 text-xs text-emerald-800 italic">
+                  "{{ viewingRecord.secondary_audit_note }}"
+                </p>
+              </div>
+              <div
+                v-else-if="viewingRecord.vendor_audit_required"
+                class="col-span-2 rounded-lg border border-amber-200 bg-amber-50/80 p-3"
+              >
+                <p class="text-[11px] font-bold uppercase tracking-wide text-amber-900 mb-0.5">
+                  [Unverified Vendor — Secondary Accounting Audit Required]
+                </p>
+                <p class="text-xs text-amber-800">
+                  Manual vendor/TIN verification must be confirmed before this claim can be approved.
+                  <span v-if="Array.isArray(viewingRecord.unverified_vendors) && viewingRecord.unverified_vendors.length">
+                    Flagged: {{ viewingRecord.unverified_vendors.join(", ") }}
+                  </span>
+                </p>
+              </div>
+              <div
+                v-if="viewingRecord.report_url || viewingRecord.report_file_path || viewingRecord.report_template_data"
+                class="col-span-2"
+              >
                 <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Report</p>
-                <a
-                  :href="viewingRecord.report_url"
-                  target="_blank"
-                  class="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-                >
-                  <FileText class="w-3.5 h-3.5" />
-                  <span>Download Report</span>
-                  <Download class="w-3 h-3" />
-                </a>
+                <div class="flex flex-wrap items-center gap-3">
+                  <BaseButton
+                    data-testid="preview-report-btn"
+                    variant="secondary"
+                    size="sm"
+                    type="button"
+                    @click="previewReportOpen = true"
+                  >
+                    <Eye class="w-3.5 h-3.5" />
+                    <span>Preview Report</span>
+                  </BaseButton>
+                  <a
+                    v-if="viewingRecord.report_url"
+                    :href="viewingRecord.report_url"
+                    target="_blank"
+                    class="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                  >
+                    <FileText class="w-3.5 h-3.5" />
+                    <span>Download Report</span>
+                    <Download class="w-3 h-3" />
+                  </a>
+                  <BaseButton
+                    v-else-if="viewingRecord.report_template_data"
+                    data-testid="download-template-report-btn"
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    @click="handleDownloadGeneratedReport"
+                  >
+                    <FileText class="w-3.5 h-3.5" />
+                    <span>Download Report</span>
+                    <Download class="w-3 h-3" />
+                  </BaseButton>
+                </div>
               </div>
               <div class="col-span-2">
                 <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">User Comment</p>
@@ -262,7 +443,7 @@ function categoryName(record) {
 
             <!-- Needs Revision Banner (employee) -->
             <div
-              v-if="!auth.isAdmin && normalizeStatus(viewingRecord.status) === 'revise'"
+              v-if="(!auth.isAdmin || isOwnSubmission) && normalizeStatus(viewingRecord.status) === 'revise'"
               class="p-4 rounded-lg border border-orange-200 bg-orange-50"
             >
               <p class="text-[11px] text-orange-600 uppercase tracking-wide mb-1 font-bold">Needs Revision — Attempt {{ viewingRecord.revision_count || 1 }}/3 <span v-if="(viewingRecord.revision_count || 1) >= 3" class="text-red-600">(final attempt)</span></p>
@@ -281,9 +462,23 @@ function categoryName(record) {
 
             <!-- Receipts -->
             <div>
-              <h3 class="text-sm font-medium text-slate-700 mb-3">
-                Receipts ({{ activeReceiptItems.length }})
-              </h3>
+              <div class="flex items-center justify-between gap-3 mb-3">
+                <h3 class="text-sm font-medium text-slate-700">
+                  Receipts ({{ activeReceiptItems.length }})
+                </h3>
+                <BaseButton
+                  data-testid="export-reimbursement-report-btn"
+                  variant="secondary"
+                  size="sm"
+                  type="button"
+                  :loading="isExporting"
+                  :disabled="isExporting"
+                  @click="exportReport('reimbursement', viewingRecord.id)"
+                >
+                  <Download class="w-3.5 h-3.5" />
+                  <span>{{ isExporting ? "Exporting..." : "Export Report" }}</span>
+                </BaseButton>
+              </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <article
@@ -314,11 +509,16 @@ function categoryName(record) {
                       <StatusBadge :status="receipt.status" />
                     </div>
 
-                    <div class="flex justify-between items-center">
-                      <span class="text-[10px] font-medium uppercase tracking-wide text-primary bg-primary/5 px-2 py-0.5 rounded">
-                        {{ categoryName(receipt) }}
-                      </span>
-                      <span class="text-sm font-semibold text-slate-800">
+                    <div class="flex justify-between items-center gap-2">
+                      <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="text-[10px] font-medium uppercase tracking-wide text-primary bg-primary/5 px-2 py-0.5 rounded">
+                          {{ categoryName(receipt) }}
+                        </span>
+                        <span v-if="receipt.event_type" class="text-[10px] font-medium uppercase tracking-wide text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
+                          {{ receipt.event_type }}
+                        </span>
+                      </div>
+                      <span class="text-sm font-semibold text-slate-800 shrink-0">
                         {{ formatAmount(receipt.total_amount || 0, receipt.currency || "PHP") }}
                       </span>
                     </div>
@@ -336,13 +536,20 @@ function categoryName(record) {
                 </article>
               </div>
             </div>
+
+            <!-- Audit Trail Section -->
+            <BaseAuditTrail
+              :trail="viewingRecord.audit_trail || []"
+              :entity-title="`Reimbursement-#${viewingRecord.id}`"
+              class="mt-5"
+            />
           </template>
         </div>
 
         <!-- Footer Actions (Admin: Pending/Revise) -->
         <footer
           v-if="auth.isAdmin && viewingRecord && ['pending','revise'].includes(normalizeStatus(viewingRecord.status))"
-          class="px-6 py-4 border-t border-slate-100 flex flex-col gap-3 sm:flex-row shrink-0"
+          class="px-6 py-4 border-t border-slate-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end shrink-0"
         >
           <p
             v-if="isOwnSubmission"
@@ -351,10 +558,10 @@ function categoryName(record) {
             You cannot process your own request.
           </p>
           <template v-else>
-            <div class="flex-1">
+            <div class="w-full sm:w-auto">
               <select
                 @change="emit('reject', viewingRecord.id, ($event.target.value)); $event.target.value=''"
-                class="w-full py-2.5 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg bg-white hover:bg-slate-50 transition-colors text-center"
+                class="w-full sm:w-auto py-2.5 px-4 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg bg-white hover:bg-slate-50 transition-colors text-center cursor-pointer"
                 value=""
               >
                 <option value="" disabled selected>Actions ▾</option>
@@ -363,7 +570,7 @@ function categoryName(record) {
               </select>
             </div>
             <button
-              class="flex-1 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shadow-sm"
+              class="w-full sm:w-auto px-5 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shadow-sm flex items-center justify-center gap-2"
               @click="emit('approve', viewingRecord.id)"
             >
               Approve Claim
@@ -374,31 +581,32 @@ function categoryName(record) {
         <!-- Footer Actions (Admin: Approved → Grant) -->
         <footer
           v-if="auth.isAdmin && viewingRecord && normalizeStatus(viewingRecord.status) === 'approved'"
-          class="px-6 py-4 border-t border-slate-100 shrink-0"
+          class="px-6 py-4 border-t border-slate-100 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-end"
         >
           <button
             v-if="!isOwnSubmission"
-            class="w-full py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shadow-sm flex items-center justify-center gap-2"
+            class="w-full sm:w-auto px-5 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shadow-sm flex items-center justify-center gap-2"
             @click="emit('grant', viewingRecord.id)"
           >
             <Wallet class="w-4 h-4" /> Grant Claim
           </button>
-          <p v-else class="text-sm text-danger text-center">
+          <p v-else class="text-sm text-danger text-center sm:text-right">
             You cannot process your own request.
           </p>
         </footer>
 
         <!-- Footer Actions (Employee: Revise → Edit) -->
         <footer
-          v-if="!auth.isAdmin && viewingRecord && normalizeStatus(viewingRecord.status) === 'revise'"
+          v-if="(!auth.isAdmin || isOwnSubmission) && viewingRecord && normalizeStatus(viewingRecord.status) === 'revise'"
           class="px-6 py-4 border-t border-orange-100 bg-orange-50/30 shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
         >
           <p class="text-sm text-orange-800 text-center sm:text-left">
             Ready to revise? Edit your submission and it will return to Pending.
           </p>
           <button
+            data-testid="edit-resubmit-btn"
             class="px-5 py-2.5 bg-orange-500 text-white text-sm font-medium rounded-lg hover:bg-orange-600 transition-colors shadow-sm whitespace-nowrap"
-            @click="emit('edit', viewingRecord.id)"
+            @click="emit('edit', viewingRecord)"
           >
             Edit & Resubmit
           </button>
@@ -406,4 +614,14 @@ function categoryName(record) {
       </div>
     </div>
   </Transition>
+
+  <SbsiReportPreviewModal
+    v-if="viewingRecord"
+    :is-open="previewReportOpen"
+    :template-data="viewingRecord.report_template_data || null"
+    fallback-type="reimbursement"
+    :record="viewingRecord"
+    :file-url="viewingRecord.report_url || viewingRecord.report_file_path || null"
+    @close="previewReportOpen = false"
+  />
 </template>

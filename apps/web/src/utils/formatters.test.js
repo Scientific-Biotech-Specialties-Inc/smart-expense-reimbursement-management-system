@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatPeso, formatAmount, formatKpiValue, formatDate, formatCutoffPeriod } from "./formatters";
+import { formatPeso, formatAmount, formatKpiValue, formatDate, truncateText, truncateDecimal } from "./formatters";
 
 describe("formatters", () => {
   describe("formatPeso", () => {
@@ -36,35 +36,6 @@ describe("formatters", () => {
     });
   });
 
-  describe("formatCutoffPeriod", () => {
-    it("formats YYYY-M and YYYY-MM strings correctly", () => {
-      expect(formatCutoffPeriod("2026-7")).toBe("Jul 2026");
-      expect(formatCutoffPeriod("2026-07")).toBe("Jul 2026");
-      expect(formatCutoffPeriod("2026-8")).toBe("Aug 2026");
-      expect(formatCutoffPeriod("2026-08")).toBe("Aug 2026");
-      expect(formatCutoffPeriod("2026-1")).toBe("Jan 2026");
-      expect(formatCutoffPeriod("2026-12")).toBe("Dec 2026");
-    });
-
-    it("formats cutoff period half/day suffixes", () => {
-      expect(formatCutoffPeriod("2026-06-A")).toBe("Jun 1 - 15, 2026");
-      expect(formatCutoffPeriod("2026-06-B")).toBe("Jun 16 - 30, 2026");
-      expect(formatCutoffPeriod("2026-07-B")).toBe("Jul 16 - 31, 2026");
-      expect(formatCutoffPeriod("2026-02-B")).toBe("Feb 16 - 28, 2026");
-    });
-
-    it("preserves already human-readable cutoff period strings", () => {
-      expect(formatCutoffPeriod("Jan 01 - Jan 15, 2025")).toBe("Jan 01 - Jan 15, 2025");
-      expect(formatCutoffPeriod("June 1-15, 2026")).toBe("June 1-15, 2026");
-    });
-
-    it("handles null, undefined, and empty string gracefully", () => {
-      expect(formatCutoffPeriod(null)).toBe("—");
-      expect(formatCutoffPeriod(undefined)).toBe("—");
-      expect(formatCutoffPeriod("")).toBe("—");
-    });
-  });
-
   describe("formatKpiValue", () => {
     it("formats float numbers to 2 decimal places", () => {
       expect(formatKpiValue(1200.12)).toBe("1,200.12");
@@ -92,6 +63,76 @@ describe("formatters", () => {
       expect(formatKpiValue("—")).toBe("—");
       expect(formatKpiValue(null)).toBe("—");
       expect(formatKpiValue(undefined)).toBe("—");
+    });
+  });
+
+  describe("truncateText", () => {
+    it("returns '—' for null, undefined, or empty text", () => {
+      expect(truncateText(null)).toBe("—");
+      expect(truncateText(undefined)).toBe("—");
+      expect(truncateText("")).toBe("—");
+    });
+
+    it("leaves strings at or below maxLength untouched", () => {
+      expect(truncateText("Short text")).toBe("Short text");
+      expect(truncateText("123456789012345678")).toBe("123456789012345678");
+    });
+
+    it("truncates strings exceeding default cap of 18 characters (< 20) including spaces and appends '...'", () => {
+      // 25 characters with spaces:
+      // "Purchased office s" is 18 chars (9 + 1 + 6 + 1 + 1)
+      const input = "Purchased office supplies";
+      const result = truncateText(input);
+      expect(result).toBe("Purchased office s...");
+      expect("Purchased office s".length).toBe(18);
+    });
+
+    it("trims trailing spaces before the ellipsis", () => {
+      // Character 18 is a space
+      const textWithSpaceAt18 = "12345678 12345678 ABC";
+      expect(textWithSpaceAt18.slice(0, 18)).toBe("12345678 12345678 ");
+      expect(truncateText(textWithSpaceAt18, 18)).toBe("12345678 12345678...");
+    });
+
+    it("supports custom maxLength", () => {
+      expect(truncateText("Hello World!", 5)).toBe("Hello...");
+      expect(truncateText("Purchased office supplies and materials for Q4", 30)).toBe("Purchased office supplies and...");
+    });
+  });
+
+  describe("truncateDecimal", () => {
+    it("returns empty string for null, undefined, or empty value", () => {
+      expect(truncateDecimal(null)).toBe("");
+      expect(truncateDecimal(undefined)).toBe("");
+      expect(truncateDecimal("")).toBe("");
+    });
+
+    it("returns integers unchanged", () => {
+      expect(truncateDecimal(100)).toBe("100");
+      expect(truncateDecimal("100")).toBe("100");
+      expect(truncateDecimal(0)).toBe("0");
+    });
+
+    it("preserves trailing dot and values with 1 or 2 decimals while typing", () => {
+      expect(truncateDecimal("100.")).toBe("100.");
+      expect(truncateDecimal("100.5")).toBe("100.5");
+      expect(truncateDecimal("100.55")).toBe("100.55");
+      expect(truncateDecimal(100.5)).toBe("100.5");
+    });
+
+    it("truncates decimal digits exceeding 2 digits without rounding", () => {
+      expect(truncateDecimal("100.559")).toBe("100.55");
+      expect(truncateDecimal(100.559)).toBe("100.55");
+      expect(truncateDecimal("12.345678")).toBe("12.34");
+      expect(truncateDecimal(12.3499)).toBe("12.34");
+      expect(truncateDecimal("0.999")).toBe("0.99");
+      expect(truncateDecimal(".999")).toBe(".99");
+    });
+
+    it("supports custom digit lengths", () => {
+      expect(truncateDecimal("12.3456", 3)).toBe("12.345");
+      expect(truncateDecimal("12.3456", 1)).toBe("12.3");
+      expect(truncateDecimal("12.3456", 0)).toBe("12");
     });
   });
 });

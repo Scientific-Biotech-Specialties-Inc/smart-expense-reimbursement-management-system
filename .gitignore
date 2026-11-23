@@ -16,6 +16,8 @@ public/storage/
 
 .agents/
 
+.docs/superpowers
+
 # Logs
 npm-debug.log*
 yarn-debug.log*

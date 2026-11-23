@@ -17,7 +17,15 @@ const props = defineProps({
   message: {
     type: String,
     default: "This action cannot be undone."
-  }
+  },
+  loading: {
+    type: Boolean,
+    default: false,
+  },
+  isSubmitting: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(['update:modelValue', 'confirm']);
@@ -34,12 +42,14 @@ watch(() => props.modelValue, (newVal) => {
 });
 
 function handleConfirm() {
+  if (props.loading || props.isSubmitting) return;
   if (password.value) {
     emit('confirm', password.value);
   }
 }
 
 function close() {
+  if (props.loading || props.isSubmitting) return;
   emit('update:modelValue', false);
 }
 </script>
@@ -101,19 +111,21 @@ function close() {
         </div>
       </div>
 
-      <!-- Centered Action Footer per Section VI.5 -->
-      <div class="flex gap-3 mt-6">
+      <!-- Right-Aligned Action Footer -->
+      <div class="flex items-center justify-end gap-3 mt-6">
         <BaseButton
           variant="secondary"
-          class="flex-1 min-h-10"
+          class="px-5 min-h-10"
+          :disabled="loading || isSubmitting"
           @click="close"
         >
           Cancel
         </BaseButton>
         <BaseButton
           variant="destructive"
-          class="flex-1 min-h-10"
-          :disabled="password.length === 0"
+          class="px-5 min-h-10"
+          :disabled="password.length === 0 || loading || isSubmitting"
+          :loading="loading || isSubmitting"
           @click="handleConfirm"
         >
           Confirm Delete

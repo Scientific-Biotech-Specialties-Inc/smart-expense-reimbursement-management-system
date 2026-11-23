@@ -7,13 +7,10 @@ use App\Modules\Users\Models\User;
 use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Reimbursements\Models\ReceiptItem;
-use App\Modules\AuditLogs\Models\AuditLog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use App\Modules\Shared\Services\PasswordVerificationService;
 use Carbon\Carbon;
-use Mockery;
 
 class ReimbursementLogicTest extends TestCase
 {
@@ -72,10 +69,10 @@ class ReimbursementLogicTest extends TestCase
         ])->post('/api/reimbursements', [
             'description' => 'Business Lunch',
             'expense_category_id' => $category->id,
+            'event_type' => 'Client Meeting',
             'category' => 'Meals',
             'amount' => 100.00,
             'date' => '2026-06-10',
-            'cutoff_period' => '2026-06',
             'receipt_ids' => [$receipt->id],
             'report_file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf')
         ]);
@@ -91,23 +88,69 @@ class ReimbursementLogicTest extends TestCase
 
     public function test_receipt_upload_allows_missing_category(): void
     {
+        \Illuminate\Support\Facades\Queue::fake();
+
         $response = $this
             ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
             ->actingAs($this->employee)
             ->post('/api/reimbursements/receipts', [
                 'file' => UploadedFile::fake()->create('receipt.pdf', 100, 'application/pdf'),
-                'is_mock' => '1',
             ]);
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.expense_category_id', null);
-        $response->assertJsonPath('data.status', 'processed');
+        $response->assertJsonPath('data.status', 'processing');
 
         $this->assertDatabaseHas('receipts', [
             'uploaded_by' => $this->employee->id,
             'expense_category_id' => null,
-            'status' => 'processed',
+            'status' => 'processing',
         ]);
+    }
+
+    public function test_draft_receipt_is_committed_and_listed_when_updated_with_is_draft_false(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+
+        $uploadRes = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->post('/api/reimbursements/receipts', [
+                'file' => UploadedFile::fake()->create('draft-receipt.png', 100, 'image/png'),
+                'is_draft' => '1',
+            ]);
+
+        $uploadRes->assertStatus(201);
+        $receiptId = $uploadRes->json('data.id');
+
+        // Draft receipt stays hidden from My Expenses listing
+        $listBefore = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->getJson('/api/reimbursements/receipts');
+
+        $listBefore->assertOk();
+        $this->assertFalse(collect($listBefore->json('data'))->contains('id', $receiptId));
+
+        // Saving the receipt with is_draft=false commits it into My Expenses
+        $saveRes = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->patchJson("/api/reimbursements/receipts/{$receiptId}", [
+                'vendor_name' => 'Ma & Pa Bake Shop',
+                'is_draft' => false,
+            ]);
+
+        $saveRes->assertOk()
+            ->assertJsonPath('data.is_draft', false);
+
+        $listAfter = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->getJson('/api/reimbursements/receipts');
+
+        $listAfter->assertOk();
+        $this->assertTrue(collect($listAfter->json('data'))->contains('id', $receiptId));
     }
 
     public function test_categories_endpoint_seeds_defaults_when_empty(): void
@@ -146,7 +189,6 @@ class ReimbursementLogicTest extends TestCase
             'category' => 'Meals',
             'amount' => 100.00,
             'date' => Carbon::now(),
-            'cutoff_period' => '2026-06',
             'status' => 'pending',
             'submitted_by_name' => $this->employee->name,
         ]);
@@ -214,7 +256,6 @@ class ReimbursementLogicTest extends TestCase
             'category' => 'Meals',
             'amount' => 100.00,
             'date' => Carbon::now(),
-            'cutoff_period' => '2026-06',
             'status' => 'pending',
             'submitted_by_name' => $this->employee->name,
         ]);
@@ -230,10 +271,10 @@ class ReimbursementLogicTest extends TestCase
             ->post('/api/reimbursements', [
                 'description' => 'Duplicate Claim',
                 'expense_category_id' => $category->id,
+                'event_type' => 'Client Meeting',
                 'category' => 'Meals',
                 'amount' => 100.00,
                 'date' => '2026-06-10',
-                'cutoff_period' => '2026-06',
                 'receipt_ids' => [$receipt->id],
                 'report_file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf'),
             ]);
@@ -255,7 +296,6 @@ class ReimbursementLogicTest extends TestCase
             'category' => 'Travel',
             'amount' => 500.00,
             'date' => Carbon::now(),
-            'cutoff_period' => '2026-06',
             'status' => 'pending',
             'submitted_by_name' => $this->admin->name,
         ]);
@@ -287,7 +327,6 @@ class ReimbursementLogicTest extends TestCase
             'category' => 'Supplies',
             'amount' => 50.00,
             'date' => Carbon::now(),
-            'cutoff_period' => '2026-06',
             'status' => 'pending',
             'submitted_by_name' => $this->employee->name,
         ]);
@@ -337,7 +376,6 @@ class ReimbursementLogicTest extends TestCase
             'category' => 'Meals',
             'amount' => 150.00,
             'date' => Carbon::now(),
-            'cutoff_period' => '2026-06',
             'status' => 'pending',
             'submitted_by_name' => $this->employee->name,
         ]);
@@ -407,7 +445,6 @@ class ReimbursementLogicTest extends TestCase
             'category' => 'Meals',
             'amount' => 200.00,
             'date' => Carbon::now(),
-            'cutoff_period' => '2026-06',
             'status' => 'pending',
             'submitted_by_name' => $this->employee->name,
         ]);
@@ -457,9 +494,9 @@ class ReimbursementLogicTest extends TestCase
             'description' => 'Client Lunch',
             'user_comment' => $customComment,
             'expense_category_id' => $category->id,
+            'event_type' => 'Client Meeting',
             'amount' => 150.00,
             'date' => '2026-06-15',
-            'cutoff_period' => '2026-06-16',
             'receipt_ids' => [$receipt->id],
             'report_file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf')
         ]);
@@ -500,9 +537,9 @@ class ReimbursementLogicTest extends TestCase
         ])->post('/api/reimbursements', [
             'description' => 'Taxi Ride',
             'expense_category_id' => $category->id,
+            'event_type' => 'Client Meeting',
             'amount' => 80.00,
             'date' => '2026-06-16',
-            'cutoff_period' => '2026-06-16',
             'receipt_ids' => [$receipt->id],
             'report_file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf')
         ]);
@@ -537,7 +574,6 @@ class ReimbursementLogicTest extends TestCase
             'expense_category_id' => $category->id,
             'amount' => 50.00,
             'date' => '2026-06-17',
-            'cutoff_period' => '2026-06-16',
             'status' => 'pending',
             'submitted_by_name' => $this->employee->name,
         ]);
@@ -567,5 +603,408 @@ class ReimbursementLogicTest extends TestCase
             'user_comment' => $updatedComment,
         ]);
     }
+
+    public function test_reimbursement_eager_loads_payout_relation(): void
+    {
+        $reimbursement = Reimbursement::create([
+            'user_id' => $this->employee->id,
+            'description' => 'Granted Reimbursement',
+            'amount' => 1500.00,
+            'date' => '2026-10-01',
+            'status' => 'granted',
+            'submitted_by_name' => $this->employee->name,
+        ]);
+
+        \App\Modules\Reimbursements\Models\Payout::create([
+            'reimbursement_id' => $reimbursement->id,
+            'request_date' => '2026-10-01',
+            'approved_at' => '2026-10-05 14:00:00',
+            'granted_at' => '2026-10-10 10:00:00',
+            'approved_by' => 'Finance Manager',
+            'granted_by' => 'Cashier Jane',
+            'payout_method' => 'E-wallet',
+            'amount' => 1500.00,
+            'granter_signature' => 'data:image/png;base64,granterSig',
+        ]);
+
+        $token = $this->generateMockToken([
+            'email' => $this->employee->email,
+            'role' => $this->employee->role,
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+        ]);
+
+        $response = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+            'Accept' => 'application/json',
+        ])->get('/api/reimbursements');
+
+        $response->assertStatus(200);
+        $this->assertEquals('E-wallet', $response->json('0.payout.payout_method'));
+        $this->assertEquals('Cashier Jane', $response->json('0.payout.granted_by'));
+    }
+
+    public function test_approve_saves_approving_admin_and_timestamp(): void
+    {
+        $reimbursement = Reimbursement::create([
+            'user_id' => $this->employee->id,
+            'description' => 'Client Lunch',
+            'amount' => 1200.00,
+            'date' => '2026-10-01',
+            'status' => 'pending',
+            'submitted_by_name' => $this->employee->name,
+        ]);
+
+        $token = $this->generateMockToken([
+            'email' => $this->admin->email,
+            'role' => $this->admin->role,
+            'first_name' => 'Admin',
+            'last_name' => 'User',
+        ]);
+
+        $response = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+            'Accept' => 'application/json',
+        ])->postJson('/api/reimbursements/' . $reimbursement->id . '/approve', []);
+
+        $response->assertStatus(200);
+        $this->assertEquals('approved', $response->json('data.status'));
+        $this->assertEquals($this->admin->name, $response->json('data.approved_by'));
+        $this->assertNotNull($response->json('data.approved_at'));
+    }
+
+    public function test_grant_creates_payout_record_and_blocks_duplicate_or_unapproved_grant(): void
+    {
+        $reimbursement = Reimbursement::create([
+            'user_id' => $this->employee->id,
+            'description' => 'Conference Travel',
+            'amount' => 3500.00,
+            'date' => '2026-10-02',
+            'status' => 'approved',
+            'approved_by' => 'Finance Approver',
+            'approved_at' => '2026-10-05 12:00:00',
+            'submitted_by_name' => $this->employee->name,
+        ]);
+
+        $token = $this->generateMockToken([
+            'email' => $this->admin->email,
+            'role' => $this->admin->role,
+            'first_name' => 'Admin',
+            'last_name' => 'User',
+        ]);
+
+        // Selecting Other without payout_method_other fails validation (G2-045)
+        $invalidResponse = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+            'Accept' => 'application/json',
+        ])->postJson('/api/reimbursements/' . $reimbursement->id . '/grant', [
+            'granted_by' => 'Cashier Jane',
+            'payout_method' => 'Other',
+            'granter_signature' => 'data:image/png;base64,granterSig',
+        ]);
+        $invalidResponse->assertStatus(422);
+
+        // Valid grant (G2-044, G2-045, G2-046, G2-047)
+        $response = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+            'Accept' => 'application/json',
+        ])->postJson('/api/reimbursements/' . $reimbursement->id . '/grant', [
+            'granted_by' => 'Cashier Jane',
+            'payout_method' => 'Other',
+            'payout_method_other' => 'GCash Corporate',
+            'granter_signature' => 'data:image/png;base64,granterSig',
+        ]);
+
+        $response->assertStatus(200);
+        $this->assertEquals('granted', $response->json('data.status'));
+        $this->assertEquals('Cashier Jane', $response->json('data.payout.granted_by'));
+        $this->assertEquals('Finance Approver', $response->json('data.payout.approved_by'));
+        $this->assertEquals('Other', $response->json('data.payout.payout_method'));
+        $this->assertEquals('GCash Corporate', $response->json('data.payout.payout_method_other'));
+        $this->assertEquals('3500.00', $response->json('data.payout.amount'));
+
+        // Duplicate grant is blocked (G2-047)
+        $secondGrant = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+            'Accept' => 'application/json',
+        ])->postJson('/api/reimbursements/' . $reimbursement->id . '/grant', [
+            'granted_by' => 'Cashier Jane',
+            'payout_method' => 'Cash',
+            'granter_signature' => 'data:image/png;base64,granterSig',
+        ]);
+        $secondGrant->assertStatus(403);
+    }
+
+    public function test_employee_can_acknowledge_own_granted_payout_once_and_not_others(): void
+    {
+        $reimbursement = Reimbursement::create([
+            'user_id' => $this->employee->id,
+            'description' => 'Granted Reimbursement',
+            'amount' => 1500.00,
+            'date' => '2026-10-01',
+            'status' => 'granted',
+            'submitted_by_name' => $this->employee->name,
+        ]);
+
+        \App\Modules\Reimbursements\Models\Payout::create([
+            'reimbursement_id' => $reimbursement->id,
+            'request_date' => '2026-10-01',
+            'approved_at' => '2026-10-05 14:00:00',
+            'granted_at' => '2026-10-10 10:00:00',
+            'approved_by' => 'Finance Manager',
+            'granted_by' => 'Cashier Jane',
+            'payout_method' => 'Cash',
+            'amount' => 1500.00,
+            'granter_signature' => 'data:image/png;base64,granterSig',
+        ]);
+
+        $otherUser = User::create([
+            'name' => 'Other Emp',
+            'email' => 'other@example.com',
+            'role' => 'employee',
+            'grade' => 'L1',
+            'department' => 'IT',
+        ]);
+
+        $otherToken = $this->generateMockToken([
+            'email' => $otherUser->email,
+            'role' => $otherUser->role,
+            'first_name' => 'Other',
+            'last_name' => 'Emp',
+        ]);
+
+        // Other employee cannot acknowledge (G2-050, G2-053)
+        $forbidden = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $otherToken,
+            'Accept' => 'application/json',
+        ])->postJson('/api/reimbursements/' . $reimbursement->id . '/acknowledge', [
+            'employee_signature' => 'data:image/png;base64,empSig',
+        ]);
+        $forbidden->assertStatus(403);
+
+        // Owning employee acknowledges (G2-050)
+        $empToken = $this->generateMockToken([
+            'email' => $this->employee->email,
+            'role' => $this->employee->role,
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+        ]);
+
+        $ok = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $empToken,
+            'Accept' => 'application/json',
+        ])->postJson('/api/reimbursements/' . $reimbursement->id . '/acknowledge', [
+            'employee_signature' => 'data:image/png;base64,empSig',
+        ]);
+        $ok->assertStatus(200);
+        $this->assertEquals('data:image/png;base64,empSig', $ok->json('data.payout.employee_signature'));
+        $this->assertNotNull($ok->json('data.payout.acknowledged_at'));
+
+        // Cannot re-sign once acknowledged (G2-050 Task 3)
+        $resign = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $empToken,
+            'Accept' => 'application/json',
+        ])->postJson('/api/reimbursements/' . $reimbursement->id . '/acknowledge', [
+            'employee_signature' => 'data:image/png;base64,newSig',
+        ]);
+        $resign->assertStatus(403);
+    }
+
+    public function test_granted_reimbursement_cannot_be_updated_or_deleted(): void
+    {
+        $reimbursement = Reimbursement::create([
+            'user_id' => $this->employee->id,
+            'description' => 'Locked Granted Claim',
+            'amount' => 1500.00,
+            'date' => '2026-10-01',
+            'status' => 'granted',
+            'submitted_by_name' => $this->employee->name,
+        ]);
+
+        $adminToken = $this->generateMockToken([
+            'email' => $this->admin->email,
+            'role' => $this->admin->role,
+            'first_name' => 'Admin',
+            'last_name' => 'User',
+        ]);
+
+        $patchRes = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $adminToken,
+            'Accept' => 'application/json',
+        ])->patchJson('/api/reimbursements/' . $reimbursement->id, [
+            'admin_notes' => 'Trying to edit granted record',
+        ]);
+        $patchRes->assertStatus(403);
+    }
+
+    public function test_store_reimbursement_requires_event_type(): void
+    {
+        $category = \App\Modules\Reimbursements\Models\ExpenseCategory::firstOrCreate(['name' => 'Meals']);
+        $receipt = Receipt::create([
+            'uploaded_by' => $this->employee->id,
+            'file_path' => 'receipts/rcpt_test.png',
+            'file_hash' => str_repeat('b', 64),
+            'file_type' => 'png',
+            'file_size_bytes' => 1024,
+            'vendor_name' => 'Vendor Test',
+            'total_amount' => 100.00,
+        ]);
+
+        $token = $this->generateMockToken([
+            'email' => $this->employee->email,
+            'role' => $this->employee->role,
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+        ]);
+
+        $response = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+            'Accept' => 'application/json',
+        ])->post('/api/reimbursements', [
+            'description' => 'Meeting Lunch',
+            'expense_category_id' => $category->id,
+            'amount' => 100.00,
+            'date' => '2026-10-01',
+            'receipt_ids' => [$receipt->id],
+            'report_file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf'),
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['event_type']);
+    }
+
+    public function test_store_and_update_reimbursement_persists_event_type(): void
+    {
+        $category = \App\Modules\Reimbursements\Models\ExpenseCategory::firstOrCreate(['name' => 'Meals']);
+        $receipt = Receipt::create([
+            'uploaded_by' => $this->employee->id,
+            'file_path' => 'receipts/rcpt_test.png',
+            'file_hash' => str_repeat('c', 64),
+            'file_type' => 'png',
+            'file_size_bytes' => 1024,
+            'vendor_name' => 'Vendor Test',
+            'total_amount' => 100.00,
+        ]);
+
+        $token = $this->generateMockToken([
+            'email' => $this->employee->email,
+            'role' => $this->employee->role,
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+        ]);
+
+        $response = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+            'Accept' => 'application/json',
+        ])->post('/api/reimbursements', [
+            'description' => 'Meeting Lunch',
+            'expense_category_id' => $category->id,
+            'event_type' => 'Client Meeting',
+            'amount' => 100.00,
+            'date' => '2026-10-01',
+            'receipt_ids' => [$receipt->id],
+            'receipts' => [
+                [
+                    'id' => $receipt->id,
+                    'event_type' => 'Client Meeting',
+                ],
+            ],
+            'report_file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf'),
+        ]);
+
+        $response->assertStatus(201);
+        $reimbursementId = $response->json('data.id');
+
+        $this->assertDatabaseHas('reimbursements', [
+            'id' => $reimbursementId,
+            'event_type' => 'Client Meeting',
+        ]);
+
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receipt->id,
+            'event_type' => 'Client Meeting',
+        ]);
+
+        $updateRes = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+            'Accept' => 'application/json',
+        ])->patch('/api/reimbursements/' . $reimbursementId, [
+            'description' => 'Updated Meeting Lunch',
+            'expense_category_id' => $category->id,
+            'event_type' => 'Conference / Seminar',
+            'amount' => 100.00,
+            'date' => '2026-10-01',
+            'receipt_ids' => [$receipt->id],
+            'receipts' => [
+                [
+                    'id' => $receipt->id,
+                    'event_type' => 'Conference / Seminar',
+                ],
+            ],
+        ]);
+
+        $updateRes->assertStatus(200);
+
+        $this->assertDatabaseHas('reimbursements', [
+            'id' => $reimbursementId,
+            'event_type' => 'Conference / Seminar',
+        ]);
+
+        $this->assertDatabaseHas('receipts', [
+            'id' => $receipt->id,
+            'event_type' => 'Conference / Seminar',
+        ]);
+    }
+
+    public function test_store_reimbursement_blocks_rejected_receipts(): void
+    {
+        $category = \App\Modules\Reimbursements\Models\ExpenseCategory::firstOrCreate(['name' => 'Meals']);
+
+        $token = $this->generateMockToken([
+            'email' => $this->employee->email,
+            'role' => $this->employee->role,
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+        ]);
+
+        foreach (['rejected', 'automatic-rejected'] as $status) {
+            $receipt = Receipt::create([
+                'uploaded_by' => $this->employee->id,
+                'file_path' => "receipts/rcpt_rej_{$status}.png",
+                'file_hash' => hash('sha256', "reimb_rejected_{$status}"),
+                'file_type' => 'png',
+                'file_size_bytes' => 1024,
+                'vendor_name' => 'Bad Receipt Vendor',
+                'total_amount' => 100.00,
+                'status' => $status,
+                'ocr_flagged' => true,
+                'rejection_code' => 'unreadable',
+                'rejection_reason' => 'Unreadable receipt.',
+            ]);
+
+            $response = $this->withHeaders([
+                'Authorization' => 'Bearer ' . $token,
+                'Accept' => 'application/json',
+            ])->post('/api/reimbursements', [
+                'description' => 'Should Reject Claim',
+                'expense_category_id' => $category->id,
+                'event_type' => 'Client Meeting',
+                'amount' => 100.00,
+                'date' => '2026-10-01',
+                'receipt_ids' => [$receipt->id],
+                'report_file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf'),
+            ]);
+
+            $response->assertStatus(422);
+            $response->assertJsonValidationErrors(['receipt_ids']);
+
+            $this->assertDatabaseHas('receipts', [
+                'id' => $receipt->id,
+                'status' => $status,
+            ]);
+        }
+    }
 }
+
+
 

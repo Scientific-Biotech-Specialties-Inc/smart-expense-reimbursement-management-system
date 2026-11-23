@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useNotificationStore } from "@/stores/notification";
@@ -26,6 +26,9 @@ const route = useRoute();
 const { addToast } = useToast();
 
 onMounted(() => {
+  notif.fetchNotifications().catch(() => {});
+  notif.startPolling(30000);
+
   if (route.query.message) {
     addToast({
       message: route.query.message,
@@ -39,15 +42,27 @@ onMounted(() => {
   }
 });
 
+onUnmounted(() => {
+  notif.stopPolling();
+});
+
 const sidebarOpen = ref(true);
 const notifOpen = ref(false);
 const mobileOpen = ref(false);
 
 const navLinks = buildNavLinks();
 
-const unreadCount = computed(() => notif.alerts.filter((a) => !a.read).length);
+const unreadCount = computed(() => notif.unreadCount);
 
 const pageTitle = computed(() => route.meta?.title || "SERMS");
+
+const hideSidebar = computed(() => {
+  return (
+    route.meta?.hideSidebar === true ||
+    route.name === "Profile" ||
+    route.path === "/profile"
+  );
+});
 
 const userInitials = computed(() => {
   if (!auth.user?.name) return "US";
@@ -75,7 +90,7 @@ async function logout() {
     <!-- Mobile overlay -->
     <Transition name="fade">
       <div
-        v-if="mobileOpen"
+        v-if="mobileOpen && !hideSidebar"
         class="fixed inset-0 z-20 bg-slate-900/50 backdrop-blur-sm lg:hidden"
         @click="mobileOpen = false"
       />
@@ -83,6 +98,7 @@ async function logout() {
 
     <!-- ======================== SIDEBAR (Section VI.1) ======================== -->
     <aside
+      v-if="!hideSidebar"
       :class="[
         'flex flex-col z-30 transition-[width,transform] duration-300 ease-out flex-shrink-0',
         'fixed lg:relative inset-y-0 left-0 bg-primary select-none',
@@ -91,11 +107,15 @@ async function logout() {
       ]"
     >
       <!-- Branding & Subsystem Lockup -->
-      <div
+      <RouterLink
+        to="/dashboard"
+        data-testid="sidebar-brand-link"
         :class="[
-          'flex items-center px-4 py-4 border-b border-white/10 min-h-[70px]',
+          'flex items-center px-4 py-4 border-b border-white/10 min-h-[70px] cursor-pointer transition-opacity hover:opacity-90 outline-none focus:outline-none',
           sidebarOpen ? 'justify-start gap-3' : 'justify-center',
         ]"
+        title="Dashboard"
+        @click="mobileOpen = false"
       >
         <img
           :src="sidebarOpen ? sbsiLogo : sbsiLogoShort"
@@ -116,7 +136,7 @@ async function logout() {
             MANAGEMENT SYSTEM
           </span>
         </div>
-      </div>
+      </RouterLink>
 
       <!-- Navigation Links -->
       <nav class="flex-1 px-3 py-4 overflow-y-auto scrollbar-thin space-y-1">
@@ -193,6 +213,7 @@ async function logout() {
         <!-- Left Section: Sidebar Toggle & Page Title -->
         <div class="flex items-center gap-4">
           <button
+            v-if="!hideSidebar"
             class="p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors"
             title="Toggle Sidebar"
             @click="sidebarOpen = !sidebarOpen; mobileOpen = !mobileOpen"
@@ -200,7 +221,7 @@ async function logout() {
             <PanelLeft class="w-5 h-5" />
           </button>
 
-          <div class="h-6 w-px bg-slate-200 hidden sm:block" />
+          <div v-if="!hideSidebar" class="h-6 w-px bg-slate-200 hidden sm:block" />
 
           <h1 class="font-sans font-bold text-lg text-slate-700 tracking-tight">
             {{ pageTitle }}
@@ -216,12 +237,15 @@ async function logout() {
             title="Notifications"
             @click="notifOpen = !notifOpen"
           >
-            <Bell class="w-5 h-5" />
-            <span
-              v-if="unreadCount > 0"
-              class="absolute top-1.5 right-1.5 w-4 h-4 bg-secondary text-white text-[9px] font-bold flex items-center justify-center rounded-full border-2 border-white shadow-sm"
-            >
-              {{ unreadCount }}
+            <span class="relative inline-flex items-center justify-center">
+              <Bell class="w-5 h-5" />
+              <span
+                v-if="unreadCount > 0"
+                data-testid="notif-badge"
+                class="absolute -top-1.5 -right-2 min-w-[18px] h-[18px] px-1 bg-secondary text-white text-[10px] font-bold leading-none flex items-center justify-center rounded-full border-2 border-white shadow-sm pointer-events-none"
+              >
+                {{ unreadCount > 99 ? "99+" : unreadCount }}
+              </span>
             </span>
           </button>
 
@@ -233,7 +257,16 @@ async function logout() {
               <div
                 class="flex items-center gap-2.5 p-1.5 pr-2.5 rounded-xl cursor-pointer hover:bg-slate-100/80 transition-colors"
               >
+                <img
+                  v-if="auth.user?.avatar_url"
+                  :src="auth.user.avatar_url"
+                  :alt="auth.user?.name || 'Profile Photo'"
+                  data-testid="topbar-avatar-img"
+                  class="w-8 h-8 rounded-full object-cover border border-slate-200 shadow-sm"
+                />
                 <div
+                  v-else
+                  data-testid="topbar-avatar-initials"
                   class="w-8 h-8 rounded-full bg-avatar flex items-center justify-center text-white text-xs font-bold font-sans shadow-sm"
                 >
                   {{ userInitials }}
@@ -262,6 +295,14 @@ async function logout() {
               <DropdownMenuItem class="mt-1" @select="router.push('/profile')">
                 <User class="w-4 h-4 text-slate-500 mr-2" />
                 <span>My Profile</span>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem
+                data-testid="menu-notification-settings"
+                @select="router.push('/settings/notifications')"
+              >
+                <Bell class="w-4 h-4 text-slate-500 mr-2" />
+                <span>Notification Settings</span>
               </DropdownMenuItem>
 
               <DropdownMenuSeparator />

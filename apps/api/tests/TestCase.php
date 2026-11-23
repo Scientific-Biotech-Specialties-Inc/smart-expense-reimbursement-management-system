@@ -42,6 +42,25 @@ abstract class TestCase extends BaseTestCase
         parent::tearDownAfterClass();
     }
 
+    public function createApplication()
+    {
+        putenv('DB_CONNECTION=sqlite');
+        putenv('DB_DATABASE=:memory:');
+        $_ENV['DB_CONNECTION'] = 'sqlite';
+        $_ENV['DB_DATABASE'] = ':memory:';
+        $_SERVER['DB_CONNECTION'] = 'sqlite';
+        $_SERVER['DB_DATABASE'] = ':memory:';
+
+        $app = parent::createApplication();
+
+        $app['config']->set('database.default', 'sqlite');
+        $app['config']->set('database.connections.sqlite.database', ':memory:');
+        $app['config']->set('session.driver', 'array');
+        $app['config']->set('cache.default', 'array');
+
+        return $app;
+    }
+
     protected function setUp(): void
     {
         parent::setUp();

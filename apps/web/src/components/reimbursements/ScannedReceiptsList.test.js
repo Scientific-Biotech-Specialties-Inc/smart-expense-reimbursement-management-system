@@ -66,4 +66,243 @@ describe("ScannedReceiptsList — Required Field Highlighting", () => {
 
     expect(invoiceInput.classes()).not.toContain("input-error");
   });
+
+  it("renders Type of Event dropdown with options beside Category and binds eventType", async () => {
+    const receipt = {
+      ...baseReceipt,
+      hasOcrReturned: true,
+      categoryId: 1,
+      eventType: "",
+    };
+    const wrapper = mount(ScannedReceiptsList, {
+      props: {
+        receipts: [receipt],
+        categories: [{ id: 1, name: "Meals" }],
+      },
+    });
+
+    const eventSelect = wrapper.find("[data-testid='receipt-event-type-select']");
+    expect(eventSelect.exists()).toBe(true);
+
+    // Verify default options exist
+    const options = eventSelect.findAll("option").map((opt) => opt.text());
+    expect(options).toContain("Select type of event");
+    expect(options).toContain("Client Meeting");
+    expect(options).toContain("Conference / Seminar");
+    expect(options).toContain("Training / Workshop");
+    expect(options).toContain("Team Building");
+    expect(options).toContain("Project Deployment / Field Work");
+    expect(options).toContain("Company Celebration / Gathering");
+    expect(options).toContain("Others");
+
+    // Missing error class when empty after OCR return
+    expect(eventSelect.classes()).toContain("input-error");
+
+    // Select an option and verify update
+    await eventSelect.setValue("Client Meeting");
+    expect(receipt.eventType).toBe("Client Meeting");
+    expect(eventSelect.classes()).not.toContain("input-error");
+  });
+
+  it("shows required asterisk and missing-field error on Type of Event when requireEventType is true (default)", () => {
+    const receipt = {
+      ...baseReceipt,
+      hasOcrReturned: true,
+      categoryId: 1,
+      eventType: "",
+    };
+    const wrapper = mount(ScannedReceiptsList, {
+      props: {
+        receipts: [receipt],
+        categories: [{ id: 1, name: "Meals" }],
+      },
+    });
+
+    const eventSelect = wrapper.find("[data-testid='receipt-event-type-select']");
+    const eventWrapper = eventSelect.element.closest(".input-wrapper");
+    expect(eventWrapper.querySelector(".input-label").textContent).toContain("*");
+    expect(eventSelect.classes()).toContain("input-error");
+    expect(wrapper.text()).toContain("Type of event is required");
+    expect(eventSelect.find("option[value='']").attributes("disabled")).toBeDefined();
+  });
+
+  it("hides required asterisk and suppresses missing-field error on Type of Event when requireEventType is false", async () => {
+    const receipt = {
+      ...baseReceipt,
+      hasOcrReturned: true,
+      categoryId: 1,
+      eventType: "",
+    };
+    const wrapper = mount(ScannedReceiptsList, {
+      props: {
+        receipts: [receipt],
+        categories: [{ id: 1, name: "Meals" }],
+        requireEventType: false,
+      },
+    });
+
+    const eventSelect = wrapper.find("[data-testid='receipt-event-type-select']");
+    const eventWrapper = eventSelect.element.closest(".input-wrapper");
+    expect(eventWrapper.querySelector(".input-label").textContent).not.toContain("*");
+    expect(eventSelect.classes()).not.toContain("input-error");
+    expect(wrapper.text()).not.toContain("Type of event is required");
+    expect(eventSelect.find("option[value='']").attributes("disabled")).toBeUndefined();
+
+    // Can also select and clear back to empty
+    await eventSelect.setValue("Client Meeting");
+    expect(receipt.eventType).toBe("Client Meeting");
+    await eventSelect.setValue("");
+    expect(receipt.eventType).toBe("");
+  });
+
+  it("keeps subtotal and total independent when user inputs values", async () => {
+    const receipt = {
+      ...baseReceipt,
+      amount: "112.00",
+      subtotal: "100.00",
+      tax: "12.00",
+    };
+    const wrapper = mount(ScannedReceiptsList, {
+      props: {
+        receipts: [receipt],
+        categories: [{ id: 1, name: "Meals" }],
+      },
+    });
+
+    const numberInputs = wrapper.findAll("input[type='number']");
+    // Find subtotal input (v-model receipt.subtotal)
+    const subtotalInput = numberInputs.find((w) => w.element.value === "100.00" || w.element.value === "100");
+    const totalInput = numberInputs.find((w) => w.element.value === "112.00" || w.element.value === "112");
+
+    expect(subtotalInput).toBeDefined();
+    expect(totalInput).toBeDefined();
+
+    // Change subtotal manually
+    await subtotalInput.setValue("105.00");
+    // Total should remain intact (not auto-overwritten)
+    expect(Number(receipt.subtotal)).toBe(105);
+    expect(Number(receipt.amount)).toBe(112);
+
+    // Change total manually
+    await totalInput.setValue("120.00");
+    // Subtotal should remain intact (not auto-overwritten by VAT formula)
+    expect(Number(receipt.amount)).toBe(120);
+    expect(Number(receipt.subtotal)).toBe(105);
+  });
+
+  describe("Reimbursement Total field decimal truncation", () => {
+    it("has step='0.01' and min='0' configured on the total input", () => {
+      const receipt = {
+        ...baseReceipt,
+        amount: "100.00",
+      };
+      const wrapper = mount(ScannedReceiptsList, {
+        props: {
+          receipts: [receipt],
+          categories: [{ id: 1, name: "Meals" }],
+        },
+      });
+
+      const numberInputs = wrapper.findAll("input[type='number']");
+      const totalInput = numberInputs.find((w) => w.element.value === "100.00" || w.element.value === "100");
+      expect(totalInput).toBeDefined();
+      expect(totalInput.attributes("step")).toBe("0.01");
+      expect(totalInput.attributes("min")).toBe("0");
+    });
+
+    it("truncates decimal into two digits when user types more than two decimal places", async () => {
+      const receipt = {
+        ...baseReceipt,
+        amount: "",
+      };
+      const wrapper = mount(ScannedReceiptsList, {
+        props: {
+          receipts: [receipt],
+          categories: [{ id: 1, name: "Meals" }],
+        },
+      });
+
+      const numberInputs = wrapper.findAll("input[type='number']");
+      // The total input is the last number input with text-accent
+      const totalInput = wrapper.find("input.text-accent");
+      expect(totalInput.exists()).toBe(true);
+
+      // Simulate typing a number with 4 decimal digits
+      await totalInput.setValue("123.4567");
+      expect(receipt.amount).toBe("123.45");
+      expect(totalInput.element.value).toBe("123.45");
+
+      // Simulate another value with 3 decimal digits
+      await totalInput.setValue("99.999");
+      expect(receipt.amount).toBe("99.99");
+      expect(totalInput.element.value).toBe("99.99");
+    });
+
+    it("preserves valid 1 or 2 decimal places and trailing dot while typing", async () => {
+      const receipt = {
+        ...baseReceipt,
+        amount: "",
+      };
+      const wrapper = mount(ScannedReceiptsList, {
+        props: {
+          receipts: [receipt],
+          categories: [{ id: 1, name: "Meals" }],
+        },
+      });
+
+      const totalInput = wrapper.find("input.text-accent");
+
+      await totalInput.setValue("120.");
+      expect(receipt.amount).toBe("120.");
+
+      await totalInput.setValue("120.5");
+      expect(receipt.amount).toBe("120.5");
+
+      await totalInput.setValue("120.55");
+      expect(receipt.amount).toBe("120.55");
+    });
+
+    it("cleans trailing dot on blur", async () => {
+      const receipt = {
+        ...baseReceipt,
+        amount: "",
+      };
+      const wrapper = mount(ScannedReceiptsList, {
+        props: {
+          receipts: [receipt],
+          categories: [{ id: 1, name: "Meals" }],
+        },
+      });
+
+      const totalInput = wrapper.find("input.text-accent");
+      await totalInput.setValue("120.");
+      expect(receipt.amount).toBe("120.");
+
+      await totalInput.trigger("blur");
+      expect(receipt.amount).toBe("120");
+    });
+  });
+
+  describe("Uploading banner removal", () => {
+    it("does not render the top uploading and extracting banner during receipt upload or processing", () => {
+      const wrapper = mount(ScannedReceiptsList, {
+        props: {
+          receipts: [
+            {
+              id: "r-1",
+              fileName: "receipt.jpg",
+              amount: "100.00",
+              items: [],
+              isUploading: true,
+              isProcessing: true,
+            },
+          ],
+          categories: [{ id: 1, name: "Meals" }],
+        },
+      });
+
+      expect(wrapper.text()).not.toContain("Uploading and extracting receipt data...");
+    });
+  });
 });
+

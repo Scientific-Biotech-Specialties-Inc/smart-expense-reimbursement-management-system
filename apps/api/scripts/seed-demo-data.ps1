@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Seeds realistic, LINKED demo data for the SERMS monorepo
     (Smart Expense & Reimbursement Management System).
@@ -208,7 +208,6 @@ function seed_reimbursement($user, $receipts, $description, $catId, $amount, $st
         'date' => isset($opts['date']) ? $opts['date'] : Carbon\Carbon::now()->subDays(10)->toDateString(),
         'status' => $status,
         'rejection_comment' => isset($opts['rejection_comment']) ? $opts['rejection_comment'] : null,
-        'cutoff_period' => isset($opts['cutoff_period']) ? $opts['cutoff_period'] : '2026-08',
         'report_file_path' => isset($opts['report_file_path']) ? $opts['report_file_path'] : null,
         'admin_notes' => isset($opts['admin_notes']) ? $opts['admin_notes'] : null,
         'submitted_by_name' => $user->name,
@@ -386,12 +385,12 @@ function seed_full_user($user, $cat) {
     // ------------------------------------------------------------------
     // 2. REIMBURSEMENTS
     // ------------------------------------------------------------------
-    seed_reimbursement($user, collect([$rPending]), 'Client meeting meal reimbursement', $cat['Meals'], 275.00, 'pending', ['date' => $now->copy()->subDays(11)->toDateString(), 'cutoff_period' => '2026-08']);
-    seed_reimbursement($user, collect([$rApproved]), 'Team offsite accommodation claim', $cat['Accommodation'], 2100.00, 'approved', ['date' => $now->copy()->subDays(17)->toDateString(), 'cutoff_period' => '2026-07']);
-    seed_reimbursement($user, collect([$rRejected]), 'Office supplies overclaim', $cat['Supplies'], 900.00, 'rejected', ['date' => $now->copy()->subDays(24)->toDateString(), 'cutoff_period' => '2026-07', 'rejection_comment' => 'Duplicate with prior claim (INV-NBS-003).', 'admin_notes' => 'Duplicate with prior claim.']);
-    seed_reimbursement($user, collect([$rGranted1, $rGranted2]), 'Field service travel reimbursement', $cat['Travel'], 3970.50, 'granted', ['date' => $now->copy()->subDays(29)->toDateString(), 'cutoff_period' => '2026-07', 'source_system' => 'prs', 'source_submission_id' => 'PRS-' . $uid . '-001', 'is_request' => true]);
-    seed_reimbursement($user, collect([$rSubmitted]), 'PRS imported reimbursement request', $cat['Travel'], 1100.00, 'submitted', ['date' => $now->copy()->subDays(5)->toDateString(), 'cutoff_period' => '2026-08', 'source_system' => 'prs', 'source_submission_id' => 'PRS-' . $uid . '-002', 'is_request' => true]);
-    seed_reimbursement($user, collect([$rClaimProc]), 'Team lunch reimbursement in flight', $cat['Meals'], 450.00, 'processing', ['date' => $now->copy()->subDays(3)->toDateString(), 'cutoff_period' => '2026-08']);
+    seed_reimbursement($user, collect([$rPending]), 'Client meeting meal reimbursement', $cat['Meals'], 275.00, 'pending', ['date' => $now->copy()->subDays(11)->toDateString()]);
+    seed_reimbursement($user, collect([$rApproved]), 'Team offsite accommodation claim', $cat['Accommodation'], 2100.00, 'approved', ['date' => $now->copy()->subDays(17)->toDateString()]);
+    seed_reimbursement($user, collect([$rRejected]), 'Office supplies overclaim', $cat['Supplies'], 900.00, 'rejected', ['date' => $now->copy()->subDays(24)->toDateString(), 'rejection_comment' => 'Duplicate with prior claim (INV-NBS-003).', 'admin_notes' => 'Duplicate with prior claim.']);
+    seed_reimbursement($user, collect([$rGranted1, $rGranted2]), 'Field service travel reimbursement', $cat['Travel'], 3970.50, 'granted', ['date' => $now->copy()->subDays(29)->toDateString(), 'source_system' => 'prs', 'source_submission_id' => 'PRS-' . $uid . '-001', 'is_request' => true]);
+    seed_reimbursement($user, collect([$rSubmitted]), 'PRS imported reimbursement request', $cat['Travel'], 1100.00, 'submitted', ['date' => $now->copy()->subDays(5)->toDateString(), 'source_system' => 'prs', 'source_submission_id' => 'PRS-' . $uid . '-002', 'is_request' => true]);
+    seed_reimbursement($user, collect([$rClaimProc]), 'Team lunch reimbursement in flight', $cat['Meals'], 450.00, 'processing', ['date' => $now->copy()->subDays(3)->toDateString()]);
 
 '@
 $payloadPart3 = @'
@@ -680,8 +679,8 @@ function seed_reduced_user($user, $cat) {
     $rApproved = seed_receipt($user, $cat['Accommodation'], 'Hotel Sogo Manila', 1250.00, 'approved', ['date' => $now->copy()->subDays(11)->toDateString(), 'invoice' => 'INV-HSM-023']);
     $rLiq = seed_receipt($user, $cat['Travel'], 'Airline Booking Desk', 3000.00, 'pending', ['date' => $now->copy()->subDays(4)->toDateString(), 'invoice' => 'INV-ABD-024']);
 
-    seed_reimbursement($user, collect([$rPending]), 'Official travel claim pending', $cat['Travel'], 750.00, 'pending', ['date' => $now->copy()->subDays(5)->toDateString(), 'cutoff_period' => '2026-08']);
-    seed_reimbursement($user, collect([$rApproved]), 'Official travel claim approved', $cat['Accommodation'], 1250.00, 'approved', ['date' => $now->copy()->subDays(10)->toDateString(), 'cutoff_period' => '2026-07']);
+    seed_reimbursement($user, collect([$rPending]), 'Official travel claim pending', $cat['Travel'], 750.00, 'pending', ['date' => $now->copy()->subDays(5)->toDateString()]);
+    seed_reimbursement($user, collect([$rApproved]), 'Official travel claim approved', $cat['Accommodation'], 1250.00, 'approved', ['date' => $now->copy()->subDays(10)->toDateString()]);
 
     $ca = seed_cash_advance($user, $approver, [
         'purpose' => 'Provincial coordination trip',

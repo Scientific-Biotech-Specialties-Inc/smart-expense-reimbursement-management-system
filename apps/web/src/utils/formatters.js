@@ -107,69 +107,36 @@ export function formatDate(dateStr, options = { year: "numeric", month: "short",
   return d.toLocaleDateString("en-US", options);
 }
 
-const MONTH_NAMES_SHORT = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
 /**
- * Format a cutoff period string or date into standard human-readable format (e.g. "Jul 2026", "Jun 1 - 15, 2026").
- * Handles raw database cutoff strings such as "2026-7", "2026-07", "2026-06-A", "2026-06-B", or full ISO dates.
+ * Format a date string or timestamp into standard Philippine Medium Date & Time format:
+ * "MMM D, YYYY · h:mm A" (e.g., "Oct 20, 2026 · 2:30 PM").
  *
- * @param {string|Date} value - The cutoff period representation.
- * @returns {string} Human-readable formatted period string.
+ * @param {string|number|Date|null|undefined} dateStr - Date representation.
+ * @param {Intl.DateTimeFormatOptions} [options] - Optional custom options.
+ * @returns {string} Formatted date time string or "—".
  */
-export function formatCutoffPeriod(value) {
-  if (!value) return "—";
+export function formatDateTime(dateStr, options) {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return String(dateStr);
 
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (!trimmed) return "—";
-
-    // Match YYYY-M, YYYY-MM with optional half / day indicator (e.g. "2026-7", "2026-07", "2026-06-A", "2026-6-B", "2026-07-1")
-    const periodMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})(?:[-/]([abAB12]|0?[1-9]|[12]\d|3[01]))?$/);
-    if (periodMatch) {
-      const year = parseInt(periodMatch[1], 10);
-      const month = parseInt(periodMatch[2], 10);
-
-      if (month >= 1 && month <= 12) {
-        const monthName = MONTH_NAMES_SHORT[month - 1];
-        const halfOrDay = periodMatch[3] ? periodMatch[3].toUpperCase() : null;
-
-        if (halfOrDay === "A" || halfOrDay === "1") {
-          return `${monthName} 1 - 15, ${year}`;
-        }
-        if (halfOrDay === "B" || halfOrDay === "2") {
-          const lastDay = new Date(year, month, 0).getDate();
-          return `${monthName} 16 - ${lastDay}, ${year}`;
-        }
-        if (halfOrDay && !isNaN(parseInt(halfOrDay, 10))) {
-          const day = parseInt(halfOrDay, 10);
-          return `${monthName} ${day}, ${year}`;
-        }
-        return `${monthName} ${year}`;
-      }
-    }
-
-    // If string already contains textual month names (e.g. "Jan 01 - Jan 15, 2025", "June 1-15, 2026")
-    if (/[a-zA-Z]/.test(trimmed)) {
-      return trimmed;
-    }
-
-    // Try parsing as ISO date
-    const d = new Date(trimmed);
-    if (!isNaN(d.getTime())) {
-      return d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
-    }
-
-    return trimmed;
+  if (options) {
+    return d.toLocaleDateString("en-US", options);
   }
 
-  if (value instanceof Date && !isNaN(value.getTime())) {
-    return value.toLocaleDateString("en-US", { month: "short", year: "numeric" });
-  }
+  const datePart = d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 
-  return String(value);
+  const timePart = d.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  return `${datePart} · ${timePart}`;
 }
 
 export const SUPPORTED_CURRENCIES = [
@@ -220,5 +187,36 @@ export function getCurrencySymbol(currencyCode = "PHP") {
       return cleaned;
     }
   }
+}
+
+/**
+ * Truncate a string to a maximum length (including spaces) and append an ellipsis if truncated.
+ *
+ * @param {string|null|undefined} text - The text to truncate.
+ * @param {number} [maxLength=18] - Maximum character length including spaces.
+ * @returns {string} The truncated string or fallback.
+ */
+export function truncateText(text, maxLength = 18) {
+  if (text === null || text === undefined || text === "") return "—";
+  const str = String(text);
+  if (str.length <= maxLength) return str;
+  return str.slice(0, maxLength).trimEnd() + "...";
+}
+
+/**
+ * Truncate a number or numeric string to at most the specified decimal digits without rounding.
+ *
+ * @param {string|number|null|undefined} value - The numeric value or string to truncate.
+ * @param {number} [digits=2] - The maximum number of decimal places to retain.
+ * @returns {string} Truncated string representation of the number.
+ */
+export function truncateDecimal(value, digits = 2) {
+  if (value === null || value === undefined || value === "") return "";
+  const str = String(value);
+  const dotIndex = str.indexOf(".");
+  if (dotIndex !== -1) {
+    return digits > 0 ? str.slice(0, dotIndex + 1 + digits) : str.slice(0, dotIndex);
+  }
+  return str;
 }
 

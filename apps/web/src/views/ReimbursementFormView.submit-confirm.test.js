@@ -28,10 +28,6 @@ vi.mock("@/composables/useToast", () => ({
   useToast: () => ({ addToast: vi.fn() }),
 }));
 
-vi.mock("@/composables/useOcrMode", () => ({
-  useOcrMode: () => ({ isMockOcr: ref(false), setMockMode: vi.fn() }),
-}));
-
 vi.mock("@/composables/reimbursements/useReimbursementSubmit", () => ({
   useReimbursementSubmit: () => ({
     submitting: ref(false),
@@ -90,6 +86,7 @@ describe("ReimbursementFormView — Submit Confirmation Modal", () => {
         merchantName: "Merchant",
         amount: 100,
         categoryId: "cat-1",
+        eventType: "Client Meeting",
         date: "2026-10-01",
         isUploading: false,
       },
@@ -106,7 +103,7 @@ describe("ReimbursementFormView — Submit Confirmation Modal", () => {
           ScannedReceiptsList: true,
           MetaAndAttachments: {
             template: "<div class='meta-stub'></div>",
-            props: ["cutoffPeriod", "reportFile", "userComment"],
+            props: ["reportFile", "userComment"],
           },
           ReimbursementSummaryPanel: true,
           SegmentedReceiptUpload: true,
@@ -120,8 +117,7 @@ describe("ReimbursementFormView — Submit Confirmation Modal", () => {
   it("opens confirmation modal when submit button is clicked instead of submitting immediately", async () => {
     const wrapper = mountForm();
 
-    // Set cutoff period and report file so canProceed is true
-    wrapper.vm.cutoffPeriod = "Oct 01 - Oct 15, 2026";
+    // Set report file so canProceed is true
     wrapper.vm.reportFile = new File(["dummy"], "report.pdf", { type: "application/pdf" });
     await wrapper.vm.$nextTick();
 
@@ -151,7 +147,6 @@ describe("ReimbursementFormView — Submit Confirmation Modal", () => {
 
   it("closes confirmation modal and does not submit if user cancels", async () => {
     const wrapper = mountForm();
-    wrapper.vm.cutoffPeriod = "Oct 01 - Oct 15, 2026";
     wrapper.vm.reportFile = new File(["dummy"], "report.pdf", { type: "application/pdf" });
     await wrapper.vm.$nextTick();
 
@@ -175,7 +170,6 @@ describe("ReimbursementFormView — Submit Confirmation Modal", () => {
 
   it("submits the request when user clicks Done in confirmation modal", async () => {
     const wrapper = mountForm();
-    wrapper.vm.cutoffPeriod = "Oct 01 - Oct 15, 2026";
     wrapper.vm.reportFile = new File(["dummy"], "report.pdf", { type: "application/pdf" });
     await wrapper.vm.$nextTick();
 

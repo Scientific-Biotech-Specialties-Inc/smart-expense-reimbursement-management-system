@@ -83,4 +83,12 @@ describe('ToastNotification component and useToast composable', () => {
 
     expect(wrapper.findAll('.toast-item').length).toBe(0)
   })
+
+  it('positions the toast container at the bottom-right of the viewport', () => {
+    const wrapper = mount(ToastNotification)
+    expect(wrapper.classes()).toContain('fixed')
+    expect(wrapper.classes()).toContain('bottom-6')
+    expect(wrapper.classes()).toContain('right-6')
+    expect(wrapper.classes()).not.toContain('top-6')
+  })
 })

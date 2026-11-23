@@ -13,6 +13,20 @@ export async function apiFetch(url, options = {}) {
   
   const headers = new Headers(options.headers || {})
 
+  const method = (options.method || 'GET').toUpperCase()
+  const isMutatingMethod = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+
+  if (isMutatingMethod && !headers.has('X-Idempotency-Key')) {
+    const customKey =
+      options.idempotencyKey ||
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : null)
+    if (customKey) {
+      headers.set('X-Idempotency-Key', customKey)
+    }
+  }
+
   if (authStore.token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${authStore.token}`)
   }

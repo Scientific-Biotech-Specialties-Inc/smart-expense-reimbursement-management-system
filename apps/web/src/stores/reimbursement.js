@@ -10,18 +10,6 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
   const totalAmount = computed(() =>
     items.value.reduce((s, i) => s + parseFloat(i.amount), 0),
   );
-  const totalPending = computed(
-    () => items.value.filter((i) => i.status === "pending").length,
-  );
-  const totalApproved = computed(
-    () => items.value.filter((i) => i.status === "approved").length,
-  );
-  const totalRejected = computed(
-    () => items.value.filter((i) => i.status === "rejected").length,
-  );
-  const totalGranted = computed(
-    () => items.value.filter((i) => i.status === "granted").length,
-  );
 
   async function fetchAll() {
     isLoading.value = true;
@@ -60,7 +48,13 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
         method: "POST",
         body: formData,
       });
-      if (!response.ok) throw new Error("Failed to submit reimbursement");
+      if (!response.ok) {
+        const errorJson = await response.json().catch(() => ({}));
+        const message = errorJson.errors
+          ? Object.values(errorJson.errors).flat().join(" ")
+          : errorJson.message || "Failed to submit reimbursement";
+        throw new Error(message);
+      }
       const json = await response.json();
       items.value.unshift(json.data);
       return json.data;
@@ -72,19 +66,30 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
     }
   }
 
-  async function approve(id, password) {
+  async function approve(id, password, auditOptions = {}) {
     isLoading.value = true;
     try {
+      const payload = { password };
+      if (auditOptions.secondaryAuditConfirmed) {
+        payload.secondary_audit_confirmed = true;
+      }
+      if (auditOptions.secondaryAuditNote?.trim()) {
+        payload.secondary_audit_note = auditOptions.secondaryAuditNote.trim();
+      }
       const response = await apiFetch(
         `/api/serms/reimbursements/${id}/approve`,
         {
           method: "POST",
-          body: JSON.stringify({ password }),
+          body: JSON.stringify(payload),
         },
       );
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
-        const errMsg = errJson.errors?.password?.[0] || errJson.message || "Failed to approve";
+        const errMsg =
+          errJson.errors?.password?.[0] ||
+          errJson.errors?.secondary_audit_confirmed?.[0] ||
+          errJson.message ||
+          "Failed to approve";
         throw new Error(errMsg);
       }
       const json = await response.json();
@@ -115,31 +120,6 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
         const errMsg = errJson.errors?.password?.[0] || errJson.message || "Failed to reject";
         throw new Error(errMsg);
       }
-      const json = await response.json();
-      const index = items.value.findIndex((i) => i.id == id);
-      if (index !== -1) items.value[index] = json.data;
-      if (currentItem.value?.id == id) currentItem.value = json.data;
-      return json.data;
-    } catch (e) {
-      console.error(e);
-      throw e;
-    } finally {
-      isLoading.value = false;
-    }
-  }
-
-  async function revise(id, comment, password) {
-    return reject(id, comment, password, "revise");
-  }
-
-  async function updateNotes(id, notes) {
-    isLoading.value = true;
-    try {
-      const response = await apiFetch(`/api/serms/reimbursements/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ admin_notes: notes }),
-      });
-      if (!response.ok) throw new Error("Failed to update notes");
       const json = await response.json();
       const index = items.value.findIndex((i) => i.id == id);
       if (index !== -1) items.value[index] = json.data;
@@ -209,16 +189,50 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
     }
   }
 
-  async function grant(id, password) {
+  async function grant(id, payload) {
     isLoading.value = true;
     try {
+      const body = typeof payload === "string" ? { password: payload } : payload;
       const response = await apiFetch(`/api/serms/reimbursements/${id}/grant`, {
         method: "POST",
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(body),
       });
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
-        const errMsg = errJson.errors?.password?.[0] || errJson.message || "Failed to grant";
+        const errMsg =
+          errJson.errors?.password?.[0] ||
+          errJson.errors?.granter_signature?.[0] ||
+          errJson.errors?.granted_by?.[0] ||
+          errJson.message ||
+          "Failed to grant";
+        throw new Error(errMsg);
+      }
+      const json = await response.json();
+      const index = items.value.findIndex((i) => i.id == id);
+      if (index !== -1) items.value[index] = json.data;
+      if (currentItem.value?.id == id) currentItem.value = json.data;
+      return json.data;
+    } catch (e) {
+      console.error(e);
+      throw e;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
+  async function acknowledgePayout(id, employeeSignature) {
+    isLoading.value = true;
+    try {
+      const response = await apiFetch(`/api/serms/reimbursements/${id}/acknowledge`, {
+        method: "POST",
+        body: JSON.stringify({ employee_signature: employeeSignature }),
+      });
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        const errMsg =
+          errJson.errors?.employee_signature?.[0] ||
+          errJson.message ||
+          "Failed to acknowledge payout";
         throw new Error(errMsg);
       }
       const json = await response.json();
@@ -239,18 +253,13 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
     currentItem,
     isLoading,
     totalAmount,
-    totalPending,
-    totalApproved,
-    totalRejected,
-    totalGranted,
     fetchAll,
     fetchOne,
     submit,
     approve,
     reject,
-    revise,
     grant,
-    updateNotes,
+    acknowledgePayout,
     updateRequest,
     deleteRequest,
   };

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useCashAdvanceStore } from "@/stores/cashAdvance";
 import { useLiquidationStore } from "@/stores/liquidation";
@@ -7,14 +7,12 @@ import { useReceiptStore } from "@/stores/receipts";
 import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
 import StatusBadge from "@/components/base/StatusBadge.vue";
-import FileUpload from "@/components/base/FileUpload.vue";
+import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseModal from "@/components/base/BaseModal.vue";
-import BaseToggleSwitch from "@/components/base/BaseToggleSwitch.vue";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import BaseUtilityToolbar from "@/components/base/BaseUtilityToolbar.vue";
-import SkeletonLoader from "@/components/base/SkeletonLoader.vue";
 import DecisionConfirmationModal from "@/components/base/DecisionConfirmationModal.vue";
 import ConfirmModal from "@/components/base/ConfirmModal.vue";
 import DeleteConfirmModal from "@/components/base/DeleteConfirmModal.vue";
@@ -27,12 +25,33 @@ import LiquidationSettlementForm from "@/components/liquidations/LiquidationSett
 import { useLiquidationDecisions } from "@/composables/liquidations/useLiquidationDecisions";
 import { useLiquidationForwarding } from "@/composables/liquidations/useLiquidationForwarding";
 import { useLiquidationSubmit } from "@/composables/liquidations/useLiquidationSubmit";
-import { useOcrMode } from "@/composables/useOcrMode";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
-import { formatPeso, formatDate } from "@/utils/formatters";
+import {
+  canonicalizeSnapshot,
+  isManualReportTemplate,
+  isRevisionStatus,
+  serializeFileAttachment,
+  serializeReceiptList,
+  serializeTemplateData,
+} from "@/composables/useRevisionGuard";
+import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
+import {
+  useCurrencyRates,
+  useReceiptCurrencyWatcher,
+  extractReceiptFxSnapshot,
+} from "@/composables/useCurrencyRates";
+import { formatPeso, formatDate, truncateText } from "@/utils/formatters";
 import { numberOrZero } from "@/utils/numbers";
+import {
+  computePenaltyDaysPastGrace,
+  sumPenaltyRecords,
+  resolveAdvanceBalance,
+  isExpenseBelowBalance,
+} from "@/utils/liquidationPenalties";
 import { getFileUrl } from "@/utils/fileUtils";
 import { firstFilePathField } from "@/utils/receiptUtils";
+import { createDefaultTemplateData } from "@/utils/sbsiReportTemplateUtils";
+import { apiFetch } from "@/utils/apiFetch";
 import {
   Activity,
   AlertTriangle,
@@ -54,7 +73,7 @@ const receiptStore = useReceiptStore();
 const auth = useAuthStore();
 const router = useRouter();
 const { addToast } = useToast();
-const { isMockOcr, setMockMode } = useOcrMode();
+const { fetchRates, sumReceiptsPhpAmount } = useCurrencyRates();
 
 /** Refresh both stores in parallel — balance is now authoritative in the DB */
 async function refreshAll() {
@@ -62,15 +81,16 @@ async function refreshAll() {
     liqStore.fetchSettlements(),
     store.fetchAll(),
     receiptStore.fetchCategories(),
+    fetchRates(),
   ]);
 }
 
-onMounted(() => refreshAll());
-
 const selectedAdvance = ref(null);
 const receipts = ref([]);
+useReceiptCurrencyWatcher(receipts);
 const reportAttachment = ref(null);
-const reportAttachmentInput = ref(null);
+const reportTemplateData = ref(null);
+const isReportManualMode = ref(false);
 const { submitting, submitLiquidation: performSubmitLiquidation } =
   useLiquidationSubmit();
 const submitted = ref(false);
@@ -80,46 +100,28 @@ const settlementModalStep = ref("form"); // "select" | "form"
 const canReturnToAdvanceList = ref(false);
 
 function liquidationDraftSignature() {
-  return JSON.stringify({
-    receipts: receipts.value.map((r) => ({
-      id: r.id ?? null,
-      name: r.name ?? "",
-      fileName: r.fileName ?? "",
-      merchantName: r.merchantName ?? "",
-      date: r.date ?? "",
-      tin: r.tin ?? "",
-      invoiceNumber: r.invoiceNumber ?? "",
-      location: r.location ?? "",
-      currency: r.currency ?? "",
-      vatClassification: r.vatClassification ?? "",
-      category: r.category ?? "",
-      categoryId: r.categoryId ?? null,
-      subtotal: r.subtotal ?? "",
-      tax: r.tax ?? "",
-      amount: r.amount ?? null,
-      filePath: r.filePath ?? null,
-      items: (r.items || []).map((item) => ({
-        name: item.name ?? "",
-        qty: item.qty ?? null,
-        price: item.price ?? null,
-      })),
-    })),
-    reportAttachment:
-      reportAttachment.value && typeof reportAttachment.value === "object"
-        ? reportAttachment.value.name ||
-          reportAttachment.value.fileName ||
-          "attached"
-        : reportAttachment.value,
-    shortfallExplanation: shortfallExplanation.value,
-  });
+  return JSON.stringify(
+    canonicalizeSnapshot({
+      receipts: serializeReceiptList(receipts.value),
+      reportAttachment: serializeFileAttachment(reportAttachment.value),
+      reportTemplateData: serializeTemplateData(reportTemplateData.value),
+      isReportManualMode: isReportManualMode.value,
+      shortfallExplanation: shortfallExplanation.value,
+    }),
+  );
 }
 const hydrationSignature = ref(liquidationDraftSignature());
+let baselineSyncToken = 0;
 
 const isDirty = computed(() => {
   // Do not blanket-force view mode clean: a hydrated baseline already keeps
   // untouched records clean while still catching real field edits.
   return liquidationDraftSignature() !== hydrationSignature.value;
 });
+
+const isLiquidationUnchangedRevision = computed(
+  () => isRevisionStatus(existingLiquidation.value?.status) && !isDirty.value,
+);
 
 const {
   showConfirmModal,
@@ -154,7 +156,6 @@ const {
 );
 
 const reviewDrafts = ref({});
-const confirmFinalizeOpen = ref(false);
 const receiptDetailsOpen = ref(false);
 const selectedReceipt = ref(null);
 const pendingReceiptDecision = ref("");
@@ -166,11 +167,6 @@ const employeeSearchQuery = ref("");
 const employeeActiveStatus = ref("All");
 const employeeSortKey = ref("date");
 const employeeSortDirection = ref("desc");
-const VALID_REPORT_ATTACHMENT_MIME_TYPES = [
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-];
-const VALID_REPORT_ATTACHMENT_EXTENSIONS = [".pdf", ".docx"];
 
 const statusFilters = [
   "All",
@@ -221,11 +217,17 @@ const defaultReceiptCategoryId = computed(() => {
   return Number(preferredCategory?.id ?? categories[0]?.id ?? null) || null;
 });
 
+function resolveLiquidationReceiptAmount(receipt) {
+  if (!receipt) return 0;
+  const ocrAmt = receipt.ocrData?.amount;
+  if (ocrAmt !== undefined && ocrAmt !== null && ocrAmt !== "") {
+    return numberOrZero(ocrAmt);
+  }
+  return numberOrZero(receipt.amount ?? receipt.total_amount);
+}
+
 const totalExpenseAmount = computed(() =>
-  receipts.value.reduce(
-    (sum, receipt) => sum + numberOrZero(receipt.ocrData?.amount),
-    0,
-  ),
+  sumReceiptsPhpAmount(receipts.value, resolveLiquidationReceiptAmount),
 );
 
 const isReceiptOcrProcessing = computed(() =>
@@ -252,17 +254,19 @@ const hasIncompleteReceiptFields = computed(() => {
   });
 });
 
-const agingInfo = computed(() => {
-  if (!selectedAdvance.value) return null;
-  return liqStore.calculateAging(selectedAdvance.value);
-});
+const currentAdvanceBalance = computed(() =>
+  resolveAdvanceBalance(selectedAdvance.value),
+);
+
+const isExpenseBelowRequiredBalance = computed(
+  () =>
+    Boolean(selectedAdvance.value) &&
+    isExpenseBelowBalance(totalExpenseAmount.value, currentAdvanceBalance.value),
+);
 
 const variance = computed(() => {
   if (!selectedAdvance.value) return 0;
-  const currentBalance = numberOrZero(
-    selectedAdvance.value.balance ?? selectedAdvance.value.amount,
-  );
-  return currentBalance - totalExpenseAmount.value;
+  return currentAdvanceBalance.value - totalExpenseAmount.value;
 });
 
 const liquidationOutstandingBalance = computed(() =>
@@ -274,15 +278,8 @@ const liquidationStatus = computed(() => {
   if (variance.value > 0) return "Incomplete";
   return "Liquidated";
 });
-const calculatedOutstandingBalance = computed(() => {
-  const currentBalance = numberOrZero(selectedAdvance.value?.balance);
-  return Math.max(totalExpenseAmount.value - currentBalance, 0);
-});
 const overpaymentAmount = computed(() =>
-  Math.max(
-    totalExpenseAmount.value - numberOrZero(selectedAdvance.value?.balance),
-    0,
-  ),
+  Math.max(totalExpenseAmount.value - currentAdvanceBalance.value, 0),
 );
 
 const { forwardOverpaymentToReimbursement } = useLiquidationForwarding(
@@ -290,13 +287,6 @@ const { forwardOverpaymentToReimbursement } = useLiquidationForwarding(
   overpaymentAmount,
   receipts,
   defaultReceiptCategoryId,
-);
-
-const needsReportAttachmentReminder = computed(
-  () =>
-    selectedAdvance.value &&
-    (liquidationStatus.value === "Incomplete" ||
-      (overpaymentAmount.value > 0 && !reportAttachment.value)),
 );
 
 const currentUserId = computed(() =>
@@ -469,6 +459,8 @@ const sourceCases = computed(() => {
         transactionDate: r.transaction_date || r.created_at,
         tinNumber: r.tin || "N/A",
         items: r.items || [],
+        currency: r.currency || "PHP",
+        ...extractReceiptFxSnapshot(r, r.currency || "PHP"),
         amount: Number(r.total_amount || 0),
         subtotal,
         vat: Number(r.vat_amount || 0),
@@ -478,11 +470,27 @@ const sourceCases = computed(() => {
       };
     });
 
+    const penalties = item.cash_advance?.penalties || item.penalties || [];
+    const penaltiesTotal = numberOrZero(
+      item.penalties_total ??
+        item.cash_advance?.penalties_total ??
+        sumPenaltyRecords(penalties),
+    );
+    const resolvedBalance = numberOrZero(
+      item.outstanding_balance ??
+        item.cash_advance?.outstanding_balance ??
+        item.cash_advance?.balance ??
+        item.cash_advance?.amount,
+    );
+
     const statusContext = {
       cashAdvanceAmount: Number(item.cash_advance?.amount || 0),
+      outstandingBalance: resolvedBalance,
       dueDate:
         item.cash_advance?.expected_liquidation_date ||
         item.cash_advance?.dueDate,
+      penalties,
+      cashAdvanceStatus: item.cash_advance?.status,
     };
 
     const displayStatus = mapBackendStatusToDisplayStatus(
@@ -496,6 +504,9 @@ const sourceCases = computed(() => {
       databaseId: item.id,
       advanceId: `CA-${String(item.cash_advance_id).padStart(3, "0")}`,
       cashAdvanceId: item.cash_advance_id,
+      cashAdvanceStatus: item.cash_advance?.status || null,
+      penalties,
+      penaltiesTotal,
       purpose:
         item.purpose ||
         item.cash_advance?.purpose ||
@@ -519,14 +530,14 @@ const sourceCases = computed(() => {
         item.cash_advance?.expected_liquidation_date ||
         item.cash_advance?.dueDate,
       cashAdvanceAmount: Number(item.cash_advance?.amount || 0),
-      outstandingBalance: numberOrZero(
-        item.outstanding_balance ?? item.cash_advance?.amount,
-      ),
+      outstandingBalance: resolvedBalance,
       receipts: mappedReceipts,
       submittedReceiptTotal: Number(item.total_expense_amount || 0),
       shortfallExplanation: item.shortfall_explanation || "",
       adminNote: item.admin_note || "",
       reportFilePath: item.report_file_path || null,
+      reportUrl: item.report_url || null,
+      reportTemplateData: item.report_template_data || null,
       status: displayStatus,
       createdAt: item.created_at || item.createdAt || null,
       submittedAt:
@@ -847,6 +858,27 @@ function employeeAdvanceBadgeStatus(advance) {
     : derivedStatus.toLowerCase().replace(/\s+/g, "-");
 }
 
+const modalAdvanceStatus = computed(() => {
+  if (!selectedAdvance.value) return "";
+  return employeeAdvanceBadgeStatus(selectedAdvance.value);
+});
+
+const isModalAdvanceOverdue = computed(() => {
+  if (!selectedAdvance.value) return false;
+  if (modalAdvanceStatus.value === "overdue") return true;
+  if (liqStore.calculateAging(selectedAdvance.value)?.isOverdue) return true;
+  if (
+    Array.isArray(selectedAdvance.value?.penalties) &&
+    selectedAdvance.value.penalties.length > 0
+  ) {
+    return true;
+  }
+  const due =
+    selectedAdvance.value.dueDate ||
+    selectedAdvance.value.expected_liquidation_date;
+  return computePenaltyDaysPastGrace(due) > 0;
+});
+
 function employeeSortValue(advance, key) {
   if (key === "amount") return numberOrZero(advance.amount);
   if (key === "balance") return numberOrZero(advance.balance);
@@ -919,7 +951,8 @@ function closeSettlementModal() {
     return;
   }
 
-  dismissWithConfirm(() => {
+  dismissWithConfirm(async () => {
+    await abortLiquidationDraftReceipts();
     isSettlementModalOpen.value = false;
     settlementModalMode.value = "settle";
     settlementModalStep.value = "form";
@@ -1022,8 +1055,7 @@ const selectedAdvanceCanLiquidate = computed(() => {
 
 const showSubmitConfirmModal = ref(false);
 
-function promptSubmitLiquidation() {
-  if (settlementModalMode.value === "view") return;
+function canProceedWithLiquidationSubmission() {
   // Preview-only until acknowledged / Phase 2 — block submit with feedback
   if (!selectedAdvanceCanLiquidate.value) {
     addToast({
@@ -1032,8 +1064,25 @@ function promptSubmitLiquidation() {
         "Please acknowledge the cash advance (sign) before submitting a liquidation. Preview only until Phase 2.",
       type: "danger",
     });
-    return;
+    return false;
   }
+
+  if (isExpenseBelowRequiredBalance.value) {
+    addToast({
+      title: "Insufficient Liquidation Amount",
+      message: `Total expenses (${formatPeso(totalExpenseAmount.value)}) must be equal to or greater than the outstanding balance (${formatPeso(currentAdvanceBalance.value)}).`,
+      type: "danger",
+    });
+    return false;
+  }
+
+  return true;
+}
+
+function promptSubmitLiquidation() {
+  if (settlementModalMode.value === "view") return;
+  if (isLiquidationUnchangedRevision.value) return;
+  if (!canProceedWithLiquidationSubmission()) return;
   showSubmitConfirmModal.value = true;
 }
 
@@ -1047,21 +1096,15 @@ function handleCancelSubmit() {
 }
 
 async function submitLiquidation() {
-  // Preview-only until acknowledged / Phase 2 — block submit with feedback
-  if (!selectedAdvanceCanLiquidate.value) {
-    addToast({
-      title: "Acknowledgement Required",
-      message:
-        "Please acknowledge the cash advance (sign) before submitting a liquidation. Preview only until Phase 2.",
-      type: "danger",
-    });
-    return;
-  }
+  if (isLiquidationUnchangedRevision.value) return;
+  if (!canProceedWithLiquidationSubmission()) return;
   const isEditing = !!existingLiquidation.value;
   const success = await performSubmitLiquidation({
     receipts: receipts.value,
     selectedAdvance: selectedAdvance.value,
     reportAttachment: reportAttachment.value,
+    reportTemplateData: reportTemplateData.value,
+    isManualMode: isReportManualMode.value,
     totalExpenses: totalExpenseAmount.value,
     variance: variance.value,
     shortfallExplanation: shortfallExplanation.value,
@@ -1122,7 +1165,6 @@ async function confirmDeleteLiquidation(password) {
 function getActions(row) {
   const status = String(row.status || "").toLowerCase();
   const isRevise = status === "revise";
-  const isRejected = status === "rejected";
   return [
     {
       label: "Edit",
@@ -1157,7 +1199,12 @@ function handleEditLiquidation(row) {
     selectAdvance({
       id: advId,
       amount: row.cashAdvanceAmount,
+      balance: row.outstandingBalance,
       outstanding_balance: row.outstandingBalance,
+      penalties: row.penalties || [],
+      penalties_total: row.penaltiesTotal || 0,
+      dueDate: row.dueDate,
+      status: row.cashAdvanceStatus || row.status,
     });
   }
   // Scroll to settlement form for immediate editing
@@ -1179,8 +1226,6 @@ function selectAdvance(adv) {
 
     if (existingLiq) {
       shortfallExplanation.value = existingLiq.shortfall_explanation || "";
-      // If it's a string filepath from backend, reportAttachment can be set to it
-      reportAttachment.value = existingLiq.report_file_path;
 
       if (existingLiq.receipts && Array.isArray(existingLiq.receipts)) {
         receipts.value = existingLiq.receipts.map((r) => {
@@ -1215,6 +1260,7 @@ function selectAdvance(adv) {
             invoiceNumber: r.invoice_number || "",
             location: r.location || "",
             currency: r.currency || "PHP",
+            ...extractReceiptFxSnapshot(r, r.currency || "PHP"),
             vatClassification: vatClass,
             subtotal: subtotal.toFixed(2),
             tax: Number(r.vat_amount || 0).toFixed(2),
@@ -1238,6 +1284,7 @@ function selectAdvance(adv) {
               tin: r.tin,
               invoiceNumber: r.invoice_number,
               location: r.location || "",
+              currency: r.currency || "PHP",
               file_path: r.file_path,
             },
           };
@@ -1245,20 +1292,153 @@ function selectAdvance(adv) {
       } else {
         receipts.value = [];
       }
+
+      if (
+        existingLiq.report_template_data &&
+        !isManualReportTemplate(existingLiq.report_template_data)
+      ) {
+        reportAttachment.value = null;
+        isReportManualMode.value = false;
+        const isEditableStatus =
+          String(existingLiq.status || "").toLowerCase() === "revise";
+        reportTemplateData.value = createDefaultTemplateData("liquidation", {
+          user: isEditableStatus
+            ? auth.user
+            : auth.user
+              ? { ...auth.user, signature: "" }
+              : null,
+          receipts: receipts.value,
+          allocatedAmount: Number(adv?.amount ?? adv?.balance ?? 0),
+          utilizedAmount: totalExpenseAmount.value,
+          variance: variance.value,
+          purpose: adv?.purpose || "",
+          disbursementDate: String(
+            adv?.disbursement?.disbursed_at ||
+              adv?.disbursed_at ||
+              adv?.expected_disbursement_date ||
+              adv?.acknowledgedAt ||
+              adv?.date ||
+              "",
+          ).slice(0, 10),
+          recordId: existingLiq.id,
+          existingData: existingLiq.report_template_data,
+        });
+      } else if (existingLiq.report_file_path) {
+        reportTemplateData.value = null;
+        reportAttachment.value = existingLiq.report_file_path;
+        isReportManualMode.value = true;
+      } else if (isManualReportTemplate(existingLiq.report_template_data)) {
+        reportTemplateData.value = { mode: "manual" };
+        reportAttachment.value = null;
+        isReportManualMode.value = true;
+      } else {
+        reportAttachment.value = null;
+        isReportManualMode.value = false;
+        reportTemplateData.value = createDefaultTemplateData("liquidation", {
+          user: auth.user,
+          receipts: receipts.value,
+          allocatedAmount: Number(adv?.amount ?? adv?.balance ?? 0),
+          utilizedAmount: totalExpenseAmount.value,
+          variance: variance.value,
+          purpose: adv?.purpose || "",
+          disbursementDate: String(
+            adv?.disbursement?.disbursed_at ||
+              adv?.disbursed_at ||
+              adv?.expected_disbursement_date ||
+              adv?.acknowledgedAt ||
+              adv?.date ||
+              "",
+          ).slice(0, 10),
+          recordId: existingLiq.id,
+        });
+      }
     } else {
       receipts.value = [];
       reportAttachment.value = null;
       shortfallExplanation.value = "";
+      isReportManualMode.value = false;
+      reportTemplateData.value = createDefaultTemplateData("liquidation", {
+        user: auth.user,
+        receipts: [],
+        allocatedAmount: Number(adv?.amount ?? adv?.balance ?? 0),
+        utilizedAmount: 0,
+        variance: Number(adv?.amount ?? adv?.balance ?? 0),
+        purpose: adv?.purpose || "",
+        disbursementDate: String(
+          adv?.disbursement?.disbursed_at ||
+            adv?.disbursed_at ||
+            adv?.expected_disbursement_date ||
+            adv?.acknowledgedAt ||
+            adv?.date ||
+            "",
+        ).slice(0, 10),
+        recordId: adv?.id || null,
+      });
     }
 
+    const token = ++baselineSyncToken;
+    const preMountCore = JSON.stringify(
+      canonicalizeSnapshot({
+        receipts: serializeReceiptList(receipts.value),
+        reportAttachment: serializeFileAttachment(reportAttachment.value),
+        shortfallExplanation: shortfallExplanation.value,
+      }),
+    );
     hydrationSignature.value = liquidationDraftSignature();
+
+    nextTick()
+      .then(() => nextTick())
+      .then(() => {
+        if (token !== baselineSyncToken) return;
+        const postMountCore = JSON.stringify(
+          canonicalizeSnapshot({
+            receipts: serializeReceiptList(receipts.value),
+            reportAttachment: serializeFileAttachment(reportAttachment.value),
+            shortfallExplanation: shortfallExplanation.value,
+          }),
+        );
+        if (postMountCore === preMountCore) {
+          hydrationSignature.value = liquidationDraftSignature();
+        }
+      });
   });
+}
+
+async function abortLiquidationDraftReceipts() {
+  if (submitted.value) return;
+  const existingIds = new Set(
+    (existingLiquidation.value?.receipts || []).map((r) => r.id)
+  );
+  const draftsToDelete = receipts.value.filter(
+    (r) => r.id && !existingIds.has(r.id) && !String(r.id).startsWith("temp-")
+  );
+
+  if (draftsToDelete.length === 0) return;
+
+  await Promise.allSettled(
+    draftsToDelete.map(async (r) => {
+      try {
+        await apiFetch(`/api/serms/reimbursements/receipts/${r.id}`, {
+          method: "DELETE",
+        });
+      } catch (err) {
+        console.error(`Failed to delete liquidation receipt draft ${r.id}:`, err);
+      }
+    })
+  );
+}
+
+async function onConfirmLeaveModal() {
+  await abortLiquidationDraftReceipts();
+  handleConfirmLeave();
 }
 
 function resetLiquidationComposer() {
   selectedAdvance.value = null;
   receipts.value = [];
   reportAttachment.value = null;
+  reportTemplateData.value = null;
+  isReportManualMode.value = false;
   shortfallExplanation.value = "";
   submitted.value = false;
   hydrationSignature.value = liquidationDraftSignature();
@@ -1292,41 +1472,12 @@ function chooseAdvanceForLiquidation(advance) {
 }
 
 function backToAdvanceSelection() {
-  dismissWithConfirm(() => {
+  dismissWithConfirm(async () => {
+    await abortLiquidationDraftReceipts();
     resetLiquidationComposer();
     settlementModalMode.value = "settle";
     settlementModalStep.value = "select";
   });
-}
-
-function isValidReportAttachment(file) {
-  if (!file) return false;
-
-  const normalizedName = String(file.name || "").toLowerCase();
-  const isValidImage = String(file.type || "").startsWith("image/");
-  const hasValidMimeType = VALID_REPORT_ATTACHMENT_MIME_TYPES.includes(
-    file.type,
-  );
-  const hasValidExtension = VALID_REPORT_ATTACHMENT_EXTENSIONS.some((ext) =>
-    normalizedName.endsWith(ext),
-  );
-
-  if (isValidImage || hasValidMimeType || hasValidExtension) {
-    return true;
-  }
-
-  addToast({
-    message:
-      "Invalid file type. Only image files, PDF, and DOCX are allowed for the report attachment.",
-    type: "error",
-  });
-  return false;
-}
-
-function selectReportAttachment(event) {
-  const file = event.target.files?.[0];
-  if (file && isValidReportAttachment(file)) reportAttachment.value = file;
-  event.target.value = "";
 }
 
 function clearReportAttachment() {
@@ -1334,28 +1485,34 @@ function clearReportAttachment() {
 }
 
 function acceptedReceiptTotal(row, receipts) {
-  return receipts.reduce((sum, receipt) => {
-    if (receipt.decision !== "accepted") return sum;
-    return sum + Number(receipt.amount || 0);
-  }, 0);
+  return sumReceiptsPhpAmount(
+    (receipts || []).filter((receipt) => receipt.decision === "accepted"),
+    (receipt) => Number(receipt.amount || 0),
+  );
 }
 
 function calculateLiquidationStatus(row, acceptedTotal) {
-  const outstanding = Math.max(row.cashAdvanceAmount - acceptedTotal, 0);
-  if (acceptedTotal > row.cashAdvanceAmount) return "Overpayment";
+  const balanceTarget = numberOrZero(
+    row.outstandingBalance ?? row.cashAdvanceAmount,
+  );
+  const outstanding = Math.max(balanceTarget - acceptedTotal, 0);
+  if (acceptedTotal > balanceTarget) return "Overpayment";
   if (outstanding === 0) return "Liquidated";
-  if (isPastDue(row.dueDate)) return "Overdue";
+  if (isPastDue(row.dueDate, row)) return "Overdue";
   return "Incomplete";
 }
 
-function isPastDue(value) {
-  if (!value) return false;
-  const dueDate = new Date(value);
-  if (Number.isNaN(dueDate.getTime())) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  dueDate.setHours(0, 0, 0, 0);
-  return dueDate < today;
+function isPastDue(value, row = null) {
+  if (
+    String(row?.cashAdvanceStatus || row?.status || "").toLowerCase() ===
+    "overdue"
+  ) {
+    return true;
+  }
+  if (Array.isArray(row?.penalties) && row.penalties.length > 0) {
+    return true;
+  }
+  return computePenaltyDaysPastGrace(value) > 0;
 }
 
 function toggleSort(column) {
@@ -1413,7 +1570,6 @@ function openReview(row) {
   }
 
   reviewingCase.value = row;
-  confirmFinalizeOpen.value = false;
   receiptDetailsOpen.value = false;
   selectedReceipt.value = null;
   pendingReceiptDecision.value = "";
@@ -1421,7 +1577,6 @@ function openReview(row) {
 
 function closeReview() {
   reviewingCase.value = null;
-  confirmFinalizeOpen.value = false;
   receiptDetailsOpen.value = false;
   selectedReceipt.value = null;
   pendingReceiptDecision.value = "";
@@ -1489,12 +1644,37 @@ function handleReceiptUploadError(payload) {
   });
 }
 
-function finalizeLiquidation() {
-  if (!reviewingCase.value || !activeDraft.value) return;
-  activeDraft.value.finalizedStatus = reviewStatus.value;
-  confirmFinalizeOpen.value = false;
-  closeReview();
-}
+const { checkDeepLink: checkLiquidationDeepLink } = useNotificationDeepLink({
+  verifyUrl: (id) => `/api/serms/liquidations/${id}`,
+  onOpenRecord: (record) => {
+    if (auth.isAdmin) {
+      const row = sourceCases.value.find(
+        (r) => String(r.databaseId) === String(record.id),
+      );
+      if (row) openReview(row);
+    } else {
+      const adv = store.items.find(
+        (a) => String(a.id) === String(record.cash_advance_id),
+      );
+      if (adv) openSettlementModal(adv, "view");
+    }
+  },
+});
+
+const { checkDeepLink: checkAdvanceDeepLink } = useNotificationDeepLink({
+  queryKey: "advance",
+  verifyUrl: (id) => `/api/serms/cash-advances/${id}`,
+  onOpenRecord: (record) => {
+    const adv = store.items.find((a) => String(a.id) === String(record.id)) || record;
+    openSettlementModal(adv, "view");
+  },
+});
+
+onMounted(async () => {
+  await refreshAll();
+  checkLiquidationDeepLink();
+  checkAdvanceDeepLink();
+});
 </script>
 
 <template>
@@ -1582,12 +1762,12 @@ function finalizeLiquidation() {
         @sort="toggleSort"
       >
         <template #cell-purpose="{ row }">
-          <div class="max-w-[200px] sm:max-w-[260px]">
+          <div class="max-w-[18ch]">
             <span
               class="block truncate text-sm font-medium text-slate-800"
               :title="row.purpose"
             >
-              {{ row.purpose || "—" }}
+              {{ truncateText(row.purpose, 18) }}
             </span>
           </div>
         </template>
@@ -1650,7 +1830,6 @@ function finalizeLiquidation() {
       :is-reviewing-own-liquidation="isReviewingOwnLiquidation"
       :get-file-url="getFileUrl"
       @close="closeReceiptDetails"
-      @close-review="closeReview"
       @request-decision="requestReceiptDecision"
       @cancel-decision="cancelReceiptDecision"
       @confirm-decision="confirmReceiptDecision"
@@ -1704,26 +1883,6 @@ function finalizeLiquidation() {
       </template>
     </BaseUtilityToolbar>
 
-    <div
-      v-if="!auth.isAdmin"
-      class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3"
-    >
-      <BaseToggleSwitch
-        :model-value="isMockOcr"
-        @update:model-value="setMockMode"
-        on-label="Mock OCR"
-        off-label="Real OCR"
-        hint="Mock uploads file, fills instantly, skips OCR wait"
-      />
-      <p class="text-[11px] text-slate-400">
-        {{
-          isMockOcr
-            ? "Fast — real file upload, instant mock data."
-            : "Online — uses ocr-pipeline with polling."
-        }}
-      </p>
-    </div>
-
     <section
       v-if="!auth.isAdmin"
       class="overflow-hidden bg-white border shadow-sm rounded-xl border-slate-200"
@@ -1750,12 +1909,12 @@ function finalizeLiquidation() {
         @sort="employeeToggleSort"
       >
         <template #cell-purpose="{ row }">
-          <div class="max-w-[200px] sm:max-w-[260px]">
+          <div class="max-w-[18ch]">
             <span
               class="block truncate text-sm font-medium text-slate-800"
               :title="row.purpose"
             >
-              {{ row.purpose || "—" }}
+              {{ truncateText(row.purpose, 18) }}
             </span>
           </div>
         </template>
@@ -1824,9 +1983,9 @@ function finalizeLiquidation() {
       "
       @close="closeSettlementModal"
     >
-      <div class="flex max-h-[90vh] flex-col">
+      <div class="flex max-h-[90vh] flex-col w-full min-w-0 max-w-full overflow-x-clip">
         <div
-          class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4"
+          class="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 w-full min-w-0 shrink-0"
         >
           <div class="flex min-w-0 items-start gap-2">
             <button
@@ -1856,7 +2015,10 @@ function finalizeLiquidation() {
                         : "Settle Cash Advance"
                 }}
               </h2>
-              <p class="mt-0.5 truncate text-xs text-slate-400">
+              <p
+                v-if="settlementModalStep === 'select' || settlementModalMode !== 'view'"
+                class="mt-0.5 truncate text-xs text-slate-400"
+              >
                 {{
                   settlementModalStep === "select"
                     ? "Choose a cash advance to liquidate."
@@ -1865,17 +2027,41 @@ function finalizeLiquidation() {
               </p>
             </div>
           </div>
-          <button
-            id="settlement-modal-close"
-            type="button"
-            aria-label="Close liquidation details"
-            class="-mr-1 mt-0.5 flex shrink-0 items-center justify-center rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100"
-            @click="closeSettlementModal"
-          >
-            <X class="w-4 h-4" />
-          </button>
+          <div class="flex items-center gap-2 sm:gap-2.5 shrink-0">
+            <DaysLeftBadge
+              v-if="
+                settlementModalStep === 'form' &&
+                (selectedAdvance?.dueDate ||
+                  selectedAdvance?.expected_liquidation_date)
+              "
+              :due-date="
+                selectedAdvance?.dueDate ||
+                selectedAdvance?.expected_liquidation_date
+              "
+              :start-date="
+                selectedAdvance?.date ||
+                selectedAdvance?.dateOfAdvances ||
+                selectedAdvance?.createdAt
+              "
+              :status="modalAdvanceStatus"
+              :is-overdue="isModalAdvanceOverdue"
+            />
+            <StatusBadge
+              v-if="settlementModalStep === 'form' && selectedAdvance"
+              :status="modalAdvanceStatus"
+            />
+            <button
+              id="settlement-modal-close"
+              type="button"
+              aria-label="Close liquidation details"
+              class="-mr-1 mt-0.5 flex shrink-0 items-center justify-center rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100"
+              @click="closeSettlementModal"
+            >
+              <X class="w-4 h-4" />
+            </button>
+          </div>
         </div>
-        <div class="overflow-y-auto">
+        <div class="w-full min-w-0 max-w-full flex-1 overflow-y-auto overflow-x-clip">
           <LiquidationAdvancePicker
             v-if="settlementModalStep === 'select'"
             :advances="employeeOutstandingAdvances"
@@ -1890,10 +2076,13 @@ function finalizeLiquidation() {
             @update:receipts="receipts = $event"
             :receipt-category-options="receiptCategoryOptions"
             :report-attachment="reportAttachment"
-            @file-selected="selectReportAttachment"
+            :report-template-data="reportTemplateData"
+            :is-manual-mode="isReportManualMode"
+            @update:report-template-data="reportTemplateData = $event"
+            @update:report-attachment="reportAttachment = $event"
+            @update:is-manual-mode="isReportManualMode = $event"
             @file-cleared="clearReportAttachment"
             :existing-liquidation="existingLiquidation"
-            :needs-report-attachment-reminder="needsReportAttachmentReminder"
             :variance="variance"
             :shortfall-explanation="shortfallExplanation"
             @update:shortfall-explanation="shortfallExplanation = $event"
@@ -1905,6 +2094,7 @@ function finalizeLiquidation() {
             :disabled="
               settlementModalMode === 'view' || !selectedAdvanceCanLiquidate
             "
+            :has-changes="isDirty"
             :has-incomplete-receipt-fields="hasIncompleteReceiptFields"
             @reload-console="handleReloadConsole"
             @upload-error="handleReceiptUploadError"
@@ -1923,6 +2113,7 @@ function finalizeLiquidation() {
       confirm-text="Done"
       cancel-text="Cancel"
       :danger="false"
+      :loading="submitting"
       @confirm="handleConfirmSubmit"
       @close="handleCancelSubmit"
     />
@@ -1934,7 +2125,7 @@ function finalizeLiquidation() {
       confirm-text="Leave"
       cancel-text="Stay"
       :danger="true"
-      @confirm="handleConfirmLeave"
+      @confirm="onConfirmLeaveModal"
       @close="handleCancelLeave"
     />
 

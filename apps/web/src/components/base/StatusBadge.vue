@@ -147,6 +147,54 @@ const statusConfig = {
     medium: 'bg-red-50 text-red-700 border border-red-300',
     low: 'bg-red-50/70 text-red-700',
   },
+  acknowledged: {
+    label: 'Acknowledged',
+    high: 'bg-emerald-600 text-white',
+    medium: 'bg-emerald-50 text-emerald-700 border border-emerald-300',
+    low: 'bg-emerald-50/70 text-emerald-700',
+  },
+  'awaiting-acknowledgement': {
+    label: 'Awaiting Acknowledgement',
+    high: 'bg-amber-500 text-white',
+    medium: 'bg-amber-50 text-amber-700 border border-amber-300',
+    low: 'bg-amber-50/70 text-amber-700',
+  },
+  open: {
+    label: 'Open',
+    high: 'bg-blue-600 text-white',
+    medium: 'bg-blue-50 text-blue-700 border border-blue-300',
+    low: 'bg-blue-50/70 text-blue-700',
+  },
+  'in-progress': {
+    label: 'In Progress',
+    high: 'bg-blue-600 text-white',
+    medium: 'bg-blue-50 text-blue-700 border border-blue-300',
+    low: 'bg-blue-50/70 text-blue-700',
+  },
+  'pending-evaluation': {
+    label: 'Pending Evaluation',
+    high: 'bg-amber-500 text-white',
+    medium: 'bg-amber-50 text-amber-700 border border-amber-300',
+    low: 'bg-amber-50/70 text-amber-700',
+  },
+  resolved: {
+    label: 'Resolved',
+    high: 'bg-emerald-600 text-white',
+    medium: 'bg-emerald-50 text-emerald-700 border border-emerald-300',
+    low: 'bg-emerald-50/70 text-emerald-700',
+  },
+  closed: {
+    label: 'Closed',
+    high: 'bg-slate-600 text-white',
+    medium: 'bg-slate-100 text-slate-700 border border-slate-300',
+    low: 'bg-slate-100/70 text-slate-600',
+  },
+  discarded: {
+    label: 'Discarded',
+    high: 'bg-red-600 text-white',
+    medium: 'bg-red-50 text-red-700 border border-red-300',
+    low: 'bg-red-50/70 text-red-700',
+  },
 }
 
 function toTitleCase(str) {

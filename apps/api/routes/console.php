@@ -9,5 +9,8 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('receipts:warn-deletion')->daily();
+Schedule::command('receipts:prune-orphans')->daily();
 Schedule::command('penalties:calculate')->daily();
+Schedule::command('notifications:check-liquidation-deadlines')->daily();
+Schedule::command('currencies:sync')->daily();
 

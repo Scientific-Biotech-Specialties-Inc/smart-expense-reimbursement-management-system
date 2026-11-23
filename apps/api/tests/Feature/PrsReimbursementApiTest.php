@@ -89,7 +89,6 @@ class PrsReimbursementApiTest extends TestCase
             'category' => 'Demo',
             'amount' => 500,
             'date' => '2026-06-15',
-            'cutoff_period' => 'June 1-15, 2026',
             'status' => 'submitted',
             'submitted_by_name' => $employee->name,
             'source_system' => 'prs',
