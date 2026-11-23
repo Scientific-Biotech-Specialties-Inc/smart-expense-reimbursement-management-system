@@ -1,5 +1,5 @@
 <script setup>
-import { formatAmount, formatCutoffPeriod } from "@/utils/formatters";
+import { formatAmount } from "@/utils/formatters";
 
 const props = defineProps({
   receiptCount: {
@@ -9,10 +9,6 @@ const props = defineProps({
   reportFile: {
     type: File,
     default: null,
-  },
-  cutoffPeriod: {
-    type: String,
-    required: true,
   },
   totalAmount: {
     type: Number,
@@ -44,25 +40,13 @@ const props = defineProps({
           {{ receiptCount }} - ready
         </span>
       </div>
-      <div class="flex justify-between items-center text-sm">
+      <div
+        class="flex justify-between items-center text-sm pb-4 border-b border-accent/20"
+      >
         <span class="text-slate-500">Report Attached</span>
         <span class="text-slate-400">{{
           reportFile ? reportFile.name : "None"
         }}</span>
-      </div>
-      <div
-        class="flex justify-between items-center text-sm pb-4 border-b border-accent/20"
-      >
-        <span class="text-slate-500">Cutoff Period</span>
-        <span
-          :class="
-            cutoffPeriod
-              ? 'text-slate-700 font-semibold'
-              : 'text-danger font-bold'
-          "
-        >
-          {{ (cutoffPeriod && formatCutoffPeriod(cutoffPeriod) !== '—') ? formatCutoffPeriod(cutoffPeriod) : (cutoffPeriod || "Not selected") }}
-        </span>
       </div>
       <div class="flex justify-between items-center pt-2">
         <span

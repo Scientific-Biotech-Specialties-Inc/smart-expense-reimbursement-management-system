@@ -93,4 +93,42 @@ describe("ReceiptImagePreview", () => {
     expect(modal.exists()).toBe(true);
     expect(modal.props("modelValue")).toBe(true);
   });
+
+  it("renders StackedReceiptDeck when multiple images are provided via images prop", () => {
+    const wrapper = mount(ReceiptImagePreview, {
+      props: {
+        images: [
+          "https://example.com/part1.jpg",
+          "https://example.com/part2.jpg",
+        ],
+        fileName: "multi_receipt.jpg",
+      },
+    });
+
+    const stackedCards = wrapper.findAll("[data-testid='stacked-receipt-card']");
+    expect(stackedCards).toHaveLength(2);
+    expect(wrapper.text()).toContain("Part 1");
+    expect(wrapper.text()).toContain("Part 2");
+  });
+
+  it("renders StackedReceiptDeck when receipt object has multiple file_urls", () => {
+    const wrapper = mount(ReceiptImagePreview, {
+      props: {
+        receipt: {
+          file_url: [
+            "https://example.com/slice1.jpg",
+            "https://example.com/slice2.jpg",
+            "https://example.com/slice3.jpg",
+          ],
+        },
+      },
+    });
+
+    const stackedCards = wrapper.findAll("[data-testid='stacked-receipt-card']");
+    expect(stackedCards).toHaveLength(3);
+    expect(wrapper.text()).toContain("Part 1");
+    expect(wrapper.text()).toContain("Part 2");
+    expect(wrapper.text()).toContain("Part 3");
+  });
 });
+

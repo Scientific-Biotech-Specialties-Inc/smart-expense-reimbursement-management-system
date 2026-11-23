@@ -38,28 +38,43 @@ const newPenalty = reactive({
   effectiveDate: new Date().toISOString().split('T')[0]
 })
 
+const isSubmittingLimit = ref(false)
+const isSubmittingPenalty = ref(false)
+
 async function submitLimit() {
-  await policyStore.addLimitRule({
-    category: newPolicy.category,
-    grade: newPolicy.grade,
-    department: newPolicy.department,
-    limit: Number(newPolicy.limit),
-    threshold: newPolicy.threshold ? Number(newPolicy.threshold) : null,
-    effectiveDate: newPolicy.effectiveDate
-  }, authStore.user)
-  showAddLimit.value = false
-  Object.assign(newPolicy, { limit: '', threshold: '' })
+  if (isSubmittingLimit.value) return
+  isSubmittingLimit.value = true
+  try {
+    await policyStore.addLimitRule({
+      category: newPolicy.category,
+      grade: newPolicy.grade,
+      department: newPolicy.department,
+      limit: Number(newPolicy.limit),
+      threshold: newPolicy.threshold ? Number(newPolicy.threshold) : null,
+      effectiveDate: newPolicy.effectiveDate
+    }, authStore.user)
+    showAddLimit.value = false
+    Object.assign(newPolicy, { limit: '', threshold: '' })
+  } finally {
+    isSubmittingLimit.value = false
+  }
 }
 
 async function submitPenalty() {
-  await policyStore.addPenaltyRule({
-    dailyRate: Number(newPenalty.dailyRate),
-    maxCap: Number(newPenalty.maxCap),
-    capType: newPenalty.capType,
-    effectiveDate: newPenalty.effectiveDate
-  }, authStore.user)
-  showAddPenalty.value = false
-  Object.assign(newPenalty, { dailyRate: '', maxCap: '' })
+  if (isSubmittingPenalty.value) return
+  isSubmittingPenalty.value = true
+  try {
+    await policyStore.addPenaltyRule({
+      dailyRate: Number(newPenalty.dailyRate),
+      maxCap: Number(newPenalty.maxCap),
+      capType: newPenalty.capType,
+      effectiveDate: newPenalty.effectiveDate
+    }, authStore.user)
+    showAddPenalty.value = false
+    Object.assign(newPenalty, { dailyRate: '', maxCap: '' })
+  } finally {
+    isSubmittingPenalty.value = false
+  }
 }
 
 async function deleteLimit(id) {
@@ -166,7 +181,7 @@ async function deleteLimit(id) {
               </div>
             </div>
             <div class="flex justify-end mt-4">
-              <BaseButton variant="primary" class="min-h-[42px] w-full sm:w-fit" :disabled="!newPolicy.limit || !newPolicy.effectiveDate" @click="submitLimit">
+              <BaseButton variant="primary" class="min-h-[42px] w-full sm:w-fit" :loading="isSubmittingLimit" :disabled="isSubmittingLimit || !newPolicy.limit || !newPolicy.effectiveDate" @click="submitLimit">
                 <Save class="w-3.5 h-3.5 mr-2" /> DEPLOY LIMIT RULE
               </BaseButton>
             </div>
@@ -259,7 +274,7 @@ async function deleteLimit(id) {
               </div>
             </div>
             <div class="flex justify-end mt-4">
-              <BaseButton variant="danger" class="px-4 py-2.5" :disabled="!newPenalty.dailyRate || !newPenalty.maxCap" @click="submitPenalty">
+              <BaseButton variant="danger" class="px-4 py-2.5" :loading="isSubmittingPenalty" :disabled="isSubmittingPenalty || !newPenalty.dailyRate || !newPenalty.maxCap" @click="submitPenalty">
                 <Save class="w-3.5 h-3.5 mr-2" /> ENFORCE RULE
               </BaseButton>
             </div>

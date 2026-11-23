@@ -11,8 +11,8 @@ import {
   getForwardingBlockReason,
   mapReceiptToReimbursement,
 } from "@/utils/reimbursementForwarding";
+import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
 
-import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import BaseUtilityToolbar from "@/components/base/BaseUtilityToolbar.vue";
@@ -29,7 +29,8 @@ import {
   Receipt,
   Wallet,
   CheckSquare,
-  ShieldCheck,
+  ChevronDown,
+  Layers,
 } from "lucide-vue-next";
 
 const auth = useAuthStore();
@@ -131,6 +132,7 @@ const totalExpenses = computed(() =>
 // ── Delete Modal ──────────────────────────────────────────────────
 const deleteModalOpen = ref(false);
 const selectedReceiptId = ref(null);
+const isDeleting = ref(false);
 
 function promptDelete(id) {
   selectedReceiptId.value = id;
@@ -148,25 +150,41 @@ async function confirmDelete(password) {
       type: "error",
     });
     deleteModalOpen.value = false;
+    selectedReceiptId.value = null;
     return;
   }
 
-  const isValid = await auth.verifyPassword(password);
+  isDeleting.value = true;
+  try {
+    const isValid = await auth.verifyPassword(password);
 
-  if (isValid) {
-    await receiptsStore.softDelete(selectedReceiptId.value);
-    const s = new Set(selectedIds.value);
-    s.delete(selectedReceiptId.value);
-    selectedIds.value = s;
-    const nextPage =
-      receiptsStore.visibleReceipts.length === 1 && currentPage.value > 1
-        ? currentPage.value - 1
-        : currentPage.value;
-    await fetchReceipts(nextPage);
-    addToast({ message: "Receipt removed.", type: "success" });
-    deleteModalOpen.value = false;
-  } else {
-    addToast({ message: "Invalid password.", type: "error" });
+    if (isValid) {
+      try {
+        await receiptsStore.softDelete(selectedReceiptId.value);
+        const s = new Set(selectedIds.value);
+        s.delete(selectedReceiptId.value);
+        selectedIds.value = s;
+        const nextPage =
+          receiptsStore.visibleReceipts.length === 1 && currentPage.value > 1
+            ? currentPage.value - 1
+            : currentPage.value;
+        await fetchReceipts(nextPage);
+        addToast({ message: "Receipt removed.", type: "success" });
+        deleteModalOpen.value = false;
+        selectedReceiptId.value = null;
+      } catch (error) {
+        addToast({
+          message: error.message || "Failed to delete receipt.",
+          type: "error",
+        });
+        deleteModalOpen.value = false;
+        selectedReceiptId.value = null;
+      }
+    } else {
+      addToast({ message: "Invalid password.", type: "error" });
+    }
+  } finally {
+    isDeleting.value = false;
   }
 }
 
@@ -249,7 +267,10 @@ function openViewModal(receipt) {
 // ── Upload Modal ──────────────────────────────────────────────────
 const uploadModalOpen = ref(false);
 const receiptBeingEdited = ref(null);
-const adminNotesByReceipt = ref({});
+const isDropdownOpen = ref(false);
+const uploadMode = ref("single");
+const myExpenseFileInput = ref(null);
+const pendingUpload = ref(null);
 
 const automaticRejectedReceipts = computed(() =>
   receiptsStore.visibleReceipts.filter(
@@ -257,11 +278,42 @@ const automaticRejectedReceipts = computed(() =>
   ),
 );
 
-const pendingReReviewReceipts = computed(() =>
-  receiptsStore.reReviewReceipts.filter(
-    (r) => r.status === "pending-admin-re-review",
-  ),
-);
+function triggerUpload(mode) {
+  uploadMode.value = mode;
+  isDropdownOpen.value = false;
+  if (myExpenseFileInput.value) {
+    myExpenseFileInput.value.multiple = (mode === "multi");
+    myExpenseFileInput.value.value = "";
+    myExpenseFileInput.value.click();
+  }
+}
+
+function handleFileInput(e) {
+  const files = e.target.files;
+  if (files && files.length > 0) {
+    const fileArray = Array.from(files);
+    if (uploadMode.value === "single") {
+      pendingUpload.value = { mode: "single", files: [fileArray[0]] };
+    } else {
+      if (fileArray.length >= 2) {
+        pendingUpload.value = { mode: "multi", files: fileArray.slice(0, 6) };
+      } else {
+        // Fallback to single receipt
+        pendingUpload.value = { mode: "single", files: [fileArray[0]] };
+      }
+    }
+    uploadModalOpen.value = true;
+  }
+  if (e.target) e.target.value = "";
+}
+
+const dropdownRef = ref(null);
+
+function handleWindowClick(event) {
+  if (dropdownRef.value && !dropdownRef.value.contains(event.target)) {
+    isDropdownOpen.value = false;
+  }
+}
 
 function openEditReceipt(receipt) {
   if (!canEditReceipt(receipt)) {
@@ -278,7 +330,10 @@ function openEditReceipt(receipt) {
 
 function closeUploadModal(value) {
   uploadModalOpen.value = value;
-  if (!value) receiptBeingEdited.value = null;
+  if (!value) {
+    receiptBeingEdited.value = null;
+    pendingUpload.value = null;
+  }
 }
 
 // Refresh the card grid after a new OCR'd receipt is saved.
@@ -286,38 +341,30 @@ function onExpenseSaved() {
   fetchReceipts(currentPage.value);
 }
 
-async function finalizeReceiptReview(receipt, decision) {
-  const notes = adminNotesByReceipt.value[receipt.id] || "";
-  if (notes.trim().length < 10) {
-    addToast({
-      message: "Admin notes must be at least 10 characters.",
-      type: "error",
-    });
-    return;
-  }
-
-  await receiptsStore.finalizeReReview(receipt.id, decision, notes);
-  addToast({
-    message:
-      decision === "approve"
-        ? "Receipt approved by override."
-        : "Final rejection confirmed.",
-    type: "success",
-  });
-}
-
 // ── Lifecycle ─────────────────────────────────────────────────────
-const handleOpenReceiptUpload = () => { uploadModalOpen.value = true; };
+const handleOpenReceiptUpload = () => { triggerUpload("single"); };
+
+const { checkDeepLink } = useNotificationDeepLink({
+  verifyUrl: (id) => `/api/serms/reimbursements/receipts/${id}`,
+  onOpenRecord: (record) => {
+    const existing = receiptsStore.visibleReceipts.find(
+      (r) => String(r.dbId ?? r.id) === String(record.id),
+    );
+    openViewModal(existing || record);
+  },
+});
 
 onMounted(async () => {
+  window.addEventListener("click", handleWindowClick);
   const tasks = [fetchReceipts(1), receiptsStore.fetchCategories()];
-  if (auth.isAdmin) tasks.push(receiptsStore.fetchReReviewReceipts());
   await Promise.all(tasks);
+  checkDeepLink();
   ensureOcrWatch();
   window.addEventListener('open-receipt-upload', handleOpenReceiptUpload);
 });
 
 onUnmounted(() => {
+  window.removeEventListener("click", handleWindowClick);
   if (ocrPollTimer) clearInterval(ocrPollTimer);
   window.removeEventListener('open-receipt-upload', handleOpenReceiptUpload);
 });
@@ -364,6 +411,16 @@ const kpis = computed(() => [
 
 <template>
   <div>
+    <!-- Hidden file input for My Expense Upload -->
+    <input
+      ref="myExpenseFileInput"
+      type="file"
+      class="hidden"
+      accept=".jpg,.jpeg,.png,.pdf"
+      :multiple="uploadMode === 'multi'"
+      @change="handleFileInput"
+    />
+
     <div class="flex flex-col gap-6 pb-12 mx-auto max-w-7xl animate-fade-up">
       <!-- ── Page Header ── -->
       <div
@@ -396,14 +453,54 @@ const kpis = computed(() => [
             <Send class="w-4 h-4 shrink-0" />
             <span>To Reimbursement</span>
           </button>
-          <!-- Upload Receipt -->
-          <button
-            @click="uploadModalOpen = true"
-            class="btn btn-primary min-h-[42px]"
-          >
-            <UploadCloud class="w-4 h-4" />
-            Upload Receipt
-          </button>
+          <!-- Upload Receipt Dropdown -->
+          <div ref="dropdownRef" class="relative inline-block text-left" @click.stop>
+            <button
+              id="upload-receipt-btn"
+              type="button"
+              @click.stop="isDropdownOpen = !isDropdownOpen"
+              class="btn btn-primary min-h-[42px] inline-flex items-center gap-2"
+            >
+              <UploadCloud class="w-4 h-4" />
+              <span>Upload Receipt</span>
+              <ChevronDown class="w-3.5 h-3.5 ml-1 -mr-1" aria-hidden="true" />
+            </button>
+
+            <transition
+              enter-active-class="transition duration-100 ease-out"
+              enter-from-class="transform scale-95 opacity-0"
+              enter-to-class="transform scale-100 opacity-100"
+              leave-active-class="transition duration-75 ease-in"
+              leave-from-class="transform scale-100 opacity-100"
+              leave-to-class="transform scale-95 opacity-0"
+            >
+              <div
+                v-if="isDropdownOpen"
+                class="absolute z-30 w-48 mt-2 origin-top-right right-0 bg-white divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+              >
+                <div class="px-1 py-1">
+                  <button
+                    type="button"
+                    id="my-expense-single-btn"
+                    class="group flex w-full items-center rounded-md px-3 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white transition-colors"
+                    @click="triggerUpload('single')"
+                  >
+                    <UploadCloud class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
+                    Single Receipt
+                  </button>
+                  <button
+                    type="button"
+                    id="my-expense-multi-btn"
+                    class="group flex w-full items-center rounded-md px-3 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white transition-colors"
+                    @click="triggerUpload('multi')"
+                  >
+                    <Layers class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
+                    Multi Receipt
+                  </button>
+                </div>
+              </div>
+            </transition>
+          </div>
         </div>
       </div>
 
@@ -425,91 +522,16 @@ const kpis = computed(() => [
               {{ automaticRejectedReceipts.length }} receipt{{
                 automaticRejectedReceipts.length === 1 ? "" : "s"
               }}
-              need correction
+              automatically rejected
             </p>
             <p class="mt-1 text-sm text-slate-600">
-              System validation automatically rejected these receipts. Edit and
-              resubmit them for admin re-review.
+              System validation automatically rejected these receipts. Rejected
+              receipts cannot be edited — please delete them and upload clearer
+              copies.
             </p>
           </div>
         </div>
       </div>
-
-      <section
-        v-if="auth.isAdmin && pendingReReviewReceipts.length > 0"
-        class="overflow-hidden bg-white border shadow-sm rounded-xl border-accent/20"
-      >
-        <div
-          class="flex items-center justify-between px-5 py-4 border-b border-slate-200 bg-accent-50"
-        >
-          <div>
-            <h2 class="text-base font-bold font-heading text-primary">
-              Pending Admin Re-review
-            </h2>
-            <p class="mt-0.5 text-xs text-slate-500">
-              Previously system rejected, then modified and resubmitted by
-              employee.
-            </p>
-          </div>
-          <span class="kpi-label text-accent"
-            >{{ pendingReReviewReceipts.length }} queued</span
-          >
-        </div>
-        <div class="divide-y divide-slate-100">
-          <div
-            v-for="receipt in pendingReReviewReceipts"
-            :key="receipt.id"
-            class="grid gap-4 p-5 lg:grid-cols-[1fr_320px]"
-          >
-            <div class="space-y-2">
-              <div class="flex flex-wrap items-center gap-2">
-                <StatusBadge status="pending-admin-re-review" />
-                <StatusBadge status="automatic-rejected" />
-              </div>
-              <h3 class="text-sm font-bold font-heading text-slate-900">
-                {{ receipt.vendorName || "Unknown Vendor" }}
-              </h3>
-              <p class="text-xs text-slate-500">
-                {{ receipt.id }} | {{ receipt.fileName }} |
-                {{ formatPeso(receipt.amount || 0) }}
-              </p>
-              <p class="text-xs text-slate-400">
-                {{
-                  receipt.complianceReason ||
-                  "Modified by employee after automatic system rejection."
-                }}
-              </p>
-            </div>
-            <div class="space-y-3">
-              <div class="input-wrapper">
-                <label class="input-label"
-                  >Admin Notes <span class="text-danger">*</span></label
-                >
-                <textarea
-                  v-model="adminNotesByReceipt[receipt.id]"
-                  class="input min-h-[88px] resize-none"
-                  placeholder="Explain the final decision..."
-                />
-              </div>
-              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <button
-                  class="btn btn-primary"
-                  @click="finalizeReceiptReview(receipt, 'approve')"
-                >
-                  <ShieldCheck class="w-4 h-4" />
-                  Approve Override
-                </button>
-                <button
-                  class="btn btn-danger !py-2"
-                  @click="finalizeReceiptReview(receipt, 'reject')"
-                >
-                  Confirm Final Rejection
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
 
       <!-- ── Search / Popup Filters ── -->
       <BaseUtilityToolbar
@@ -581,7 +603,7 @@ const kpis = computed(() => [
             Try a different category filter or upload a new receipt.
           </p>
         </div>
-        <button @click="uploadModalOpen = true" class="mt-2 btn btn-primary">
+        <button @click="triggerUpload('single')" class="mt-2 btn btn-primary">
           <UploadCloud class="w-4 h-4" /> Upload Receipt
         </button>
       </div>
@@ -592,12 +614,17 @@ const kpis = computed(() => [
       :model-value="uploadModalOpen"
       :categories="receiptsStore.categories"
       :receipt-to-edit="receiptBeingEdited"
+      :pending-upload="pendingUpload"
       @update:model-value="closeUploadModal"
       @saved="onExpenseSaved"
     />
 
     <!-- ── Delete Confirmation Modal ── -->
-    <DeleteConfirmModal v-model="deleteModalOpen" @confirm="confirmDelete" />
+    <DeleteConfirmModal
+      v-model="deleteModalOpen"
+      :loading="isDeleting"
+      @confirm="confirmDelete"
+    />
 
     <!-- ── View Receipt Modal ── -->
     <ReceiptViewModal

@@ -10,9 +10,13 @@ class CashAdvanceDisbursement extends Model
     protected $fillable = [
         'cash_advance_id',
         'disbursed_by_id',
+        'granted_by',
         'disbursement_date',
         'channel',
+        'payout_method',
+        'payout_method_other',
         'reference_number',
+        'granter_signature',
     ];
 
     protected $casts = [

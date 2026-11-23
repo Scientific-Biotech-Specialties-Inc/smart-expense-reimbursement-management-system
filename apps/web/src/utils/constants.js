@@ -5,3 +5,13 @@ export const EXPENSE_CATEGORIES = [
   { id: 4, name: "Supplies" },
   { id: 5, name: "Uncategorized" },
 ];
+
+export const REIMBURSEMENT_EVENT_TYPES = [
+  "Client Meeting",
+  "Conference / Seminar",
+  "Training / Workshop",
+  "Team Building",
+  "Project Deployment / Field Work",
+  "Company Celebration / Gathering",
+  "Others",
+];

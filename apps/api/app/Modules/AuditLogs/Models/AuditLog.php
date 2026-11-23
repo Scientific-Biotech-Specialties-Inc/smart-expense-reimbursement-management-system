@@ -20,12 +20,18 @@ class AuditLog extends Model
     protected $casts = [
         'before_state' => 'json',
         'after_state' => 'json',
+        'created_at' => 'datetime',
     ];
 
     /**
      * Disable standard timestamps; we only track created_at (since logs are append-only).
      */
     public $timestamps = false;
+
+    public function actor()
+    {
+        return $this->belongsTo(\App\Modules\Users\Models\User::class, 'actor_id');
+    }
 
     protected static function booted()
     {

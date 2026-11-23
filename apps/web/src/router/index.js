@@ -75,6 +75,30 @@ const routes = [
         meta: { title: "My Expense" },
       },
       {
+        path: "payout",
+        name: "Payout",
+        component: () => import("@/views/PayoutView.vue"),
+        meta: { title: "Payout" },
+      },
+      {
+        path: "notifications",
+        name: "Notifications",
+        component: () => import("@/views/NotificationsView.vue"),
+        meta: { title: "Notifications" },
+      },
+      {
+        path: "settings/notifications",
+        name: "NotificationSettings",
+        component: () => import("@/views/NotificationSettingsView.vue"),
+        meta: { title: "Notification Settings" },
+      },
+      {
+        path: "profile",
+        name: "Profile",
+        component: () => import("@/views/ProfileView.vue"),
+        meta: { title: "My Profile", hideSidebar: true },
+      },
+      {
         path: "admin/policy",
         name: "Policy",
         component: () => import("@/views/admin/PolicyView.vue"),

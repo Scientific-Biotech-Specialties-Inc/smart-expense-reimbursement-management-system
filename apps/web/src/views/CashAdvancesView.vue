@@ -14,6 +14,7 @@ import CashAdvanceTable from "@/components/cash-advances/CashAdvanceTable.vue";
 import CashAdvanceDetailsModal from "@/components/cash-advances/CashAdvanceDetailsModal.vue";
 import { Plus, Wallet, Activity, ShieldCheck, X } from "lucide-vue-next";
 import { formatPeso } from "@/utils/formatters";
+import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
 
 const store = useCashAdvanceStore();
 const auth = useAuthStore();
@@ -37,7 +38,7 @@ const searchedRows = computed(() => {
   );
 });
 
-onMounted(() => store.fetchAll());
+const viewingRecord = ref(null);
 
 function openDetails(row) {
   viewingRecord.value = {
@@ -76,11 +77,22 @@ function openDetails(row) {
   };
 }
 
-const viewingRecord = ref(null);
-
 function closeDetails() {
   viewingRecord.value = null;
 }
+
+const { checkDeepLink } = useNotificationDeepLink({
+  verifyUrl: (id) => `/api/serms/cash-advances/${id}`,
+  onOpenRecord: (record) => {
+    const existing = store.items.find((r) => String(r.id) === String(record.id));
+    openDetails(existing || record);
+  },
+});
+
+onMounted(async () => {
+  await store.fetchAll();
+  checkDeepLink();
+});
 
 const kpis = computed(() => {
   const m = activeMetrics.value;
@@ -129,16 +141,6 @@ const kpis = computed(() => {
     iconColor: "text-red-500",
     accent: "bg-red-500",
   });
-
-  // cards.push({
-  //   label: admin ? "Total Outstanding Balance" : "Outstanding Balance",
-  //   value: formatPeso(m.outstanding || 0),
-  //   sub: admin ? "Total" : "To be settled",
-  //   icon: Wallet,
-  //   iconBg: "bg-blue-900/10",
-  //   iconColor: "text-blue-900",
-  //   accent: "bg-blue-900",
-  // });
 
   return cards;
 });

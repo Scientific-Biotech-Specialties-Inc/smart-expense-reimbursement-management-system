@@ -143,11 +143,11 @@ app/Modules/{ModuleName}/
 | `CashAdvances` | `/api/cash-advances`<br>`App\Modules\CashAdvances` | `CashAdvanceController`<br>`CashAdvanceService` | `CalculateOverdueCashAdvancesJob` | Cash advance request lifecycle (submission, policy threshold validation, accounting approval/rejection, disbursement logging, and employee acknowledgment). |
 | `Reimbursements` | `/api/reimbursements`<br>`App\Modules\Reimbursements` | `ReimbursementController`<br>`ReceiptController`<br>`ExpenseCategoryController`<br>`PrsReimbursementRequestController`<br>`PrsWebhookController`<br>`OcrCallbackController`<br>`ReimbursementService`<br>`ReceiptService` | `UpdatePrsReimbursementStatusJob`<br>`DispatchReceiptToAiService` | Reimbursement claim lifecycle, multi-receipt uploading & OCR dispatch, 90-day duplicate checking, BIR VAT classification, PRS status sync, and approval workflows. |
 | `Expenses` | `/api/expenses`<br>`App\Modules\Expenses` | `ExpenseController`<br>`ExpenseService` | — | Generic expense logging, line-item recording, receipt linkage, and expense category association. |
-| `Liquidations` | `/api/liquidations`<br>`App\Modules\Liquidations` | `LiquidationController`<br>`LiquidationOcrCallbackController` | `CalculateDailyPenaltiesJob`<br>`DispatchReceiptToAiService` | Cash advance liquidation reports, receipt item matching & scanning, variance/shortfall computation, accounting audit verification, and daily penalty accruals. |
+| `Liquidations` | `/api/liquidations`<br>`App\Modules\Liquidations` | `LiquidationController` | `CalculateDailyPenaltiesJob`<br>`DispatchReceiptToAiService` | Cash advance liquidation reports, receipt item matching & scanning, variance/shortfall computation, accounting audit verification, and daily penalty accruals. |
 | `AuditLogs` | `App\Modules\AuditLogs` | `AuditLogService` | — | Centralized append-only audit trail logging (`AuditLogService::log()`) and compliance export action tracking. |
 | `Notifications` | `App\Modules\Notifications` | `NotificationDeliveryService` | — | Template-based in-app notification dispatching, failed attempt logging, and role-based hierarchy resolution. |
 | `Ai` | `App\Modules\Ai` | `AiServiceOcrEngine`<br>`TesseractOcrEngine` | — | OCR contract bindings (`OcrEngineInterface`, `AsyncOcrEngineInterface`), external OCR service communication, payload signing, and webhook validation. |
-| `Users` | `App\Modules\Users` | `User` Model & Providers | — | User identity mapping, department and organizational hierarchy resolution, and role policy checks. |
+| `Users` | `/api/profile`<br>`App\Modules\Users` | `ProfileController`<br>`ProfileService`<br>`User` Model & Providers | — | User identity mapping, profile management (personal/contact details Dual-Sync with `capstone-auth-module`), Supabase avatar and hybrid signature storage, client-encrypted password updates, and user-scoped audit activity logs. |
 | `Shared` | `/api/crypto`<br>`/api/auth`<br>`App\Modules\Shared` | `CryptoController`<br>`AuthController`<br>`PayloadDecryptionService`<br>`PasswordVerificationService` | — | Cryptographic public key distribution (`GET /api/crypto/key`), client payload pre-encryption decryption middleware (`DecryptPayloadMiddleware`), external auth SSO proxying (`/api/auth/me`), and password re-verification. |
 
 ### Cross-Cutting Services
@@ -155,6 +155,7 @@ app/Modules/{ModuleName}/
 | Service | Namespace / Location | Consumer Modules | Purpose |
 |---------|----------------------|------------------|---------|
 | `AuditLogService::log()` | `App\Modules\AuditLogs\Services\AuditLogService` | All Modules | Central audit log writer — invoked on every database mutation and report export |
+| `AuditLogService::enrich*()` | `App\Modules\AuditLogs\Services\AuditLogService` | `Reimbursements`, `CashAdvances`, `Liquidations` | Batch-enriches request/advance/liquidation models with chronological lifecycle audit trail and masks IP addresses based on user privileges |
 | `NotificationDeliveryService::send()` | `App\Modules\Notifications\Services\NotificationDeliveryService` | `CashAdvances`, `Reimbursements`, `Liquidations` | Template-gated notification dispatcher |
 | `PayloadDecryptionService` | `App\Modules\Shared\Services\PayloadDecryptionService` | `Shared` (`DecryptPayloadMiddleware`) | Server-side RSA-OAEP private key and AES-256-GCM decryption for sensitive client payloads |
 | `PasswordVerificationService` | `App\Modules\Shared\Services\PasswordVerificationService` | `Shared` (`AuthController`) | Proxies high-security password verification requests to `capstone-auth-module` |
@@ -172,7 +173,18 @@ erDiagram
     users {
         bigint id PK
         string name
+        string first_name
+        string middle_name
+        string last_name
         string email
+        string role
+        string grade
+        string department
+        string contact_number
+        string avatar
+        longtext signature
+        string signature_path
+        timestamp last_login_at
         boolean is_admin
         string auth_id
     }
@@ -235,6 +247,8 @@ erDiagram
         date transaction_date
         decimal total_amount
         decimal vat_amount
+        decimal discount_amount
+        string discount_type
         string tin
         string invoice_number
         enum vat_classification
@@ -243,6 +257,7 @@ erDiagram
         bigint expense_category_id FK
         enum status
         boolean is_archived
+        boolean is_draft
         datetime deleted_at
     }
 
@@ -341,7 +356,7 @@ The Vue SPA manages the following reactive state through Pinia stores:
 | `receipts.js` | Receipt list, OCR polling state, upload flow |
 | `reimbursement.js` | Reimbursement list, approval workflow state |
 | `liquidation.js` | Liquidation reports and status |
-| `policy.js` | Admin-managed rules (approval thresholds, penalty rules, cutoff periods) |
+| `policy.js` | Admin-managed rules (approval thresholds, penalty rules) |
 | `notification.js` | In-app notification panel state |
 
 ---
@@ -479,6 +494,8 @@ sequenceDiagram
 | **Payload Encryption** | Pre-encryption of JSON payloads (client-side) using AES-256-GCM and RSA wrapper prior to HTTP POST/PUT transmission |
 | **Audit log immutability** | `audit_logs` table has no `updated_at` column; service layer is append-only |
 | **Export Action Auditing** | All exports (XLSX, CSV, PDF) require logging of: `actor_id`, `action_type: EXPORT_REPORTS`, `entity_type: Report`, `after_state: { format, filters_used }` |
+| **Audit trail IP privacy masking** | Client IP addresses (`ip_address`) in enriched audit logs are visible solely to authorized Admins (`serms.reimbursements.manage` / Accounting); masked as `null` for regular employees |
+| **Audit trail diff sanitization** | Field-level diff computation (`computeSanitizedDiff()`) filters out internal primary keys, timestamps, and credential fields before exposing changes |
 
 ---
 
@@ -537,6 +554,7 @@ cd apps/api && composer run dev
 | Session Timeout | 90 min (user) / 60 min (admin) | Enforced by auth-module; SERMS validates on every `/api/serms/auth/me` call |
 | File Upload Size | ≤ 2MB per file | Enforced in `StoreReceiptRequest` validation rules |
 | Duplicate Detection Window | 90 days | Checked in `ExpenseService::storeReceipt()` on vendor + date + amount + invoice |
+| Draft Receipt Retention | 24 hours | Scheduled daily via CRON (`receipts:prune-orphans --hours=24`) purging Supabase files, pgvector embeddings, and DB records |
 | Penalty Accrual | Daily via CRON | Queue job dispatched by scheduled command after 7-day grace period |
 | Dashboard Performance | Pre-aggregated database queries | Computed via optimized SQL `SUM` and `COUNT` queries; indexed correctly |
 | Audit Log Query Performance | Indexed by `entity_type` + `entity_id` | No full-table scans; composite index required on these columns |

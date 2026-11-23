@@ -21,6 +21,11 @@ class GrantReimbursementRequest extends FormRequest
     {
         return [
             'password' => 'nullable|string',
+            'approved_by' => 'nullable|string|max:255',
+            'granted_by' => 'required|string|max:255',
+            'payout_method' => 'required|string|in:Cash,E-wallet,Card,Visa,Other',
+            'payout_method_other' => 'required_if:payout_method,Other|nullable|string|max:255',
+            'granter_signature' => 'required|string',
         ];
     }
 }

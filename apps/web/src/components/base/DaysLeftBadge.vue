@@ -37,11 +37,6 @@ const parsedStartDate = computed(() => {
   return Number.isNaN(d.getTime()) ? null : d;
 });
 
-const isSettledOrLiquidated = computed(() => {
-  const s = String(props.status || "").toLowerCase().trim();
-  return s === "liquidated" || s === "settled" || s === "rejected";
-});
-
 const diffDays = computed(() => {
   if (!parsedDueDate.value) return 0;
   const today = new Date();
@@ -85,43 +80,43 @@ const daysLeftText = computed(() => {
 });
 
 const badgeClasses = computed(() => {
-  if (computedIsOverdue.value || daysLeft.value === 0) {
+  if (computedIsOverdue.value || daysLeft.value <= 3) {
     return "bg-red-50 text-red-700 border-red-200";
   }
-  if (daysLeft.value <= 2) {
+  if (daysLeft.value <= 10) {
     return "bg-amber-50 text-amber-700 border-amber-200";
   }
-  return "bg-slate-50 text-slate-700 border-slate-200";
+  return "bg-emerald-50 text-emerald-700 border-emerald-200";
 });
 
 const iconClasses = computed(() => {
-  if (computedIsOverdue.value || daysLeft.value === 0) {
+  if (computedIsOverdue.value || daysLeft.value <= 3) {
     return "text-red-600";
   }
-  if (daysLeft.value <= 2) {
+  if (daysLeft.value <= 10) {
     return "text-amber-600";
   }
-  return "text-slate-500";
+  return "text-emerald-600";
 });
 
 const trackClasses = computed(() => {
-  if (computedIsOverdue.value || daysLeft.value === 0) {
+  if (computedIsOverdue.value || daysLeft.value <= 3) {
     return "bg-red-200";
   }
-  if (daysLeft.value <= 2) {
+  if (daysLeft.value <= 10) {
     return "bg-amber-200";
   }
-  return "bg-slate-200";
+  return "bg-emerald-200";
 });
 
 const fillClasses = computed(() => {
-  if (computedIsOverdue.value || daysLeft.value === 0) {
+  if (computedIsOverdue.value || daysLeft.value <= 3) {
     return "bg-red-600";
   }
-  if (daysLeft.value <= 2) {
+  if (daysLeft.value <= 10) {
     return "bg-amber-500";
   }
-  return "bg-primary";
+  return "bg-emerald-600";
 });
 
 const tooltipTitle = computed(() => {
@@ -140,7 +135,7 @@ const tooltipTitle = computed(() => {
 
 <template>
   <div
-    v-if="parsedDueDate && !isSettledOrLiquidated"
+    v-if="parsedDueDate"
     class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold font-sans transition-colors"
     :class="badgeClasses"
     :title="tooltipTitle"

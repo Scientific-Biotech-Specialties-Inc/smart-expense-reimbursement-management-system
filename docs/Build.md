@@ -312,7 +312,7 @@ When debugging authentication, role-based access control (RBAC), approval thresh
 | Role / Persona | Email | Password | Department / Grade | Purpose & Scopes |
 | -------------- | ----- | -------- | ------------------ | ---------------- |
 | **Employee (Standard)** | `employee@example.com` | `password` | Operations / L2 | Regular expense upload, reimbursement requests, cash advances, liquidation submissions |
-| **Accounting / Finance** | `sum@sbsi.com` | `@.Akirasendoh07` | Accounting / Finance | Primary accounting verification, disbursements, settlement validation |
+| **Accounting / Finance** | `sum@sbsi.com` | `password` | Accounting / Finance | Primary accounting verification, disbursements, settlement validation |
 | **IT Administrator** | `admin@example.com` | `password` | IT / L5 | System administration, user management, audit log inspection, global settings |
 | **Approver / Finance Manager** | `approver@example.com` | `password` | Finance / L4 | Cash advance approvals, threshold sign-offs, reimbursement approvals |
 | **Finance Administrator** | `finance-admin@example.com` | `password` | Finance / Admin | Financial compliance, expense category oversight, audit reporting |

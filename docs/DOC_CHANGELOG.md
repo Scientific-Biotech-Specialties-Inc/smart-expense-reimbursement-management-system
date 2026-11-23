@@ -3,12 +3,12 @@
 **Project:** Smart Expense & Reimbursement Management System (SERMS)  
 **Client / Partner:** Science Biotech Specialties Inc. (SBSI) — [https://sbsi.com.ph/about-us/](https://sbsi.com.ph/about-us/)  
 **Academic Context:** 3rd & 4th Year Capstone Project (Capstone 1: Ended July 2026 · Capstone 2: September–December 2026)  
-**Date:** 2026-10-17  
-**Version:** 1.7.0  
+**Date:** Nov 21, 2026  
+**Version:** 2.1.0  
 **Owner:** SERMS Engineering Team  
 **Status:** Active  
-**Last reconciled:** 2026-10-16 (Refactored component design system to shadcn-vue and Radix Vue primitives)  
-**Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [AGENTS.md](../AGENTS.md)
+**Last reconciled:** Nov 21, 2026 (Bi-Directional TS ↔ SERMS Integration & Staging Reconciliation)  
+**Canonical Spec:** [SERMS.md](SERMS.md) · **Related Docs:** [index.md](index.md) · [PRD.md](PRD.md) · [SAD.md](SAD.md) · [SDD.md](SDD.md) · [DSD.md](DSD.md) · [Build.md](Build.md) · [OPS.md](OPS.md) · [QAD.md](QAD.md) · [TS_INTEGRATION_HANDOFF.md](TS_INTEGRATION_HANDOFF.md) · [AGENTS.md](../AGENTS.md)
 
 ---
 
@@ -22,13 +22,237 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 > **Note for AI Subagents & Developers:** Always consult this file when you need chronological historical context, previous architectural pivots, or design rationale before modifying codebase features or documentation guides.
 
+## [Unreleased] - Nov 21, 2026
+
+### Added
+- **Bi-Directional Ticketing System (TS) ↔ SERMS Integration (`docs/SERMS.md`, `docs/TS_INTEGRATION_HANDOFF.md`, `apps/api`, `apps/web`, `docker-compose.yml`):**
+  - Updated `docs/SERMS.md` (§2.3, §5, §6.1, §6.6) and `docs/index.md`, and created `docs/TS_INTEGRATION_HANDOFF.md` with the locked SERMS ↔ TS API contracts (`401`/`403`/`404`/`422`), TS-side implementation plan (`ticket-service`, `VerifyInternalToken`, `nginx.gateway.conf.template`, `TicketDetailModal.jsx` / `ProofCompletionModal.jsx`), local port-forwarding vs Azure Container Apps (`ticketing.bicep` / `serms.bicep`) guide with production secret rotation warning, `curl` verification steps, and copy-paste TS agent prompt.
+  - **Backend (`apps/api`, `docker-compose.yml`):** Added `services.ts` config/env (`TS_API_URL`, `TS_REIMBURSEMENT_STATUS_URL`, `TS_INTERNAL_SECRET`, `TS_SERVICE_TIMEOUT=10`), `AuthenticateInternalService` TS secret priority + `EnsureIdempotency` file/null-user support, migration `2026_11_21_000001_add_ticket_fields_to_reimbursements_table.php` (`ticket_id`, `ticket_number`, non-unique `reimbursements_source_submission_idx`), `Reimbursement::$appends` `reference_no` (`RMB-YYYY-00000`), `AuditLogService` `TS_REIMBURSEMENT_RECEIVED` metadata, shared `ReceiptService` helpers, `TsReimbursementImportService`, `InternalTsController`, `TsClientService`, `TsController` (single `whereIn` batch enrichment), `UpdateTsReimbursementStatusJob`, `TsInternalReimbursementTest.php`, and `TsOutboundIntegrationTest.php`.
+  - **Frontend (`apps/web`):** Added `useTsStore`, `<TsTicketSelect>`, and `<TsTicketsPanel>`; extended `StatusBadge.vue` with TS ticket statuses; wired `?ticket_id=&ticket_number=` prefill and ticket selection into `MetaAndAttachments.vue`, `useReimbursementSubmit.js`, and `ReimbursementFormView.vue`; exposed the `Tickets (TS)` tab to all authenticated users in `ReimbursementsView.vue`; and displayed `reference_no`, ticket badges, and `From TS` indicators across `useReimbursementFilters.js`, `ReimbursementsTable.vue`, and `ReimbursementDetailsModal.vue` with full Vitest coverage.
+- **Cash Advance Disbursement via `GrantPayoutModal` & Unified Payout Integration (`docs/SERMS.md`, `apps/api`, `apps/web`):**
+  - Updated `docs/SERMS.md` (§4.2, §6.1, §6.4) to specify Cash Advance disbursement through the shared `GrantPayoutModal` (`granted_by`, `payout_method`, `payout_method_other`, `granter_signature`, password verification, and legacy `{ channel, reference, password }` backwards compatibility), unified `payout` enrichment via `CashAdvanceEnrichmentService`, `CASH_ADVANCE_DISBURSED` audit trail fields, and unified `PayoutView.vue` tracking & employee acknowledgement.
+  - **Backend (`apps/api`):** Added `2026_11_21_000001_add_payout_fields_to_cash_advance_disbursements_table.php`, updated `CashAdvanceDisbursement`, `DisburseCashAdvanceRequest`, `CashAdvanceController`, `CashAdvanceService`, `CashAdvanceEnrichmentService`, and `AuditLogService`, and added `CashAdvancePayoutDisbursementTest.php`.
+  - **Frontend (`apps/web`):** Reused `GrantPayoutModal.vue` in `CashAdvanceDetailsModal.vue` (`stores/cashAdvance.js`) and integrated Cash Advance payouts into `usePayoutFilters.js`, `PayoutView.vue`, `PayoutsTable.vue`, and `PayoutDetailsModal.vue`.
+- **Smart Multi-Receipt Auto-Split & Per-Card Isolation (`docs/SERMS.md`, `apps/web`):**
+  - Documented the Multi-Receipt Auto-Split workflow and `split_receipts` / `segment_indices` cross-service contract in `docs/SERMS.md` (§4.2 and §6.3) and `docs/CHANGELOG.md`.
+  - **Shared Utilities (`receiptUtils.js`):** Extracted `hasSplitReceipts()`, `formatSplitReceiptsToastMessage()`, `resolveSplitSegmentIndices()`, and `isDuplicateOcrResponse()`.
+  - **Reimbursements & My Expense (`useReceiptUploads.js`, `ReimbursementFormView.vue`):** Delegated 1-file `submitSegments()` and `onReceiptSelect()` Multi Receipt selections to `addReceiptFiles()`, capped multi-file batches at 6, expanded `split_receipts` before early rejection/failure returns, isolated per-card rejections/duplicates by card `id`/reference, and guarded blob URL revocation across siblings.
+  - **Liquidations (`FileUpload.vue`):** Partitioned `pages`/`previews` on `split_receipts`, inserted child entries after the placeholder entry, showed the split info toast, and evaluated each entry independently (`hydrateEntry`, `handleRejectedEntry`, or `failed` status).
+  - **Vitest Coverage:** Added `useReceiptUploads.test.js` and `FileUpload.test.js`, and extended `receiptUtils.test.js`, `ReceiptUploadModal.spec.js`, and `ReimbursementFormView.duplicate-cancel.test.js`.
+
+### Changed
+- **Liquidation Minimum Balance Enforcement (`docs/SERMS.md`, `docs/PRD.md`, `apps/api`, `apps/web`):**
+  - Updated `docs/SERMS.md` and `docs/PRD.md` to require `total_expense_amount >= outstanding_balance` (equal to or greater than the current penalty-inclusive balance) on liquidation submissions and updates, blocking under-balance submissions at both UI and API layers.
+  - **Backend (`LiquidationController.php`):** Added `assertExpenseMeetsBalance()` with cent-precision validation in both `store()` (post-penalty sync, pre-receipt mutation) and `update()` (covering `pending` and penalty-synced `revise` edits) returning HTTP `422` on `total_expense_amount`, and removed the prior `variance > 0` `shortfall_explanation` gate.
+  - **Frontend (`liquidationPenalties.js`, `LiquidationSettlementForm.vue`, `LiquidationsView.vue`, `useLiquidationSubmit.js`):** Extracted `resolveAdvanceBalance` and `isExpenseBelowBalance`, disabled `#submit-liquidation-btn` with an accessible inline `role="alert"` message (`data-testid="liquidation-balance-error"`) when expenses are below balance, guarded `promptSubmitLiquidation()` / `submitLiquidation()` in `LiquidationsView.vue`, and removed automatic shortfall note synthesis in `useLiquidationSubmit.js`.
+
+### Fixed
+- **PRS Webhook Dispatch Isolation Guard (`apps/api/app/Modules/Reimbursements/Services/ReimbursementService.php`):**
+  - Guarded `UpdatePrsReimbursementStatusJob::dispatch(...)` in both `approveReimbursement()` and `grantReimbursement()` with `$reimbursement->source_system === 'prs'` so TS-originated (and other non-PRS) reimbursement claims never trigger PRS status webhooks.
+
+## [Unreleased] - Nov 20, 2026
+
+### Fixed
+- **Overdue Penalty Balance Reconciliation & 7-Day Grace Period Enforcement (`apps/api`, `apps/web`, `docs/TECHNICAL_IMPLEMENTATION_DETAILS.md`):**
+  - **Shared Backend Sync (`PenaltySyncService.php`):** Extracted `App\Modules\Shared\Services\PenaltySyncService` (shared by `ComputeDailyPenalties`, `CashAdvanceController`, and `LiquidationController`) to enforce the canonical 7-day grace period after `expected_liquidation_date`, accrue daily `PHP 50.00` `PenaltyRecord` rows into `cash_advances.outstanding_balance` (propagating to `liquidations.outstanding_balance`), pause daily accrual while a liquidation is `pending` / `under-review` (resuming on `revise` / `incomplete`), and write `OVERDUE_PENALTY` audit logs on `entity_type = 'cash_advance'`.
+  - **Deadline Notifications & PDF Reports (`CheckLiquidationDeadlines.php`, `ReportGeneratorService.php`):** Aligned Stage 3 overdue notifications and liquidation PDF penalty fallback with the 7-day grace period.
+  - **Seeder Repair (`OverdueCashAdvanceSeeder.php`):** Updated overdue fixture due dates to `7 + overdueDays` days ago, seeded daily `PHP 50.00` `PenaltyRecord` entries, and persisted penalty-inclusive `outstanding_balance` (`PHP 10,250.00`, `PHP 15,200.00`, `PHP 5,150.00`) across `cash_advances` and `liquidations`.
+  - **Frontend Liquidation UI & Math (`liquidationPenalties.js`, `liquidation.js`, `LiquidationsView.vue`, `LiquidationSettlementForm.vue`, `LiquidationReviewModal.vue`, `UnifiedRoadmapStepper.vue`):** Enforced the 7-day grace period in `calculateAging` and roadmap/overdue helpers, fixed `calculateLiquidationStatus` and `roadmapOverpayment` to evaluate against `outstandingBalance` rather than `cashAdvanceAmount`, and added `Requested Amount` + `Overdue Penalty` = `Total Balance` breakdowns in Settlement Summary and the Admin Review modal.
+
+## [2.1.0] - Nov 14, 2026
+
+### Added
+- **Reimbursement Fast-Track Priority & Secondary Accounting Audit Gate (`apps/api`, `apps/web`, `docs/SERMS.md`):**
+  - Added migration `2026_11_14_000004_add_secondary_audit_fields_to_reimbursements_table.php` (`secondary_audit_confirmed_at`, `secondary_audit_by`, `secondary_audit_note`) and computed accessors (`fast_track_eligible`, `vendor_audit_required`, `unverified_vendors`) on `Reimbursement`.
+  - Updated `ReimbursementService::listReimbursements()` to sort pending `fast_track_eligible` claims first and `ReimbursementService::approveReimbursement()` / `ApproveReimbursementRequest` to require `secondary_audit_confirmed` (recorded in `CLAIM_APPROVED` audit logs) when any attached receipt requires vendor audit.
+  - Updated `ReimbursementsView.vue`, `ReimbursementsTable.vue`, `ReimbursementDetailsModal.vue`, `DecisionConfirmationModal.vue`, `useReimbursementFilters.js`, `useReimbursementDecisions.js`, and `useReimbursementStore` with priority sorting, vendor-review toolbar filters, status pills, and the Secondary Accounting Audit confirmation gate.
+- **CMS ↔ SERMS Bi-Directional Integration (`apps/api`, `apps/web`, `docker-compose.yml`, `docs/SERMS.md`):**
+  - Added CMS configuration (`CMS_CONTRACT_URL`, `CMS_VENDOR_URL`, `INTERNAL_SERVICE_SECRET`, `CMS_SERVICE_TIMEOUT`) across `apps/api/config/services.php`, `.env.example`, `.env`, and `docker-compose.yml`.
+  - Added `AuthenticateInternalService` (`auth.internal` middleware) enforcing constant-time `hash_equals()` validation of `X-Internal-Secret` on `/api/internal/*`.
+  - Implemented `InternalCmsController` and `CmsContractExpenseService` exposing `GET /api/internal/expenses/by-contract` (SQL-aggregated `approved` + `granted` spend breakdown) and `GET /api/internal/reimbursements/by-vendor` (normalized TIN match with case-insensitive `vendor_name` fallback).
+  - Implemented `CmsClientService`, `CmsVendorVerificationService`, `CmsRecurringExpenseService`, and `CmsController` (`/api/cms/contracts/active`, `/api/cms/vendors/suggest`, `/api/cms/recurring-expenses`, `/api/cms/contract-requests`) wired into `OcrCallbackService`, `ReceiptService`, `ReimbursementService`, `CashAdvanceService`, and `AuditLogService` (`CMS_VENDOR_SUGGESTED`, `CMS_CONTRACT_REQUEST_FORWARDED`).
+  - Added database migrations for `reimbursements` & `cash_advances` (`contract_id`, `client_name`), `receipts` (7 `vendor_*` fields), and `cms_contract_requests`.
+  - Added Vue store `useCmsStore`, `<CmsContractSelect>`, `<CmsSuggestVendorAction>`, and `<CmsRecurringExpensesPanel>` integrated into Reimbursements, Cash Advances, and Receipt inspection modals, plus PHPUnit and Vitest test suites.
+
+## [2.0.1] - Nov 14, 2026
+
+### Removed
+- **Obsolete Liquidation OCR Callback Endpoint (`apps/api` & `docs/SDD.md`):**
+  - Removed unused `LiquidationOcrCallbackController` and `POST /api/liquidations/receipts/{id}/ocr-callback` from `apps/api/app/Modules/Liquidations/routes/api.php`. All receipt OCR callbacks (reimbursement and liquidation) route through the unified `OcrCallbackController` (`POST /api/reimbursements/receipts/{id}/ocr-callback`) as dispatched by `DispatchReceiptToAiService`.
+  - Updated `docs/SDD.md` Module Roster for `Liquidations` to reflect the removal of `LiquidationOcrCallbackController`.
+- **Backend Dead Code, Stray Artifacts & Unused Dependencies (`apps/api` & Root):**
+  - Deleted stray root/backend artifacts (`nginx-proxy.conf`, `.superpowers/sdd/2026-10-22-report-epic/progress.md`, stray mangled-path folder in `apps/api/public/`, `apps/api/database/database.sqlite`, `apps/api/.phpunit.result.cache`), unused `ReceiptDuplicateDetected` event, and default Laravel `ExampleTest` stubs.
+  - Removed unused `postmark`, `resend`, `ses`, and `slack` keys from `apps/api/config/services.php` and removed `laravel/pao` from `apps/api/composer.json` `require-dev`.
+  - Removed unused methods (`reviseAdvance`, `reviseReimbursement`), dead locals, unreachable branch in `ReceiptService::resubmitReceipt`, and unused `use` imports across `apps/api` app/migration/seeder and feature test files.
+
+### Changed
+- **Backend A-09 Deduplication (`apps/api`):**
+  - Extracted `PrsReimbursementImportService` (`Reimbursements`) to share validation rules and atomic receipt/reimbursement creation between `PrsReimbursementRequestController` and `PrsWebhookController`.
+  - Extracted `BaseBearerTokenMiddleware` (`Shared`) for constant-time bearer token validation across `AuthenticateAiServiceApi` and `AuthenticatePrsReimbursementApi`.
+  - Extracted `CashAdvanceEnrichmentService` (`Shared`) to unify Unified Roadmap `CashAdvance` enrichment between `CashAdvanceController` and `LiquidationController`, and extracted `LiquidationController::syncLiquidationReceipts()`.
+
+## [2.0.0] - Nov 12, 2026
+
+### Removed
+- **Mock OCR Engine & UI Toggle Removal (`apps/api` & `apps/web`):**
+  - **Backend (`apps/api`):** Deleted `MockOcrService.php` and its dedicated test `MockOcrUploadTest.php`. Cleaned up `ReceiptService.php` and `LiquidationController.php` by removing mock request detection (`is_mock`/`mock`/`X-Mock-OCR`), fake data generation fallbacks, and mock status overrides. All receipt uploads and liquidation scans now strictly route to the asynchronous OCR pipeline job dispatch (`DispatchReceiptToAiService`). Removed obsolete `is_mock` and `mock` validation rules from `StoreReceiptRequest.php`.
+  - **Frontend (`apps/web`):** Deleted `useOcrMode.js`, `useOcrMode.test.js`, `mockOcr.js`, and `mockOcr.test.js`. Removed the OCR Mode toggle switches (`BaseToggleSwitch`) and explanatory helper text from `ReimbursementFormView.vue`, `ReimbursementsView.vue`, `LiquidationsView.vue`, and `LiquidationSettlementForm.vue`. Removed `mockMode` prop from `FileUpload.vue` and removed mock mode request flags (`is_mock`, `X-Mock-OCR`) from `useReceiptUploads.js` and `FileUpload.vue`. Cleaned up mock imports across all 9 affected Vitest test files.
+
+### Added
+- **Unified Profile Signature on Signature Pads & Test Seeder (`apps/web` & `apps/api`):**
+  - **`BaseSignaturePad.vue` Enhancements:** Added `allowProfileSignature`, `savedSignature`, and `showHelperNote` props; added automatic pre-fill from `auth.user.signature` on mount; integrated a "Use Saved Signature" (`Sparkles`) toolbar button that appears when a saved signature is available and the pad is blank or redrawn; and unified the "Pre-filled from your profile signature" helper badge across all signature touchpoints.
+  - **Cash Advance Acknowledgement Unification (`CashAdvanceDetailsModal.vue`):** Replaced legacy raw `<canvas>` and manual stroke capture handlers with reusable `<BaseSignaturePad />`, eliminating duplicate drawing logic (Axiom A-09) and enabling 1-click saved signature acknowledgement for disbursed cash advances.
+  - **Payout Modals Cleanup (`GrantPayoutModal.vue` & `PayoutDetailsModal.vue`):** Delegated pre-fill notification and re-application to `BaseSignaturePad.vue`, preventing duplicate badge markup.
+  - **Dedicated Test Seeder (`SignatureTestingSeeder.php`):** Created idempotent seeder populating demo signatures on `employee@example.com` and `sum@sbsi.com`, plus 4 test scenarios: disbursed Cash Advance (ready for employee signature acknowledgement), signed Cash Advance (ready for liquidation testing), approved Reimbursement (ready for admin payout grant with signature), and granted Reimbursement with Payout (ready for employee payout acknowledgement signature).
+  - **Automated Tests:** Authored Vitest unit tests in `BaseSignaturePad.test.js` & `CashAdvanceDetailsModal.test.js` and PHPUnit feature tests in `SignatureTestingSeederTest.php` (all passing).
+- **User Profile Module (Sprint 6 EP 12 / G2-104 to G2-110) (`apps/api` & `apps/web`):**
+  - **Database Migration (`users` table):** Added `first_name`, `middle_name`, `last_name`, `contact_number`, `signature` (`longText`), `signature_path`, and `last_login_at` columns with automatic `employee_id` (`EMP-000X`), `avatar_url`, and `has_signature` Eloquent model accessors.
+  - **Backend API & Dual-Sync Service (`ProfileService` & `ProfileController`):** Delivered `/api/profile` endpoints supporting profile updates (dual-synced with `capstone-auth-module`), photo upload/deletion (`supabase` bucket `avatars/`), hybrid signature saving/removal (`supabase` bucket `signatures/` + Base64 PNG), client-encrypted password updates (RSA forwarded to `capstone-auth-module`), and user-scoped login/change activity logs.
+  - **Login Tracking & Audit Trail Integration:** Updated `AuthenticateWithExternalService` to record `USER_LOGIN` audit logs once per unique JWT token (`jti` cache-locking) and registered profile mutation actions (`PROFILE_UPDATED`, `PROFILE_PHOTO_UPDATED`, `PROFILE_PHOTO_REMOVED`, `PASSWORD_CHANGED`, `SIGNATURE_UPDATED`, `SIGNATURE_REMOVED`) with field-level diff tracking in `AuditLogService`.
+  - **Frontend Profile Page (`ProfileView.vue`):** Built a responsive, clinical design layout featuring a top header card with avatar upload/removal, role pill, joined date, admin compliance notice (G2-105), and 3 integrated tabs:
+    1. **Personal & Work:** View/Edit personal details (first/middle/last name, contact number) while preserving read-only company fields (email, role, employee ID, department, date joined), paired with a Digital Signature card (with "Configured" status).
+    2. **Security:** Change password form with client-side payload pre-encryption, visibility toggles, and live 6-point complexity checklist.
+    3. **Activity Log:** 2-column feed displaying Last Login time callout, recent logins list, and chronological account changes with sanitized field diffs.
+  - **Removed Redundant Status Indicators:** Removed non-essential "Active" pulsing indicators and synthetic account status badges from the profile header, personal details, signature configuration, and login history cards to align with actual SERMS entity models.
+  - **Signature Pre-Filling Integration:** Enhanced `<BaseSignaturePad />` to draw existing Base64 PNG signatures on canvas and wired saved signature pre-filling into `GrantPayoutModal.vue` (`Granter's Signature`) and `PayoutDetailsModal.vue` (`Employee's Signature`) with clear/redraw support.
+  - **Top Bar Avatar Display:** Updated `AppLayout.vue` top bar to render the user's custom profile photo image with fallback to initials.
+  - **Distraction-Free Layout & Back Navigation (`AppLayout.vue` & `ProfileView.vue`):** Configured `/profile` route with `hideSidebar: true`, dynamically hiding the sidebar chrome, overlay, and toggle button to grant full width to the profile canvas; removed the breadcrumbs label and replaced it with a clean, borderless and transparent Back button (`<ArrowLeft /> Back`) that redirects the user to the last page they visited (with safe `/dashboard` fallback).
+  - **Comprehensive Automated Test Coverage:** Authored 10 PHPUnit feature tests in `ProfileControllerTest.php` and 8 Vitest unit tests in `ProfileView.test.js` & `AppLayout.test.js`, passing with 100% green status.
+
+## [1.9.9] - Nov 11, 2026
+
+### Fixed
+- **Cash Advance View Modal Document Name Truncation & Download (`apps/web`):**
+  - Resolved issue where clicking and downloading an attached document in `CashAdvanceDetailsModal.vue` caused the filename to be hidden or truncated.
+  - Implemented safe `documentDisplayName` and `hasDocument` computed properties that preserve the filename and prevent disappearing text when `store.fetchDocument()` resolves or when `file_name` is absent in API payloads.
+  - Added truncation formatting (`truncate max-w-[260px] sm:max-w-[420px]`, `shrink-0` on icons, `max-w-full`, and `:title="documentDisplayName"`) to ensure long document filenames do not overflow or push action icons off-screen.
+  - Integrated `getFileUrl()` from `@/utils/fileUtils` for robust Supabase storage URL resolution, added loading indicator state (`Loader2`), keyboard accessibility handlers (`@keydown.enter`, `@keydown.space`), and error toast handling.
+  - Added automated test cases in `CashAdvanceDetailsModal.test.js` covering document name truncation, preservation on download click, and fallback behavior.
+
+## [1.9.8] - Nov 9, 2026
+
+### Added
+- **Sidebar Branding Dashboard Navigation (`apps/web`):**
+  - Wrapped the SBSI logo and "Smart Expense Reimbursement Management System" text lockup in the sidebar header with `<RouterLink to="/dashboard">`.
+  - Added click handler to dismiss the mobile drawer (`mobileOpen = false`) when navigated on mobile devices.
+  - Added unit test in `apps/web/src/layouts/AppLayout.test.js` validating the brand link renders, targets `/dashboard`, and encloses the logo image and system label.
+
+## [1.9.7] - Nov 9, 2026
+
+### Changed
+- **Modal Action Button Layout Standardization (`apps/web` & `docs/DESIGN.md`):**
+  - Updated confirmation modal dialog action button containers from horizontally centered (`justify-center`) to right-aligned (`justify-end gap-3`) across `DeleteConfirmModal.vue`, `ConfirmModal.vue`, and `CashAdvanceDetailsModal.vue` acknowledge dialogs.
+  - Aligned all dialogs with `docs/DESIGN.md` Section VI.5 ("Right-Aligned Action Footer") and updated `DialogFooter.vue` design guidelines to mandate right-aligned footers (`sm:justify-end`) consistently across all modal types.
+- **Duplicate Receipt Modal Cancel Action (`apps/web`):**
+  - Added "Cancel" button beside "Upload New One" in `DuplicateReceiptModal.vue`.
+  - Added `handleCancel()` to close the modal, dispatch `remove-duplicate-receipt` to clean up the rejected duplicate from the UI without triggering the file uploader dialog, and redirect the user back to `/reimbursements`.
+  - Added unit test suite `apps/web/src/components/expenses/DuplicateReceiptModal.spec.js` covering modal event trigger, cancel action with `/reimbursements` navigation, and upload new action.
+
+## [1.9.6] - Nov 7, 2026
+
+### Added
+- **End-to-End Receipt Discount Extraction, Reconciliation & UI (`discount_amount` & `discount_type`):**
+  - **Database & API Persistence (`apps/api`):** Added migration `2026_11_07_000001_add_discount_fields_to_receipts_table.php` introducing `discount_amount` (`decimal(12, 2)`, default `0.00`) and `discount_type` (`string(50)`, nullable, default `'none'`, canonical values: `none`, `senior`, `pwd`, `student`, `promo`, `employee`, `other`). Updated `Receipt` model, `OcrCallbackRequest`, `OcrCallbackService`, `ReceiptService`, `ExpenseService`, and all receipt Store/Update/Resubmit request validators.
+  - **OCR Pipeline Discount Extraction & Classification (`ocr-pipeline`):** Expanded `LABELS["discount_amount"]` in `app/core/layout.py` and added `classify_discount_type()` to detect Senior Citizen (`SC`/`OSCA`), PWD, Student, Promo/Voucher/Coupon, Employee/Staff, and generic discounts. Updated `app/core/reconcile.py` (`resolve_money`, `_fill_gaps`, `_reconcile`), `app/core/items.py`, and `app/core/extraction.py` to sum multiple discount lines, preserve gross item prices, handle Philippine statutory VAT-exempt discount math (`Less VAT` separate from `discount_amount`), and emit `discount_amount` and `discount_type` in `OcrCallbackPayload`.
+  - **SERMS Discount UI & Admin Review (`apps/web`):** Added `DISCOUNT_TYPE_OPTIONS`, `normalizeDiscountType`, `formatDiscountTypeLabel`, and `receiptDiscountAmount` in `receiptUtils.js`. Added Discount Type dropdown and Discount Amount input to `ScannedReceiptsList.vue` and `ReceiptUploadModal.vue` (with automatic `0.00` reset/disable when `None` is selected, auto-switching to `Other` when a positive amount is typed, and `Total = max(0, sum(items) - discount_amount)` recalculation). Updated `BaseReceiptDetailModal.vue`, `ReceiptViewModal.vue`, `LiquidationReceiptModal.vue`, `ReceiptDetailsModal.vue`, and `useReimbursementDetails.js` so discounts display in receipt summaries and Admins can edit and save `discount_type` and `discount_amount` during reimbursement review.
+
+## [1.9.5] - Nov 6, 2026
+
+### Added
+- **Exported Technical Documentation Suite (`docs/`):**
+  - **`docs/TECH_STACK_AND_TOOLS.md`:** Comprehensive technical stack, framework, and tooling audit comparing SERMS (Laravel 13, Vue 3, MySQL 8.0, Redis) and `ocr-pipeline` (FastAPI, Celery, MongoDB 7, PostgreSQL 16 + pgvector, PaddleOCR, Tesseract, Ollama).
+  - **`docs/IMPLEMENTED_FEATURES.md`:** Complete functional feature inventory covering all 9 SERMS modules (reimbursements, segmented uploads, 3-strike revisions, cash advance approvals, liquidations, variance math, audit logging, export engine) and `ocr-pipeline` features (virtual strip tiling, blur checks, BIR classification, Ollama JSON assist, pgvector deduplication).
+  - **`docs/KNOWN_ISSUES_AND_LIMITATIONS.md`:** Operational risk ledger documenting OCR failure modes on handwritten and faded thermal slips, the $\le 1.5\text{B}-2.0\text{B}$ client AI parameter ceiling, CPU inference latency (5–20s), context truncation (2048/256 tokens), OpenMP CPU thrashing mitigation, Azure \$100 student budget constraints, and compliance gaps G-01 through G-12.
+  - **`docs/API_DOCUMENTATION_AND_INTEGRATION.md`:** Exhaustive REST API reference, Web Crypto API pre-encryption wire envelope (`RSA-OAEP` + `AES-256-GCM`), S2S webhook callback schemas, and PRS synchronization contracts.
+  - **`docs/TECHNICAL_IMPLEMENTATION_DETAILS.md` & `docs/TECHNICAL_IMPLEMENTATION_DETAILS.docx`:** Deep-dive code-level architecture guide covering the pure-PHP OAEP-SHA256 decoding engine, atomic idempotency MySQL locks, daily penalty calculations, Laplacian variance blur math, OpenCV/Tesseract strip stitching, OpenMP thread constraints, and pgvector cosine similarity algorithms. Refactored to native Word/Google Docs format (`.docx`) and standalone pre-rendered PNG diagram assets (`docs/diagrams/`) to resolve Google Docs rendering limitations.
+  - **`docs/diagrams/`:** Exported pre-rendered visual assets: `system_topology.png`, `daily_penalty_accrual.png`, `image_quality_gate.png`, and `end_to_end_sequence.png`.
+  - **`docs/index.md`:** Updated Document Suite registry with active references to the newly exported documentation files and compiled `.docx` guide.
+
+## [1.9.4] - Nov 6, 2026
+
+### Fixed
+- **Reimbursement Total Field Decimal Truncation:**
+  - Added reusable `truncateDecimal(value, digits = 2)` utility in `apps/web/src/utils/formatters.js` to strictly truncate numeric input/values to at most two decimal digits without rounding up centavos.
+  - Updated `ScannedReceiptsList.vue` reimbursement receipt Total input with `step="0.01"`, `min="0"`, real-time decimal truncation on `@input`, trailing-dot cleanup on `@blur`, and defensive sanitization in `handleAmountChange`.
+  - Updated `ReimbursementFormView.vue` and `receiptUtils.js` (`buildPrefilledReceiptDraft`) so pre-filled and edit-mode receipt amounts, as well as calculated total claims, are truncated to two decimal places.
+  - Authored comprehensive unit tests in `apps/web/src/utils/formatters.test.js`, `apps/web/src/components/reimbursements/ScannedReceiptsList.test.js`, and `apps/web/src/utils/receiptUtils.test.js`.
+
+## [1.9.3] - Oct 28, 2026
+
+### Added
+- **Receipt Upload Draft Lifecycle & 3-Layer Purge (`fix/cancel-receipt-not-saving`):**
+  - **Draft State & "My Expense" Isolation:** Added `is_draft` boolean column to `receipts` (migration `2026_10_28_000001_add_is_draft_to_receipts_table.php`). Unsubmitted uploads inside Reimbursement and Liquidation forms are saved as drafts (`is_draft = true`), hiding them from "My Expense" lists and suppressing premature notifications until the claim or liquidation report is submitted.
+  - **3-Layer Cancellation & Purge:** When a user removes a draft receipt or cancels an in-progress form, SERMS automatically:
+    1. Purges physical files from Supabase S3 storage (`Storage::disk('supabase')->delete($path)`).
+    2. Purges the 384-dimensional vector embedding in `ocr-pipeline` (`DELETE /api/duplicate/embeddings/{receipt_id}`) to prevent false semantic duplicate blocks upon re-upload.
+    3. Permanently deletes the draft database record and `file_hash`, recording `RECEIPT_DELETED` in audit logs.
+  - **Scheduled Orphan Pruner:** Created `receipts:prune-orphans --hours=24` artisan command (scheduled daily in `routes/console.php`) to automatically clean up abandoned draft receipts for users who close their browser tabs without clicking Cancel.
+  - **Frontend Form Cancellation Hooks:** Integrated draft cleanup into `useReceiptUploads.js`, `ReimbursementFormView.vue`, `FileUpload.vue`, `LiquidationSettlementForm.vue`, and `LiquidationsView.vue`, with strict guards ensuring receipts forwarded from "My Expense" or pre-existing liquidation receipts are never touched.
+
+## [1.9.2] - Oct 25, 2026
+
+### Added
+- **Receipt-Only Quality Guardrails & Manual Entry Override (`feat/receipt-guardrails`):**
+  - **Two-Stage Non-Receipt Detection:** Integrated multi-heuristic fast pre-OCR rejection (face cascade detection + color saturation vs horizontal text edge density) in `ocr-pipeline` alongside post-OCR token/keyword validation (`is_likely_receipt`), blocking non-receipts (selfies, scenery photos, screenshots) from polluting `pgvector` embeddings and MongoDB stores with `rejection_code: "not_a_receipt"`.
+  - **Differentiated Warning & User Copy:** Updated `ReceiptQualityRejectionModal.vue` to distinguish "Blurry Receipt Image Detected" vs "Unrecognized Receipt Image", providing tailored guidance for blurry versus non-receipt images and suppressing segmented upload suggestions for non-receipts.
+  - **Quality & Rejection Override Flow:** Enabled manual entry bypass across all three receipt upload flows (My Expense `ReceiptUploadModal.vue`, Reimbursements `useReceiptUploads.js`, and Liquidations `FileUpload.vue`). Users can click "Continue Anyway (Enter Manually)" to clear rejection status, mark `isQualityOverridden = true`, unlock the form for manual detail entry, and promote to `processed` upon save.
+  - **Automated Verification:** Added PHPUnit callback integration test (`test_not_a_receipt_ocr_sets_status_rejected`) and Vitest modal unit tests (`ReceiptQualityRejectionModal.test.js`), passing 100% of test suites.
+
+## [1.9.1] - Oct 24, 2026
+
+### Changed
+- **Test Account Credential Re-Seeding & Synchronization:** Re-provisioned Accounting/Finance test account `Summer Love` (`sum@sbsi.com`) in the central `capstone-auth-module` authentication service (`auth-service`) with credentials (`password`), assigned to the `Accounting` department with the `Admin` role to align with SERMS RBAC requirements. Synchronized documentation across `docs/Build.md` and `docs/agent-setup/SETUP-03-serms.md` to reference `password` consistently with `AGENTS.md`.
+
+## [1.9.0] - 2026-10-22
+
+### Added
+- **Idempotency & Duplicate Request Prevention System (`feat/idempotency`):**
+  - **Design Specification & Implementation Plan:** Authored `docs/superpowers/specs/2026-10-22-idempotency-system-design.md` and `docs/superpowers/plans/2026-10-22-idempotency-system.md` covering application-wide duplicate prevention across all mutating HTTP requests (`POST`, `PUT`, `PATCH`, `DELETE`).
+  - **Database Ledger Table (`idempotency_keys`):** Added migration `apps/api/database/migrations/2026_10_22_000001_create_idempotency_keys_table.php` and Eloquent model `App\Modules\Shared\Models\IdempotencyKey` with unique composite constraint on `(user_id, idempotency_key)`, SHA-256 request hashing, and 24-hour expiration indexing.
+  - **Global Middleware Engine (`EnsureIdempotency`):** Created `apps/api/app/Modules/Shared/Http/Middleware/EnsureIdempotency.php` registered globally in `apps/api/bootstrap/app.php`. Intercepts mutating requests, validates payload digest, returns cached deterministic replays with header `X-Idempotent-Replay: true`, flags payload mismatches with `422 Unprocessable Entity`, and halts concurrent in-flight collisions with `409 Conflict`.
+  - **Automated Ledger Pruning Command:** Created `php artisan idempotency:prune` (`apps/api/app/Console/Commands/PruneIdempotencyKeys.php`) for automatic purging of expired keys.
+  - **Concurrency & Strike Counter Hardening:** Added unique constraint on `cash_advance_disbursements.cash_advance_id` and added `lockForUpdate()` pessimistic row locks across `CashAdvanceService::rejectAdvance`, `ReimbursementService::rejectReimbursement`, and `LiquidationController::audit` to prevent race condition strike double-increments.
+  - **Client-Side Universal UUID Auto-Injection (`apiFetch.js`):** Updated `apps/web/src/utils/apiFetch.js` to automatically attach `X-Idempotency-Key` with a valid UUIDv4 token for all `POST`, `PUT`, `PATCH`, and `DELETE` requests while preserving custom caller keys and safe `GET` method exemptions.
+  - **Root Confirmation Modal Shielding:** Hardened `ConfirmModal.vue` with immediate synchronous `isClicked` lock, `DeleteConfirmModal.vue` with `loading`/`isSubmitting` prop enforcement and Enter-key suppression, and `DecisionConfirmationModal.vue` with `isSubmitting` enter-key guarding.
+  - **View & Composable Re-Entry Guards:** Bound `:loading="submitting"` to `ConfirmModal` in `ReimbursementFormView.vue` and `LiquidationsView.vue`, added re-entry short-circuits in `useReimbursementSubmit.js`, `useLiquidationSubmit.js`, and `useReimbursementDecisions.js`, and hardened action buttons in `CashAdvanceDetailsModal.vue`, `CashAdvanceFormView.vue`, `SegmentedReceiptUpload.vue`, `PolicyView.vue`, and `NotificationsView.vue`.
+  - **Automated Test Suites:** Authored comprehensive PHPUnit feature tests (`IdempotencyModelTest`, `IdempotencyMiddlewareTest`, `IdempotencyPruneCommandTest`, `ConcurrencyStrikeLockTest`) and Vitest test suites (`apiFetch.test.js`, `ConfirmModal.test.js`, `DeleteConfirmModal.test.js`), passing 100% of test assertions.
+
+## [1.8.0] - 2026-10-22
+
+### Added
+- **Request Audit Trail Section & Unified Lifecycle Timeline (`feat/audit-trail`):**
+  - **Zero-Overhead Batch Hydration:** Extended `AuditLogService` with `enrichReimbursements`, `enrichCashAdvances`, and `enrichLiquidations` to batch-hydrate records with an `audit_trail` array in single API queries (`GET /api/reimbursements`, `GET /api/cash-advances`, `GET /api/liquidations`, and their `{id}` detail endpoints) with zero extra HTTP round-trips when opening detail modals.
+  - **Dual-Source Chronological Synthesis:** Built hybrid chronological synthesis (`buildReimbursementLifecycleTrail`, `buildCashAdvanceLifecycleTrail`, `buildLiquidationLifecycleTrail`) that merges canonical immutable `audit_logs` records with existing entity timestamps and workflow action tables (`approvalActions`, `disbursements`, `penalties`), guaranteeing complete, unbroken chronological timelines for legacy and newly created records alike.
+  - **Role-Scoped IP Address Privacy Masking:** Configured `AuditLogService::formatLogEntry()` to restrict client IP address visibility exclusively to users with administrator privileges (`serms.reimbursements.manage` or accounting department membership). Regular employee accounts receive `ip_address: null` at the service layer before JSON transmission.
+  - **Field-Level Diff Sanitization:** Implemented `computeSanitizedDiff()` in `AuditLogService` to strip internal metadata (`id`, timestamps, credentials) from `before_state` vs `after_state` payloads, formatting currency and dates for clear audit viewing.
+  - **Mutation Logging Across Financial Workflows:** Added `AuditLogService::log()` calls across `ReimbursementService` (create, update, approve, reject, acknowledge), `CashAdvanceService` (create, approve, reject, disburse, acknowledge, update), and `LiquidationController` (update, hydrate) within active database transactions.
+  - **Reusable `<BaseAuditTrail />` Component (`apps/web/src/components/base/BaseAuditTrail.vue`):** Developed a unified, DSD.md-compliant audit trail component structured as a single clean table card with columns for `Time`, `User`, and `Action`. Features collapsible section header, event count badge, sort-order toggle (`Latest First` / `Oldest First`), subtle outline action badges, Medium Date Format timestamps, inline comments, field change diffs, and pagination capping (default 4 items with `"Show all X events"` / `"Show less"` toggle).
+  - **Universal Modal Integration:** Embedded `<BaseAuditTrail />` across all 5 request and settlement view modals:
+    1. `ReimbursementDetailsModal.vue`
+    2. `PayoutDetailsModal.vue`
+    3. `CashAdvanceDetailsModal.vue` (both Admin and Employee templates)
+    4. `LiquidationReviewModal.vue`
+    5. `LiquidationSettlementForm.vue`
+  - **Multi-Format Export Engine (`apps/web/src/utils/auditTrailExport.js`):** Built instant client-side export utility supporting XLSX (Excel Spreadsheet XML), CSV (RFC-4180 with UTF-8 BOM), PDF (pure PDF 1.4 corporate report with table pagination and SBSI header), and JSON downloads directly from the `<BaseAuditTrail />` header links (`Download Log: XLSX / CSV / PDF / JSON`).
+  - **Medium Date & Time Formatter (`apps/web/src/utils/formatters.js`):** Implemented `formatDateTime(dateStr, options)` rendering dates in the canonical Medium Date Format (e.g. `Oct 22, 2026 · 8:30 PM`) per SERMS Section 8.2 Guardrail 12.
+  - **Canonical Documentation Updates:** Documented the request audit trail hydration pattern, privacy masking, and UI component standards in `docs/SERMS.md` (Section 6.4) and `docs/SDD.md` (Sections 3 & 7).
+
 ## [1.7.0] - 2026-10-17
 
 ### Added
+- **Email Notifications and Settings Epic (EP 9: `G2-074` to `G2-079`) Implementation:** Delivered end-to-end email notification infrastructure using Brevo SMTP / Laravel Mail with queued worker processing (`SendNotificationEmailJob` with 3 retries, exponential backoff, and failure logging in `email_logs`), branded SBSI HTML Blade template (`sbsi-notification.blade.php`), `notification_settings` and `email_logs` database migrations and models, two-stage liquidation deadline reminders (`liquidation_due_soon` at `1..3` days, `liquidation_due_today` at `0` days, and overdue penalty alerts), role-scoped Notification Settings UI (`/settings/notifications`), user preference checking (`'skipped by user setting'`) keeping in-app notifications intact, and comprehensive backend and frontend test coverage.
+- **Reimbursement Submission Validation & Draft Safeguards:** Added client-side detection to prevent submission of stale or unpersisted temporary receipt IDs (`temp-*`), disabled submission buttons when any receipt is rejected or unpersisted, surfaced clear backend error messages in toast alerts, and added failed validation logging in `StoreReimbursementRequest`.
+- **Test Database In-Memory Safeguard:** Added explicit `:memory:` database, `array` session driver, and `array` cache store enforcement in `apps/api/config/database.php` and `tests/TestCase.php` to prevent Docker container environment variables (`DB_DATABASE=serms`) from creating disk artifacts and locking SQLite during automated test runs.
+- **Email Notifications and Settings Epic (EP 9: `G2-074` to `G2-079`) Implementation Plan:** Authored [`docs/superpowers/plans/2026-10-22-email-notifications-epic.md`](file:///c:/Projects/smart-expense-management-system/docs/superpowers/plans/2026-10-22-email-notifications-epic.md) covering Brevo SMTP / Laravel Mail queued dispatch (`SendNotificationEmailJob` with 3 retries and backoff), branded SBSI HTML Blade template (`sbsi-notification.blade.php`), `email_logs` and `notification_settings` tables, two-stage liquidation deadline reminders (`liquidation_due_soon` at `1..3` days left and `liquidation_due_today` at `0` days left, plus overdue alerts), role-scoped Notification Settings UI (`/settings/notifications`), and pre-send preference checking (`'skipped by user setting'`) with independent in-app notifications.
+- **Notifications Epic (EP 8: `G2-065` to `G2-073`) Implementation Plan:** Authored [`docs/superpowers/plans/2026-10-22-notifications-epic.md`](file:///c:/Projects/smart-expense-management-system/docs/superpowers/plans/2026-10-22-notifications-epic.md) covering the `notifications` table, `NotificationService` cross-module triggers (`Reimbursements`, `Cash Advances`, `Liquidations`, `My Expense`), daily scheduled liquidation deadline & overdue checks (`CheckLiquidationDeadlines`), anchored top-bar bell dropdown with 30-second auto-polling, `/notifications` history page, and deep-linking (`useNotificationDeepLink.js`) with `403 Forbidden` access-denied protection.
+- **Report Epic (EP 6: `G2-054` to `G2-061`) Single-Record PDF Export Engine:** Implemented zero-dependency pure PDF generator (`ReportGeneratorService`), `/api/reports/{type}/{id}` download endpoint (`ReportController`), strict RBAC & immutable audit logging (`AuditLogService::log()`), frontend export composable (`useReportExport.js`), and export triggers across Reimbursements, Cash Advances, and Liquidations. Resolved mojibake by adopting standard ISO `PHP ` currency formatting and eliminated all blue vertical sidebars in favor of a clean, minimalist corporate layout.
+- **Collision-Proof PDF Record Summary & Notes Box Geometry:** Fixed vertical coordinate overlap where `PURPOSE / BUSINESS RATIONALE` (and notes callout boxes) collided with the 5th scalar row (`AMOUNT ADVANCED` and `PENALTY AMOUNT`) in liquidation reports. Replaced legacy single-point anchor with top-down bounding geometry ensuring 14pt vertical separation, clean word-wrapping up to 2 lines, and dynamic card bottom boundary calculation.
+- **Liquidation Countdown Progress Tracker Test Seeder:** Added [`LiquidationCountdownTestSeeder.php`](file:///c:/Projects/smart-expense-management-system/apps/api/app/Modules/Liquidations/Database/Seeders/LiquidationCountdownTestSeeder.php) (and alias [`LiquidationCountdownSeeder.php`](file:///c:/Projects/smart-expense-management-system/apps/api/database/seeders/LiquidationCountdownSeeder.php)) to seed target account `summer love` (`sum@sbsi.com`) with liquidations having due dates 10 days from now (`2026-10-30`) and 1 month from now (`2026-11-20`) with associated cash advances, disbursements, and receipts to test the countdown progress tracker (`DaysLeftBadge.vue`). Covered with feature test suite [`LiquidationCountdownTestSeederTest.php`](file:///c:/Projects/smart-expense-management-system/apps/api/tests/Feature/LiquidationCountdownTestSeederTest.php).
 - **ONE UI Design System Specification:** Placed `documentations/DESIGN.md` — the canonical ONE UI Design System & Frontend Guardrails specification covering logo/brand marks, typography (Poppins/Montserrat), canonical colour palette, 8px spacing grid, elevation/shadow levels, component standards (sidebar, header, metric cards, modals, forms, selects, toasts, banners, tables, badges), interaction state matrix, and loading state bifurcation.
 - **Specialized Contextual Color Tokens:** Added `primary.hover` (`#2F2F8E`), `primary.pressed` (`#1E1E66`), `destructive.hover` (`#DC2626`), `destructive.pressed` (`#B91C1C`), `warning.banner` (`#FFFDF0`), `warning.icon` (`#D97706`), `avatar` (`#A7A7C8`), and `eyebrow` (`#8086A3`) to `tailwind.config.js` and `index.css` `:root` variables per Section III of DESIGN.md.
 
 ### Changed
+- **Countdown Progress Tracker Dynamic Status Colors & Persistent Visibility (`g2-063`):** Updated [`DaysLeftBadge.vue`](file:///c:/Projects/smart-expense-management-system/apps/web/src/components/base/DaysLeftBadge.vue) to always display when a valid due date is present (removed `isSettledOrLiquidated` exclusion). Implemented a 3-tier dynamic color palette: **Green** (`bg-emerald-50 text-emerald-700 border-emerald-200`, fill `bg-emerald-600`) when $> 10$ days remain; **Yellow** (`bg-amber-50 text-amber-700 border-amber-200`, fill `bg-amber-500`) when in the middle ($4 - 10$ days remain); and **Red** (`bg-red-50 text-red-700 border-red-200`, fill `bg-red-600`) when close to deadline ($\le 3$ days) or overdue. Unit test suite [`DaysLeftBadge.test.js`](file:///c:/Projects/smart-expense-management-system/apps/web/src/components/base/DaysLeftBadge.test.js) updated to validate all states and thresholds.
 - **Toast Hover-Pause (Section VI.8):** Implemented pause-on-hover timer logic in `useToast.js` — timer pauses when cursor enters toast, resumes on leave. Changed default auto-dismiss duration from 5000ms to 4000ms per spec. Added slide-out-right leave animation to `ToastNotification.vue`.
 - **Button Interaction States (Section VII):** Updated `Button.vue` (shadcn) — primary uses `hover:bg-primary-hover` / `active:bg-primary-pressed`, destructive uses `hover:bg-destructive-hover` / `active:bg-destructive-pressed`, secondary/outline use default border (`#CBD5E1`) with `hover:border-slate-300` (`#94A3B8`). Updated `.btn-primary`, `.btn-cta`, `.btn-danger`, `.btn-secondary` CSS utility classes with exact spec hover/pressed colours and `scale(0.98)`.
 - **DeleteConfirmModal (Section VI.5):** Refactored to centered header pattern with circular status icon badge on top, BaseButton components replacing raw `<button>` elements, and shadcn Dialog wrapper.

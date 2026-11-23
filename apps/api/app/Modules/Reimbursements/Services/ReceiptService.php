@@ -5,14 +5,18 @@ namespace App\Modules\Reimbursements\Services;
 use App\Modules\Users\Models\User;
 use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\AuditLogs\Services\AuditLogService;
-use App\Modules\Ai\Services\MockOcrService;
+use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Jobs\DispatchReceiptToAiService;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
+use App\Modules\Shared\Services\CmsVendorVerificationService;
+use App\Modules\Shared\Services\CurrencyConversionService;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
+use App\Modules\Ai\Contracts\AsyncOcrEngineInterface;
 
 class ReceiptService
 {
@@ -24,6 +28,11 @@ class ReceiptService
     {
         $query = Receipt::with('category', 'uploader', 'items')
             ->withCount('reimbursements');
+
+        // Exclude uncommitted drafts so in-flight form uploads never leak into My Expense
+        if (empty($filters['include_drafts'])) {
+            $query->where('receipts.is_draft', false);
+        }
 
         if (!$canManage || ($filters['scope'] ?? null) === 'mine') {
             $query->where('uploaded_by', $user->id);
@@ -89,16 +98,16 @@ class ReceiptService
     }
 
     /**
-     * Get a single receipt by ID, ensuring user owns it unless they can manage.
+     * Get a single receipt by ID, ensuring only the owner can view their My Expense receipt.
      */
-    public function getReceipt(User $user, int $id, bool $canManage)
+    public function getReceipt(User $user, int $id, bool $canManage = false)
     {
         $receipt = Receipt::with('category', 'uploader', 'items')
             ->withCount('reimbursements')
             ->findOrFail($id);
 
-        if (!$canManage && $receipt->uploaded_by !== $user->id) {
-            throw new AuthorizationException('Unauthorized to view this receipt.');
+        if ($receipt->uploaded_by !== $user->id) {
+            throw new AuthorizationException('Access denied. You do not have permission to view this record.');
         }
 
         return $receipt;
@@ -111,63 +120,52 @@ class ReceiptService
     {
         return DB::transaction(function () use ($user, $validated, $file) {
             $files = is_array($file) ? $file : [$file];
-            $storedFile = $this->storeReceiptFiles($files);
+            $storedFile = $this->storeAndValidateUploadedFiles($files);
 
-            $this->validateDuplicateReceipt($storedFile['file_hash']);
+            $isDraft = (bool) ($validated['is_draft'] ?? false);
 
-            $isMock = MockOcrService::isMockRequest($validated);
-            $mock = $isMock ? MockOcrService::generate($files[0]?->getClientOriginalName() ?? 'receipt.jpg') : [];
+            try {
+                $receiptPayload = app(CurrencyConversionService::class)->enrichReceiptPayload([
+                    'uploaded_by'          => $user->id,
+                    'file_path'            => $storedFile['file_path'],
+                    'file_hash'            => $storedFile['file_hash'],
+                    'file_type'            => $storedFile['file_type'],
+                    'file_size_bytes'      => $storedFile['file_size_bytes'],
+                    'expense_category_id'  => $validated['expense_category_id'] ?? null,
+                    'vendor_name'          => $validated['vendor_name'] ?? null,
+                    'transaction_date'     => $validated['transaction_date'] ?? null,
+                    'total_amount'         => $validated['total_amount'] ?? null,
+                    'subtotal'             => $validated['subtotal'] ?? null,
+                    'vat_amount'           => $validated['vat_amount'] ?? null,
+                    'discount_amount'      => $validated['discount_amount'] ?? 0,
+                    'discount_type'        => $validated['discount_type'] ?? 'none',
+                    'tin'                  => $validated['tin'] ?? null,
+                    'invoice_number'       => $validated['invoice_number'] ?? null,
+                    'vat_classification'   => $validated['vat_classification'] ?? null,
+                    'currency'             => $validated['currency'] ?? null,
+                    'location'             => $validated['location'] ?? null,
+                    'ocr_confidence_score' => null,
+                    'ocr_flagged'          => false,
+                    'is_archived'          => false,
+                    'is_draft'             => $isDraft,
+                    'status'               => 'processing',
+                ]);
 
-            $receipt = Receipt::create([
-                'uploaded_by'          => $user->id,
-                'file_path'            => $storedFile['file_path'],
-                'file_hash'            => $storedFile['file_hash'],
-                'file_type'            => $storedFile['file_type'],
-                'file_size_bytes'      => $storedFile['file_size_bytes'],
-                'expense_category_id'  => $validated['expense_category_id'] ?? null,
-                'vendor_name'          => $validated['vendor_name'] ?? $mock['vendor_name'] ?? null,
-                'transaction_date'     => $validated['transaction_date'] ?? $mock['transaction_date'] ?? null,
-                'total_amount'         => $validated['total_amount'] ?? $mock['total_amount'] ?? null,
-                'vat_amount'           => $validated['vat_amount'] ?? $mock['vat_amount'] ?? null,
-                'tin'                  => $validated['tin'] ?? $mock['tin'] ?? null,
-                'invoice_number'       => $validated['invoice_number'] ?? $mock['invoice_number'] ?? null,
-                'vat_classification'   => $validated['vat_classification'] ?? $mock['vat_classification'] ?? null,
-                'currency'             => $validated['currency'] ?? $mock['currency'] ?? ($isMock ? 'PHP' : null),
-                'location'             => $validated['location'] ?? $mock['location'] ?? null,
-                'ocr_confidence_score' => $mock['ocr_confidence_score'] ?? null,
-                'ocr_flagged'          => false,
-                'is_archived'          => false,
-                'status'               => $isMock ? 'processed' : 'processing',
-            ]);
+                $receipt = Receipt::create($receiptPayload);
+            } catch (\Throwable $e) {
+                $this->cleanupStoredFiles($storedFile['file_path']);
+                throw $e;
+            }
 
             if (!empty($validated['items'])) {
                 $receipt->items()->createMany($validated['items']);
-            } elseif ($isMock && !empty($mock['items'])) {
-                $receipt->items()->createMany($mock['items']);
-            }
-
-            if ($isMock) {
-                $receipt->load('category', 'items', 'uploader');
-
-                AuditLogService::log(
-                    actorId: $user->id,
-                    actorRole: $user->role,
-                    actionType: 'RECEIPT_CREATED',
-                    entityType: 'receipt',
-                    entityId: $receipt->id,
-                    beforeState: null,
-                    afterState: $receipt->toArray(),
-                    ipAddress: request()->ip(),
-                );
-
-                return $receipt;
             }
 
             // Dispatch to the external AI OCR + categorization service (callback-based;
             // runs inline by default so it works without a dedicated queue worker).
             $this->dispatchOcrJob($receipt);
 
-            $receipt->load('category', 'items', 'uploader');
+            $receipt->refresh()->load('category', 'items', 'uploader');
 
             // Audit Log
             AuditLogService::log(
@@ -180,6 +178,19 @@ class ReceiptService
                 afterState: $receipt->toArray(),
                 ipAddress: request()->ip(),
             );
+
+            if (!$isDraft && !$receipt->isRejectedStatus()) {
+                NotificationService::notifyUser(
+                    userId: $user->id,
+                    type: 'receipt_uploaded',
+                    module: 'My Expense',
+                    title: 'Receipt Uploaded',
+                    message: "Your My Expense receipt #{$receipt->id} was uploaded and sent for OCR processing.",
+                    recordLink: "/my-expense?view={$receipt->id}",
+                    recordType: 'receipt',
+                    recordId: $receipt->id
+                );
+            }
 
             return $receipt;
         });
@@ -203,12 +214,19 @@ class ReceiptService
                 throw new AuthorizationException('Unauthorized.');
             }
 
+            if (!$canManage && $receipt->isRejectedStatus()) {
+                throw ValidationException::withMessages([
+                    'status' => ['Rejected receipts cannot be edited or overridden. Please delete this receipt and upload a clearer copy.'],
+                ]);
+            }
+
             // Admin-only fields: admin_notes may only be set by admins.
             // A non-admin owner may promote their own (non-attached) receipt to
             // 'processed' to correct a poor OCR result, but no other status change
             // is permitted. An attached receipt must keep mirroring its
             // reimbursement, so the promotion is ignored for attached receipts.
-            $updateData = collect($data);
+            $updateData = collect($data)
+                ->except(['exchange_rate', 'converted_php_amount', 'exchange_rate_date', 'exchange_rate_source']);
             if (!$canManage) {
                 $updateData = $updateData->except(['admin_notes']);
                 if ($updateData->has('status')) {
@@ -223,9 +241,33 @@ class ReceiptService
             }
             $updateData = $updateData->toArray();
 
+            if (array_key_exists('is_draft', $updateData)) {
+                $isDraft = filter_var($updateData['is_draft'], FILTER_VALIDATE_BOOLEAN);
+                if (!$isDraft || ($canManage && !$receipt->reimbursements()->exists())) {
+                    $updateData['is_draft'] = $isDraft;
+                } else {
+                    unset($updateData['is_draft']);
+                }
+            }
+
             // Normalize vat_classification to lowercase when present.
             if (array_key_exists('vat_classification', $updateData)) {
                 $updateData['vat_classification'] = strtolower((string) $updateData['vat_classification']);
+            }
+
+            $amountChanged = array_key_exists('total_amount', $updateData)
+                && (
+                    ($updateData['total_amount'] === null) !== ($receipt->total_amount === null)
+                    || ($updateData['total_amount'] !== null && round((float) $updateData['total_amount'], 2) !== round((float) $receipt->total_amount, 2))
+                );
+            $currencyChanged = array_key_exists('currency', $updateData)
+                && $updateData['currency'] !== null
+                && trim((string) $updateData['currency']) !== ''
+                && strtoupper(trim((string) $updateData['currency'])) !== strtoupper((string) ($receipt->currency ?? 'PHP'));
+            $needsBackfill = $receipt->converted_php_amount === null && $receipt->total_amount !== null;
+
+            if ($amountChanged || $currencyChanged || $needsBackfill) {
+                $updateData = app(CurrencyConversionService::class)->enrichReceiptPayload($updateData, $receipt);
             }
 
             $beforeState = $receipt->toArray();
@@ -241,6 +283,11 @@ class ReceiptService
                 }
             }
 
+            if ((array_key_exists('vendor_name', $updateData) || array_key_exists('tin', $updateData))
+                && ($receipt->vendor_name || $receipt->tin)) {
+                app(CmsVendorVerificationService::class)->verifyAndTagReceipt($receipt);
+            }
+
             // Audit Log (required by AGENTS.md for every DB mutation).
             AuditLogService::log(
                 actorId: $user->id,
@@ -252,6 +299,34 @@ class ReceiptService
                 afterState: $receipt->fresh()->toArray(),
                 ipAddress: request()->ip(),
             );
+
+            if ($canManage && (int) $receipt->uploaded_by !== (int) $user->id) {
+                if (!empty($updateData['admin_notes'])) {
+                    NotificationService::notifyUser(
+                        userId: (int) $receipt->uploaded_by,
+                        type: 'receipt_admin_note',
+                        module: 'My Expense',
+                        title: 'Admin Note on Receipt',
+                        message: "Admin note added to Receipt #{$receipt->id}: \"{$updateData['admin_notes']}\"",
+                        recordLink: "/my-expense?view={$receipt->id}",
+                        recordType: 'receipt',
+                        recordId: $receipt->id
+                    );
+                }
+
+                if (!empty($updateData['status'])) {
+                    NotificationService::notifyUser(
+                        userId: (int) $receipt->uploaded_by,
+                        type: "receipt_{$updateData['status']}",
+                        module: 'My Expense',
+                        title: 'Receipt Status Updated',
+                        message: "Your Receipt #{$receipt->id} status was updated to {$updateData['status']}.",
+                        recordLink: "/my-expense?view={$receipt->id}",
+                        recordType: 'receipt',
+                        recordId: $receipt->id
+                    );
+                }
+            }
 
             return $receipt->fresh(['category', 'items', 'uploader'])
                 ->loadCount('reimbursements');
@@ -284,6 +359,12 @@ class ReceiptService
                 throw new AuthorizationException('Unauthorized. You can only resubmit your own receipts.');
             }
 
+            if ($receipt->isRejectedStatus()) {
+                throw ValidationException::withMessages([
+                    'status' => ['Rejected receipts cannot be edited or resubmitted. Please delete this receipt and upload a clearer copy.'],
+                ]);
+            }
+
             if (in_array($receipt->status, ['approved', 'pending', 'pending-admin-re-review', 'final-rejected'], true)) {
                 throw ValidationException::withMessages([
                     'status' => ['Receipts with status approved, pending, pending-admin-re-review, or final-rejected cannot be edited.'],
@@ -301,105 +382,20 @@ class ReceiptService
             }
 
             $updateData = collect($data)
-                ->except(['file', 'items'])
+                ->except(['file', 'items', 'exchange_rate', 'converted_php_amount', 'exchange_rate_date', 'exchange_rate_source'])
                 ->toArray();
 
             if (array_key_exists('vat_classification', $updateData)) {
                 $updateData['vat_classification'] = strtolower((string)$updateData['vat_classification']);
             }
 
-            // Metadata-only edit (no replacement file): preserve legacy behavior.
-            if (!$file) {
-                $updateData['status'] = 'processed';
-                $updateData['ocr_flagged'] = false;
-
-                $beforeState = $receipt->toArray();
-
-                $receipt->update($updateData);
-
-                if (array_key_exists('items', $data)) {
-                    $receipt->items()->delete();
-
-                    if (!empty($data['items'])) {
-                        $receipt->items()->createMany($data['items']);
-                    }
-                }
-
-                AuditLogService::log(
-                    actorId: $user->id,
-                    actorRole: $user->role,
-                    actionType: 'RECEIPT_UPDATED',
-                    entityType: 'receipt',
-                    entityId: $receipt->id,
-                    beforeState: $beforeState,
-                    afterState: $receipt->fresh()->toArray(),
-                    ipAddress: request()->ip(),
-                );
-
-                return $receipt->fresh(['category', 'items', 'uploader'])
-                    ->loadCount('reimbursements');
-            }
-
-            // New file supplied → decide duplicate vs. OCR re-run.
-            //
-            // We compute the file hash FIRST and short-circuit duplicates
-            // before persisting the uploaded file to storage. This avoids
-            // leaving orphan files on the storage disk for receipts that are
-            // rejected as duplicates (the previous code stored the file and
-            // only then detected the collision).
-            $beforeState = $receipt->toArray();
-
-            $fileHash = hash_file('sha256', $file->getRealPath());
-
-            // Collision with a DIFFERENT, non-deleted receipt → flag as duplicate.
-            if ($this->duplicateReceiptExists($fileHash, $receipt->id)) {
-                $updateData['status'] = 'rejected';
-                $updateData['rejection_code'] = 'duplicate';
-                $updateData['rejection_reason'] = 'Duplicate receipt detected based on file hash.';
-                $updateData['ocr_flagged'] = true;
-
-                $receipt->update($updateData);
-
-                if (array_key_exists('items', $data)) {
-                    $receipt->items()->delete();
-
-                    if (!empty($data['items'])) {
-                        $receipt->items()->createMany($data['items']);
-                    }
-                }
-
-                AuditLogService::log(
-                    actorId: $user->id,
-                    actorRole: $user->role,
-                    actionType: 'RECEIPT_OCR_REJECTED',
-                    entityType: 'receipt',
-                    entityId: $receipt->id,
-                    beforeState: $beforeState,
-                    afterState: $receipt->fresh()->toArray(),
-                    ipAddress: request()->ip(),
-                );
-
-                return $receipt->fresh(['category', 'items', 'uploader'])
-                    ->loadCount('reimbursements');
-            }
-
-            // Not a duplicate → persist the file, then re-run OCR.
-            try {
-                $newFile = $this->storeReceiptFiles([$file]);
-            } catch (\Throwable $e) {
-                Log::error('resubmitReceipt: failed to persist uploaded file to storage.', [
-                    'receipt_id' => $receipt->id,
-                    'error' => $e->getMessage(),
-                ]);
-                throw $e;
-            }
-
-            $updateData = array_merge($updateData, $newFile);
-
-            // Same image re-uploaded for this receipt, or a brand-new image →
-            // silently re-run OCR.
-            $updateData['status'] = 'processing';
+            // Metadata-only edit (no replacement file).
+            $updateData['status'] = 'processed';
             $updateData['ocr_flagged'] = false;
+
+            $updateData = app(CurrencyConversionService::class)->enrichReceiptPayload($updateData, $receipt);
+
+            $beforeState = $receipt->toArray();
 
             $receipt->update($updateData);
 
@@ -411,13 +407,15 @@ class ReceiptService
                 }
             }
 
-            // Dispatch OCR (runs inline by default — no dedicated worker required).
-            $this->dispatchOcrJob($receipt);
+            if ((array_key_exists('vendor_name', $updateData) || array_key_exists('tin', $updateData))
+                && ($receipt->vendor_name || $receipt->tin)) {
+                app(CmsVendorVerificationService::class)->verifyAndTagReceipt($receipt);
+            }
 
             AuditLogService::log(
                 actorId: $user->id,
                 actorRole: $user->role,
-                actionType: 'RECEIPT_OCR_RETRY',
+                actionType: 'RECEIPT_UPDATED',
                 entityType: 'receipt',
                 entityId: $receipt->id,
                 beforeState: $beforeState,
@@ -468,6 +466,50 @@ class ReceiptService
     }
 
     /**
+     * Upload files to Supabase, compute SHA-256 hashes, and validate against duplicates.
+     * Cleans up any uploaded files in Supabase if storage or duplicate validation fails.
+     *
+     * @param  array<int, mixed> $files
+     * @return array{file_path: array<int, string>, file_hash: array<int, string>, file_type: array<int, string>, file_size_bytes: array<int, int>}
+     */
+    public function storeAndValidateUploadedFiles(array $files): array
+    {
+        $storedFile = $this->storeReceiptFiles($files);
+
+        try {
+            $this->validateUploadDuplicates($storedFile['file_hash']);
+        } catch (\Throwable $e) {
+            $this->cleanupStoredFiles($storedFile['file_path']);
+            throw $e;
+        }
+
+        return $storedFile;
+    }
+
+    /**
+     * Best-effort cleanup of stored Supabase object paths when an upload or transaction fails.
+     *
+     * @param  array<int, string> $paths
+     */
+    public function cleanupStoredFiles(array $paths): void
+    {
+        foreach ($paths as $path) {
+            if (!$path || str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+                continue;
+            }
+
+            try {
+                Storage::disk('supabase')->delete($path);
+            } catch (\Throwable $e) {
+                Log::warning('ReceiptService: failed to cleanup stored file from Supabase', [
+                    'path'  => $path,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    /**
      * Store uploaded files on the configured Supabase disk and return DB column arrays.
      */
     private function storeReceiptFiles(array $files): array
@@ -477,18 +519,25 @@ class ReceiptService
         $fileTypes = [];
         $fileSizes = [];
 
-        foreach ($files as $file) {
-            if (!$file) continue;
+        try {
+            foreach ($files as $file) {
+                if (!$file) {
+                    continue;
+                }
 
-            $fileType = $file->extension();
-            if ($fileType === 'jpg') {
-                $fileType = 'jpeg';
+                $fileType = $file->extension();
+                if ($fileType === 'jpg') {
+                    $fileType = 'jpeg';
+                }
+
+                $filePaths[] = $file->store('receipts', 'supabase');
+                $fileHashes[] = hash_file('sha256', $file->getRealPath());
+                $fileTypes[] = $fileType;
+                $fileSizes[] = $file->getSize();
             }
-
-            $filePaths[] = $file->store('receipts', 'supabase');
-            $fileHashes[] = hash_file('sha256', $file->getRealPath());
-            $fileTypes[] = $fileType;
-            $fileSizes[] = $file->getSize();
+        } catch (\Throwable $e) {
+            $this->cleanupStoredFiles($filePaths);
+            throw $e;
         }
 
         return [
@@ -514,7 +563,7 @@ class ReceiptService
      * surrounding DB transaction or leaves the user guessing — the receipt is left
      * in a clear `failed` state (surfaced by the UI) instead of silently stalling.
      */
-    private function dispatchOcrJob(Receipt $receipt): void
+    public function dispatchOcrJob(Receipt $receipt): void
     {
         $connection = config('services.ai_service.ocr_queue_connection', 'sync');
 
@@ -537,6 +586,26 @@ class ReceiptService
                 'ocr_flagged'      => true,
                 'rejection_code'   => 'ocr_failed',
                 'rejection_reason' => 'OCR could not be started. Please retry OCR.',
+            ]);
+        }
+    }
+
+    /**
+     * Purge physical files from storage and vector embedding from ocr-pipeline.
+     */
+    public function purgeReceiptArtifacts(Receipt $receipt): void
+    {
+        // 1. Delete physical files from Supabase storage
+        $filePaths = is_array($receipt->file_path) ? $receipt->file_path : (array) $receipt->file_path;
+        $this->cleanupStoredFiles($filePaths);
+
+        // 2. Purge AI vector embedding from ocr-pipeline pgvector
+        try {
+            app(AsyncOcrEngineInterface::class)->deleteReceiptEmbedding($receipt->id);
+        } catch (\Throwable $e) {
+            Log::warning('purgeReceiptArtifacts: failed to purge AI embedding', [
+                'receipt_id' => $receipt->id,
+                'error'      => $e->getMessage(),
             ]);
         }
     }
@@ -569,8 +638,8 @@ class ReceiptService
 
             $beforeState = $receipt->toArray();
             
-            // Soft delete the receipt
-            $receipt->delete();
+            // Purge physical files and ocr-pipeline vector embedding
+            $this->purgeReceiptArtifacts($receipt);
 
             // Audit Log
             AuditLogService::log(
@@ -583,6 +652,13 @@ class ReceiptService
                 afterState: ['deleted_at' => now()->toDateTimeString()],
                 ipAddress: $ipAddress
             );
+
+            if ($receipt->is_draft) {
+                $receipt->items()->delete();
+                $receipt->forceDelete();
+            } else {
+                $receipt->delete();
+            }
         });
     }
 }

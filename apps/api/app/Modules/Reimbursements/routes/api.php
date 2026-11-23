@@ -36,6 +36,7 @@ Route::middleware(['auth.external'])->group(function () {
     Route::post('/{id}/approve', [ReimbursementController::class, 'approve']);
     Route::post('/{id}/reject', [ReimbursementController::class, 'reject']);
     Route::post('/{id}/grant', [ReimbursementController::class, 'grant']);
+    Route::post('/{id}/acknowledge', [ReimbursementController::class, 'acknowledge']);
 
     // Dynamic routes must be at the bottom
     Route::get('/{id}', [ReimbursementController::class, 'show']);

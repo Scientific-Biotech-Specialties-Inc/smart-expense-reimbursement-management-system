@@ -1,18 +1,29 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from "vue";
+import { ref, reactive, computed, onMounted, nextTick } from "vue";
 import { useRouter } from "vue-router";
+import { useAuthStore } from "@/stores/auth";
 import { useCashAdvanceStore } from "@/stores/cashAdvance";
 import { useToast } from "@/composables/useToast";
 import ConfirmModal from "@/components/base/ConfirmModal.vue";
+import CmsContractSelect from "@/components/base/CmsContractSelect.vue";
+import SbsiReportDocumentEditor from "@/components/base/SbsiReportDocumentEditor.vue";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
 import {
+  useRevisionGuard,
+  isManualReportTemplate,
+  isRevisionStatus,
+  serializeFileAttachment,
+  serializeTemplateData,
+} from "@/composables/useRevisionGuard";
+import {
+  createDefaultTemplateData,
+  validateTemplateData,
+} from "@/utils/sbsiReportTemplateUtils";
+import { createSbsiReportPdfFile } from "@/utils/sbsiPdfGenerator";
+import {
   ArrowLeft,
-  FileText,
-  UploadCloud,
   Info,
   Send,
-  Calendar,
-  X,
 } from "lucide-vue-next";
 
 const props = defineProps({
@@ -23,20 +34,112 @@ const props = defineProps({
 });
 
 const router = useRouter();
+const auth = useAuthStore();
 const store = useCashAdvanceStore();
 const { addToast } = useToast();
 
 const submitting = ref(false);
+const isEditMode = computed(() => !!props.id);
+const loadingRequest = ref(isEditMode.value);
+const existingStatus = ref("");
+const isReviseMode = computed(() => isRevisionStatus(existingStatus.value));
+
 const form = reactive({
   purpose: "",
+  contract_id: null,
+  client_name: "",
   amount: "",
   expected_disbursement_date: "",
   expected_liquidation_date: "",
   documents: [],
 });
-const fileInput = ref(null);
 
-const isEditMode = computed(() => !!props.id);
+const manualReportFile = ref(null);
+const isManualMode = ref(false);
+const reportTemplateData = ref(
+  isEditMode.value
+    ? null
+    : createDefaultTemplateData("cash-advance", {
+        user: auth.user,
+        purpose: form.purpose,
+        totalAmount: form.amount,
+        disbursementDate: form.expected_disbursement_date,
+        liquidationDeadline: form.expected_liquidation_date,
+      }),
+);
+
+function handleEditorModeUpdate(nextMode) {
+  const manual = nextMode === "manual";
+  isManualMode.value = manual;
+  if (!manual) {
+    manualReportFile.value = null;
+    form.documents = [];
+  }
+}
+
+function handleReportFileUpdate(file) {
+  manualReportFile.value = file;
+  form.documents = file ? [file] : [];
+  if (file) {
+    isManualMode.value = true;
+  }
+}
+
+function handleTemplatePurposeUpdate(val) {
+  if (val !== form.purpose) {
+    form.purpose = val;
+  }
+}
+
+function handleTemplateTotalUpdate(val) {
+  const numeric = Number(val) || 0;
+  if (numeric !== (Number(form.amount) || 0)) {
+    form.amount = numeric > 0 ? numeric : "";
+  }
+}
+
+function handleTemplateDisbursementUpdate(val) {
+  if (val !== form.expected_disbursement_date) {
+    form.expected_disbursement_date = val;
+  }
+}
+
+function handleTemplateLiquidationUpdate(val) {
+  if (val !== form.expected_liquidation_date) {
+    form.expected_liquidation_date = val;
+  }
+}
+
+const isTemplateValid = computed(() => validateTemplateData(reportTemplateData.value).valid);
+const hasValidAttachment = computed(() =>
+  isManualMode.value
+    ? Boolean(manualReportFile.value) && form.documents.length > 0
+    : isTemplateValid.value,
+);
+
+const {
+  isRevisionUnchanged,
+  captureBaseline: captureRevisionBaseline,
+} = useRevisionGuard({
+  isRevise: isReviseMode,
+  getSnapshot: () => ({
+    purpose: form.purpose,
+    contract_id: form.contract_id,
+    client_name: form.client_name,
+    amount:
+      form.amount === "" || form.amount === null || form.amount === undefined
+        ? ""
+        : Number.isFinite(Number(form.amount))
+          ? Number(form.amount)
+          : String(form.amount),
+    expected_disbursement_date: form.expected_disbursement_date,
+    expected_liquidation_date: form.expected_liquidation_date,
+    isManualMode: isManualMode.value,
+    documents: serializeFileAttachment(form.documents),
+    manualReportFile: serializeFileAttachment(manualReportFile.value),
+    reportTemplateData: serializeTemplateData(reportTemplateData.value),
+  }),
+});
 const todayDate = computed(() => formatDateInputValue(new Date()));
 const liquidationMinDate = computed(() => {
   if (!form.expected_disbursement_date) {
@@ -56,6 +159,17 @@ const liquidationMinDate = computed(() => {
     : todayDate.value;
 });
 
+const dateRangeError = computed(() => {
+  if (
+    form.expected_disbursement_date &&
+    form.expected_liquidation_date &&
+    form.expected_disbursement_date >= form.expected_liquidation_date
+  ) {
+    return "Liquidation deadline must be after the disbursement date.";
+  }
+  return "";
+});
+
 const isDirty = computed(() => {
   return (
     form.purpose !== "" ||
@@ -67,6 +181,7 @@ const isDirty = computed(() => {
 });
 
 const isSubmitted = ref(false);
+const showSubmitConfirmModal = ref(false);
 
 const {
   showConfirmModal,
@@ -98,27 +213,85 @@ function addDays(date, days) {
 
 onMounted(async () => {
   if (isEditMode.value) {
+    loadingRequest.value = true;
+    let hydrated = false;
     try {
       const data = await store.fetchRequest(props.id);
       if (data) {
-        form.purpose = data.purpose;
-        form.amount = data.amount;
+        existingStatus.value = data.status || "";
+        form.purpose = data.purpose || "";
+        form.contract_id = data.contract_id ?? null;
+        form.client_name = data.client_name || "";
+        form.amount = data.amount ?? "";
         if (data.expected_disbursement_date) {
           form.expected_disbursement_date = new Date(data.expected_disbursement_date).toISOString().split("T")[0];
         }
         if (data.expected_liquidation_date) {
           form.expected_liquidation_date = new Date(data.expected_liquidation_date).toISOString().split("T")[0];
         }
-        const doc = data.document;
-        if (doc) {
-          const rawDocPath = Array.isArray(doc.file_path) ? doc.file_path[0] : doc.file_path;
-          const docPathStr = typeof rawDocPath === "string" ? rawDocPath : rawDocPath ? String(rawDocPath) : "";
-          form.documents.push({
-            name: doc.file_name || (docPathStr ? docPathStr.split("/").pop() : "document.pdf"),
-            isExisting: true,
-            file_path: doc.file_path,
+        const existingDoc = (() => {
+          const doc = data.document;
+          if (doc) {
+            const rawDocPath = Array.isArray(doc.file_path) ? doc.file_path[0] : doc.file_path;
+            const docPathStr = typeof rawDocPath === "string" ? rawDocPath : rawDocPath ? String(rawDocPath) : "";
+            return {
+              name: doc.file_name || (docPathStr ? docPathStr.split("/").pop() : "document.pdf"),
+              isExisting: true,
+              file_path: doc.file_path,
+            };
+          }
+          if (data.report_file_path) {
+            const rawPath = Array.isArray(data.report_file_path)
+              ? data.report_file_path[0]
+              : String(data.report_file_path);
+            return {
+              name: rawPath ? rawPath.split("/").pop() : "document.pdf",
+              isExisting: true,
+              file_path: rawPath,
+            };
+          }
+          return null;
+        })();
+
+        if (
+          data.report_template_data &&
+          !isManualReportTemplate(data.report_template_data)
+        ) {
+          reportTemplateData.value = createDefaultTemplateData("cash-advance", {
+            user: auth.user,
+            purpose: form.purpose,
+            totalAmount: form.amount,
+            disbursementDate: form.expected_disbursement_date,
+            liquidationDeadline: form.expected_liquidation_date,
+            existingData: data.report_template_data,
           });
+          // Template mode regenerates the PDF on submit; keep manual attachment state empty.
+          form.documents = [];
+          manualReportFile.value = null;
+          isManualMode.value = false;
+        } else if (existingDoc) {
+          form.documents = [existingDoc];
+          reportTemplateData.value = null;
+          manualReportFile.value = existingDoc;
+          isManualMode.value = true;
+        } else if (isManualReportTemplate(data.report_template_data)) {
+          form.documents = [];
+          reportTemplateData.value = { mode: "manual" };
+          manualReportFile.value = null;
+          isManualMode.value = true;
+        } else {
+          reportTemplateData.value = createDefaultTemplateData("cash-advance", {
+            user: auth.user,
+            purpose: form.purpose,
+            totalAmount: form.amount,
+            disbursementDate: form.expected_disbursement_date,
+            liquidationDeadline: form.expected_liquidation_date,
+          });
+          form.documents = [];
+          manualReportFile.value = null;
+          isManualMode.value = false;
         }
+        hydrated = true;
       }
     } catch (error) {
       addToast({
@@ -126,83 +299,34 @@ onMounted(async () => {
         type: "error",
       });
       router.push("/cash-advances");
+    } finally {
+      loadingRequest.value = false;
+    }
+    if (hydrated) {
+      await nextTick();
+      await nextTick();
+      captureRevisionBaseline();
     }
   }
 });
 
-function handleFileUpload(event) {
-  const files = Array.from(event.target.files);
-
-  if (form.documents.length + files.length > 5) {
-    addToast({ message: "Maximum of 5 files allowed.", type: "error" });
-    if (fileInput.value) fileInput.value.value = "";
-    return;
-  }
-
-  for (const file of files) {
-    if (file.size > 2 * 1024 * 1024) {
-      addToast({
-        message: `File ${file.name} exceeds the 2MB size limit.`,
-        type: "error",
-      });
-      if (fileInput.value) fileInput.value.value = "";
-      return;
-    }
-
-    const validTypes = [
-      "application/pdf",
-      "application/msword",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "image/jpeg",
-      "image/png",
-      "image/jpg",
-    ];
-
-    if (!validTypes.includes(file.type)) {
-      addToast({
-        message: `Invalid file type: ${file.name}. Must be PDF, DOC, DOCX, XLSX, or Image.`,
-        type: "error",
-      });
-      if (fileInput.value) fileInput.value.value = "";
-      return;
-    }
-  }
-
-  for (const file of files) {
-    if (file.type.startsWith("image/")) {
-      file.previewUrl = URL.createObjectURL(file);
-    }
-    form.documents.push(file);
-  }
-
-  if (fileInput.value) fileInput.value.value = "";
-}
-
-function removeFile(index) {
-  const file = form.documents[index];
-  if (file.previewUrl) {
-    URL.revokeObjectURL(file.previewUrl);
-  }
-  form.documents.splice(index, 1);
-}
-
-async function handleRequest() {
+function validateRequestForm() {
   if (
     !form.purpose ||
     !form.amount ||
     !form.expected_disbursement_date ||
     !form.expected_liquidation_date ||
-    form.documents.length === 0
-  )
-    return;
+    !hasValidAttachment.value
+  ) {
+    return false;
+  }
 
   if (form.purpose.length > 255) {
     addToast({
       message: "Purpose must not exceed 255 characters.",
       type: "error",
     });
-    return;
+    return false;
   }
 
   const today = todayDate.value;
@@ -211,7 +335,7 @@ async function handleRequest() {
       message: "Disbursement date must be today or a future date.",
       type: "error",
     });
-    return;
+    return false;
   }
 
   if (form.expected_liquidation_date < today) {
@@ -219,7 +343,7 @@ async function handleRequest() {
       message: "Liquidation Deadline must be today or a future date.",
       type: "error",
     });
-    return;
+    return false;
   }
 
   if (form.expected_disbursement_date >= form.expected_liquidation_date) {
@@ -228,25 +352,60 @@ async function handleRequest() {
         "Disbursement date cannot be greater than or equal to the liquidation date.",
       type: "error",
     });
-    return;
+    return false;
   }
+
+  return true;
+}
+
+function promptSubmit() {
+  if (submitting.value || isRevisionUnchanged.value || !validateRequestForm()) return;
+  showSubmitConfirmModal.value = true;
+}
+
+function handleConfirmSubmit() {
+  showSubmitConfirmModal.value = false;
+  handleRequest();
+}
+
+function handleCancelSubmit() {
+  showSubmitConfirmModal.value = false;
+}
+
+async function handleRequest() {
+  if (submitting.value || isRevisionUnchanged.value || !validateRequestForm()) return;
 
   submitting.value = true;
 
   const formData = new FormData();
   formData.append("purpose", form.purpose);
+  if (isEditMode.value) {
+    formData.append("contract_id", form.contract_id ?? "");
+    formData.append("client_name", form.client_name ?? "");
+  } else if (form.contract_id) {
+    formData.append("contract_id", form.contract_id);
+    if (form.client_name) {
+      formData.append("client_name", form.client_name);
+    }
+  }
   formData.append("amount", form.amount);
   formData.append(
     "expected_disbursement_date",
     form.expected_disbursement_date,
   );
   formData.append("expected_liquidation_date", form.expected_liquidation_date);
-  
-  form.documents.forEach((file) => {
-    if (!file.isExisting) {
-      formData.append("documents[]", file);
-    }
-  });
+
+  if (!isManualMode.value) {
+    const pdfFile = createSbsiReportPdfFile(reportTemplateData.value);
+    formData.append("documents[]", pdfFile);
+    formData.append("report_template_data", JSON.stringify(reportTemplateData.value));
+  } else {
+    form.documents.forEach((file) => {
+      if (!file.isExisting) {
+        formData.append("documents[]", file);
+      }
+    });
+  }
 
   try {
     if (isEditMode.value) {
@@ -318,7 +477,7 @@ function goBack() {
           <form
             id="cashAdvanceForm"
             class="space-y-6"
-            @submit.prevent="handleRequest"
+            @submit.prevent="promptSubmit"
           >
             <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
               <div class="input-wrapper">
@@ -370,7 +529,23 @@ function goBack() {
                     type="date"
                   />
                 </div>
+                <p
+                  v-if="dateRangeError"
+                  data-testid="ca-date-range-error"
+                  class="mt-1 text-xs font-medium text-danger"
+                  role="alert"
+                >
+                  {{ dateRangeError }}
+                </p>
               </div>
+            </div>
+
+            <div class="input-wrapper">
+              <CmsContractSelect
+                v-model:contract-id="form.contract_id"
+                v-model:client-name="form.client_name"
+                :disabled="submitting"
+              />
             </div>
 
             <div class="input-wrapper">
@@ -397,96 +572,27 @@ function goBack() {
 
             <div class="input-wrapper">
               <label class="input-label"
-                >Request Documents (Max 5)
+                >Request Report Document
                 <span class="text-danger">*</span></label
               >
-              <input
-                type="file"
-                ref="fileInput"
-                @change="handleFileUpload"
-                class="hidden"
-                accept=".pdf,.doc,.docx,.xlsx,image/*"
-                multiple
+              <SbsiReportDocumentEditor
+                v-if="!loadingRequest"
+                type="cash-advance"
+                :model-value="reportTemplateData"
+                :report-file="manualReportFile"
+                :purpose="form.purpose"
+                :total-amount="form.amount"
+                :disbursement-date="form.expected_disbursement_date"
+                :liquidation-deadline="form.expected_liquidation_date"
+                :record-id="props.id"
+                @update:model-value="reportTemplateData = $event"
+                @update:report-file="handleReportFileUpdate"
+                @update:mode="handleEditorModeUpdate"
+                @update:purpose="handleTemplatePurposeUpdate"
+                @update:total-amount="handleTemplateTotalUpdate"
+                @update:disbursement-date="handleTemplateDisbursementUpdate"
+                @update:liquidation-deadline="handleTemplateLiquidationUpdate"
               />
-
-              <div
-                v-if="form.documents.length > 0"
-                class="flex flex-col gap-3 mb-4"
-              >
-                <div
-                  v-for="(file, index) in form.documents"
-                  :key="index"
-                  class="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-3"
-                >
-                  <div class="flex items-center gap-3">
-                    <img
-                      v-if="file.previewUrl"
-                      :src="file.previewUrl"
-                      class="h-10 w-10 rounded object-cover"
-                    />
-                    <div
-                      v-else
-                      class="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-400"
-                    >
-                      <FileText class="h-5 w-5" />
-                    </div>
-                    <div class="flex flex-col">
-                      <span class="text-sm font-bold text-slate-800">{{
-                        file.name
-                      }}</span>
-                      <span class="text-xs font-semibold text-slate-400"
-                        >{{ (file.size / 1024 / 1024).toFixed(2) }} MB</span
-                      >
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    @click="removeFile(index)"
-                    class="text-danger hover:bg-red-50 p-2 rounded-full transition-colors"
-                  >
-                    <X class="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              <button
-                v-if="form.documents.length < 5"
-                class="group flex w-full flex-col items-center justify-between gap-4 rounded-lg border-2 border-dashed border-slate-200 bg-slate-50/80 p-6 text-left transition-all duration-200 ease-out hover:border-accent/30 hover:bg-accent-50/50 md:flex-row"
-                type="button"
-                @click="fileInput.click()"
-              >
-                <div class="flex flex-col items-center gap-4 md:flex-row">
-                  <div
-                    class="flex h-12 w-12 items-center justify-center rounded-lg bg-white text-slate-400 shadow-sm transition-colors group-hover:text-accent"
-                  >
-                    <UploadCloud class="h-6 w-6" />
-                  </div>
-                  <div class="text-center md:text-left">
-                    <h3 class="font-heading text-base font-bold text-slate-800">
-                      Select files
-                    </h3>
-                    <p class="text-sm text-slate-500">
-                      Upload up to 5 request documents (PDF, DOC, DOCX, XLSX,
-                      Images)
-                    </p>
-                  </div>
-                </div>
-                <span
-                  class="rounded-md border border-black/5 bg-white px-5 py-2 text-sm font-bold text-primary shadow-sm transition-colors group-hover:border-accent/20 group-hover:text-accent"
-                >
-                  Browse
-                </span>
-              </button>
-              <p
-                class="mt-1 flex items-center gap-1 text-xs font-semibold"
-                :class="
-                  form.documents.length > 0 ? 'text-success' : 'text-danger'
-                "
-              >
-                <Info class="h-3.5 w-3.5" />
-                At least 1 request document is required to process your cash
-                advance.
-              </p>
             </div>
           </form>
         </section>
@@ -502,17 +608,6 @@ function goBack() {
             <ul
               class="list-inside list-disc space-y-2 text-sm leading-relaxed text-accent-800"
             >
-              <!-- <li>
-                Cash advance requests are subject to approval by the accounting
-                department
-              </li>
-              <li>
-                Approved amounts will be disbursed within 3-5 business days
-              </li>
-              <li>
-                You must submit reimbursement with receipts after using the cash
-                advance
-              </li> -->
               <li>Unused amounts must be returned to the company</li>
             </ul>
           </div>
@@ -526,11 +621,12 @@ function goBack() {
             class="btn btn-primary min-h-[42px] w-full sm:w-fit disabled:opacity-60 disabled:cursor-not-allowed"
             :disabled="
               submitting ||
+              isRevisionUnchanged ||
               !form.purpose ||
               !form.amount ||
               !form.expected_disbursement_date ||
               !form.expected_liquidation_date ||
-              form.documents.length === 0
+              !hasValidAttachment
             "
             form="cashAdvanceForm"
             type="submit"
@@ -546,6 +642,18 @@ function goBack() {
         </footer>
       </div>
     </main>
+
+    <ConfirmModal
+      :is-open="showSubmitConfirmModal"
+      title="Submit Request"
+      message="Are you sure do you want to submit this request?"
+      confirm-text="Done"
+      cancel-text="Cancel"
+      :danger="false"
+      :loading="submitting"
+      @confirm="handleConfirmSubmit"
+      @close="handleCancelSubmit"
+    />
 
     <ConfirmModal
       :is-open="showConfirmModal"

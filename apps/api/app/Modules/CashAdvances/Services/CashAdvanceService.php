@@ -7,6 +7,7 @@ use App\Modules\CashAdvances\Models\CashAdvanceDocument;
 use App\Modules\CashAdvances\Models\CashAdvanceApprovalAction;
 use App\Modules\CashAdvances\Models\CashAdvanceDisbursement;
 use App\Modules\CashAdvances\Models\CashAdvanceStatusHistory;
+use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Users\Models\User;
 use App\Modules\Shared\Services\PasswordVerificationService;
 use Illuminate\Http\Request;
@@ -14,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use App\Modules\AuditLogs\Services\AuditLogService;
 
 class CashAdvanceService
 {
@@ -23,10 +25,13 @@ class CashAdvanceService
             $advance = CashAdvance::create([
                 'user_id' => $user->id,
                 'purpose' => $data['purpose'],
+                'contract_id' => $data['contract_id'] ?? null,
+                'client_name' => $data['client_name'] ?? null,
                 'amount' => $data['amount'],
                 'expected_disbursement_date' => $data['expected_disbursement_date'],
                 'expected_liquidation_date' => $data['expected_liquidation_date'],
                 'status' => 'pending',
+                'report_template_data' => $data['report_template_data'] ?? null,
             ]);
 
             CashAdvanceStatusHistory::create([
@@ -46,6 +51,38 @@ class CashAdvanceService
                     'file_name' => $file->getClientOriginalName(),
                 ]);
             }
+
+            NotificationService::notifyUser(
+                userId: $user->id,
+                type: 'cash_advance_submitted',
+                module: 'Cash Advance',
+                title: 'Cash Advance Submitted',
+                message: "Your cash advance request of " . NotificationService::formatPeso($advance->amount) . " was submitted.",
+                recordLink: "/cash-advances?view={$advance->id}",
+                recordType: 'cash_advance',
+                recordId: $advance->id
+            );
+
+            NotificationService::notifyAdmins(
+                type: 'admin_cash_advance_submitted',
+                module: 'Cash Advance',
+                title: 'New Cash Advance Request',
+                message: "{$user->name} submitted a cash advance request of " . NotificationService::formatPeso($advance->amount) . ".",
+                recordLink: "/cash-advances?view={$advance->id}",
+                recordType: 'cash_advance',
+                recordId: $advance->id,
+                excludeUserId: $user->id
+            );
+
+            AuditLogService::log(
+                actorId: $user->id,
+                actorRole: $user->role ?? 'employee',
+                actionType: 'CASH_ADVANCE_SUBMITTED',
+                entityType: 'cash_advance',
+                entityId: $advance->id,
+                beforeState: null,
+                afterState: $advance->toArray()
+            );
 
             return $advance;
         });
@@ -76,6 +113,28 @@ class CashAdvanceService
                 'changed_by' => $user->id,
             ]);
 
+            $commentText = $comment ? " Approver note: \"{$comment}\"" : '';
+            NotificationService::notifyUser(
+                userId: $advance->user_id,
+                type: 'cash_advance_approved',
+                module: 'Cash Advance',
+                title: 'Cash Advance Approved',
+                message: "Your cash advance request of " . NotificationService::formatPeso($advance->amount) . " was approved by {$user->name}.{$commentText}",
+                recordLink: "/cash-advances?view={$advance->id}",
+                recordType: 'cash_advance',
+                recordId: $advance->id
+            );
+
+            AuditLogService::log(
+                actorId: $user->id,
+                actorRole: $user->role ?? 'approver',
+                actionType: 'CASH_ADVANCE_APPROVED',
+                entityType: 'cash_advance',
+                entityId: $advance->id,
+                beforeState: ['status' => 'pending'],
+                afterState: ['status' => 'approved', 'comment' => $comment]
+            );
+
             return $advance;
         });
     }
@@ -89,20 +148,23 @@ class CashAdvanceService
                 ]);
             }
 
-            if (!in_array($advance->status, ['pending', 'revise'])) {
+            $lockedAdvance = CashAdvance::where('id', $advance->id)->lockForUpdate()->firstOrFail();
+
+            if (!in_array($lockedAdvance->status, ['pending', 'revise'])) {
                 throw new \Illuminate\Auth\Access\AuthorizationException('Only pending or revise cash advances can be revised/rejected.');
             }
 
-            $currentCount = (int) ($advance->revision_count ?? 0);
+            $currentCount = (int) ($lockedAdvance->revision_count ?? 0);
             $newCount = $currentCount + 1;
             // 3 revises allowed: 1st-3rd = revise, 4th (>3) = terminal rejected
             $newStatus = $newCount > 3 ? 'rejected' : 'revise';
-            $fromStatus = $advance->status;
+            $fromStatus = $lockedAdvance->status;
 
-            $advance->update([
+            $lockedAdvance->update([
                 'status' => $newStatus,
                 'revision_count' => $newCount,
             ]);
+            $advance = $lockedAdvance;
 
             // Map request action (present tense: revise/reject) to stored action (past tense: revised/rejected).
             // Terminal 3rd strike (newCount >=3 / <=2 allowed) — 2 strikes revise, 3rd rejected, 3 total — always forces 'rejected' regardless of $action input —
@@ -156,13 +218,33 @@ class CashAdvanceService
                 'changed_by' => $user->id,
             ]);
 
+            $isTerminal = $newStatus === 'rejected';
+            $statusType = $isTerminal ? 'cash_advance_rejected' : 'cash_advance_revised';
+            $statusTitle = $isTerminal ? 'Cash Advance Rejected' : 'Cash Advance Needs Revision';
+            $statusVerb = $isTerminal ? 'rejected' : 'returned for revision';
+            NotificationService::notifyUser(
+                userId: $advance->user_id,
+                type: $statusType,
+                module: 'Cash Advance',
+                title: $statusTitle,
+                message: "Your cash advance request of " . NotificationService::formatPeso($advance->amount) . " was {$statusVerb}. Approver note: \"{$comment}\"",
+                recordLink: "/cash-advances?view={$advance->id}",
+                recordType: 'cash_advance',
+                recordId: $advance->id
+            );
+
+            AuditLogService::log(
+                actorId: $user->id,
+                actorRole: $user->role ?? 'approver',
+                actionType: $actionValue === 'rejected' ? 'CASH_ADVANCE_REJECTED' : 'CASH_ADVANCE_REVISED',
+                entityType: 'cash_advance',
+                entityId: $advance->id,
+                beforeState: ['status' => $fromStatus],
+                afterState: ['status' => $newStatus, 'comment' => $comment, 'revision_count' => $newCount]
+            );
+
             return $advance;
         });
-    }
-
-    public function reviseAdvance(CashAdvance $advance, User $user, string $comment, string $password, Request $requestContext)
-    {
-        return $this->rejectAdvance($advance, $user, $comment, 'revise', $password, $requestContext);
     }
 
     public function disburseAdvance(CashAdvance $advance, User $user, array $data, string $password, Request $requestContext)
@@ -174,6 +256,13 @@ class CashAdvanceService
                 ]);
             }
 
+            $payoutMethod = $data['payout_method'] ?? $data['channel'] ?? 'Cash';
+            $payoutMethodOther = $data['payout_method_other'] ?? null;
+            $channel = $data['channel'] ?? ($payoutMethod === 'Other' && $payoutMethodOther ? $payoutMethodOther : $payoutMethod);
+            $reference = !empty($data['reference']) ? $data['reference'] : ('CA-' . $advance->id . '-' . now()->format('YmdHis'));
+            $grantedBy = !empty($data['granted_by']) ? $data['granted_by'] : $user->name;
+            $granterSignature = $data['granter_signature'] ?? null;
+
             $advance->update([
                 'status'              => 'disbursed',
                 'outstanding_balance' => $advance->amount, // Debt begins at full amount
@@ -182,9 +271,13 @@ class CashAdvanceService
             CashAdvanceDisbursement::create([
                 'cash_advance_id' => $advance->id,
                 'disbursed_by_id' => $user->id,
+                'granted_by' => $grantedBy,
                 'disbursement_date' => now()->toDateString(),
-                'channel' => $data['channel'],
-                'reference_number' => $data['reference'],
+                'channel' => $channel,
+                'payout_method' => $payoutMethod,
+                'payout_method_other' => $payoutMethodOther,
+                'reference_number' => $reference,
+                'granter_signature' => $granterSignature,
             ]);
 
             CashAdvanceStatusHistory::create([
@@ -193,6 +286,38 @@ class CashAdvanceService
                 'to_status' => 'disbursed',
                 'changed_by' => $user->id,
             ]);
+
+            $displayChannel = ($payoutMethod === 'Other' && $payoutMethodOther)
+                ? "{$payoutMethod} ({$payoutMethodOther})"
+                : $channel;
+
+            NotificationService::notifyUser(
+                userId: $advance->user_id,
+                type: 'cash_advance_disbursed',
+                module: 'Cash Advance',
+                title: 'Cash Advance Disbursed',
+                message: "Your cash advance of " . NotificationService::formatPeso($advance->amount) . " was disbursed via {$displayChannel} (Ref: {$reference}).",
+                recordLink: "/cash-advances?view={$advance->id}",
+                recordType: 'cash_advance',
+                recordId: $advance->id
+            );
+
+            AuditLogService::log(
+                actorId: $user->id,
+                actorRole: $user->role ?? 'finance',
+                actionType: 'CASH_ADVANCE_DISBURSED',
+                entityType: 'cash_advance',
+                entityId: $advance->id,
+                beforeState: ['status' => 'approved'],
+                afterState: [
+                    'status' => 'disbursed',
+                    'channel' => $channel,
+                    'reference' => $reference,
+                    'payout_method' => $payoutMethod,
+                    'payout_method_other' => $payoutMethodOther,
+                    'granted_by' => $grantedBy,
+                ]
+            );
 
             return $advance;
         });
@@ -216,6 +341,29 @@ class CashAdvanceService
                 'changed_by' => auth()->id() ?? $advance->user_id,
             ]);
 
+            $advance->loadMissing('requester');
+            $empName = $advance->requester?->name ?? 'Employee';
+            NotificationService::notifyAdmins(
+                type: 'admin_cash_advance_signed',
+                module: 'Cash Advance',
+                title: 'Employee Signed Cash Advance',
+                message: "{$empName} signed to acknowledge Cash Advance #{$advance->id} (" . NotificationService::formatPeso($advance->amount) . ").",
+                recordLink: "/cash-advances?view={$advance->id}",
+                recordType: 'cash_advance',
+                recordId: $advance->id,
+                excludeUserId: auth()->id() ?? $advance->user_id
+            );
+
+            AuditLogService::log(
+                actorId: $advance->user_id,
+                actorRole: 'employee',
+                actionType: 'CASH_ADVANCE_ACKNOWLEDGED',
+                entityType: 'cash_advance',
+                entityId: $advance->id,
+                beforeState: ['status' => $oldStatus],
+                afterState: ['status' => 'signed']
+            );
+
             return $advance;
         });
     }
@@ -237,6 +385,18 @@ class CashAdvanceService
                 'expected_liquidation_date' => $data['expected_liquidation_date'] ?? null,
             ], fn($v) => $v !== null);
 
+            if (array_key_exists('contract_id', $data)) {
+                $updatePayload['contract_id'] = $data['contract_id'];
+            }
+
+            if (array_key_exists('client_name', $data)) {
+                $updatePayload['client_name'] = $data['client_name'];
+            }
+
+            if (array_key_exists('report_template_data', $data)) {
+                $updatePayload['report_template_data'] = $data['report_template_data'];
+            }
+
             if ($advance->status === 'rejected') {
                 throw new \Illuminate\Auth\Access\AuthorizationException('Rejected cash advances (exceeded revision limit) cannot be edited.');
             }
@@ -246,6 +406,7 @@ class CashAdvanceService
                 $updatePayload['status'] = 'pending';
             }
 
+            $beforeState = $advance->toArray();
             $advance->update($updatePayload);
 
             // Handle new document uploads — replace existing documents
@@ -277,6 +438,28 @@ class CashAdvanceService
                     'changed_by' => $user->id,
                 ]);
             }
+
+            $actionType = $oldStatus === 'revise' ? 'CASH_ADVANCE_RESUBMITTED' : 'CASH_ADVANCE_UPDATED';
+            AuditLogService::log(
+                actorId: $user->id,
+                actorRole: $user->role ?? 'employee',
+                actionType: $actionType,
+                entityType: 'cash_advance',
+                entityId: $advance->id,
+                beforeState: $beforeState,
+                afterState: $advance->fresh()->toArray()
+            );
+
+            NotificationService::notifyAdmins(
+                type: 'admin_cash_advance_resubmitted',
+                module: 'Cash Advance',
+                title: 'Cash Advance Resubmitted',
+                message: "{$user->name} updated/resubmitted Cash Advance #{$advance->id} (" . NotificationService::formatPeso($advance->amount) . ").",
+                recordLink: "/cash-advances?view={$advance->id}",
+                recordType: 'cash_advance',
+                recordId: $advance->id,
+                excludeUserId: $user->id
+            );
 
             return $advance;
         });

@@ -6,6 +6,10 @@ defineProps({
     type: Boolean,
     default: false,
   },
+  isRevise: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 defineEmits(["dismiss"]);
@@ -22,10 +26,10 @@ defineEmits(["dismiss"]);
       </button>
       <div class="min-w-0">
         <h1 class="font-heading text-2xl font-bold leading-tight text-slate-800">
-          {{ isEdit ? "Edit Reimbursement" : "New Reimbursement" }}
+          {{ isEdit ? (isRevise ? "Revise Reimbursement" : "Edit Reimbursement") : "New Reimbursement" }}
         </h1>
         <p class="mt-1 text-sm text-slate-400">
-          {{ isEdit ? "Update your expense reimbursement request" : "Submit your expense reimbursement request" }}
+          {{ isEdit ? (isRevise ? "Update and resubmit your expense reimbursement request" : "Update your expense reimbursement request") : "Submit your expense reimbursement request" }}
         </p>
       </div>
     </div>

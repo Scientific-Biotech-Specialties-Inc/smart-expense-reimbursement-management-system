@@ -76,7 +76,9 @@ class ReimbursementController extends Controller
                 (int)$id,
                 $request->validated('password'),
                 $request->ip(),
-                $request
+                $request,
+                (bool) $request->validated('secondary_audit_confirmed', false),
+                $request->validated('secondary_audit_note')
             );
 
             return response()->json([
@@ -136,7 +138,8 @@ class ReimbursementController extends Controller
                 (int)$id,
                 $request->validated('password'),
                 $request->ip(),
-                $request
+                $request,
+                $request->validated()
             );
 
             return response()->json([
@@ -150,6 +153,28 @@ class ReimbursementController extends Controller
                 'message' => 'The given data was invalid.',
                 'errors' => $e->errors(),
             ], 422);
+        }
+    }
+
+    /**
+     * Employee acknowledges their granted payout.
+     */
+    public function acknowledge(\App\Modules\Reimbursements\Http\Requests\AcknowledgePayoutRequest $request, $id)
+    {
+        try {
+            $reimbursement = $this->service->acknowledgePayout(
+                $request->user(),
+                (int)$id,
+                $request->validated('employee_signature'),
+                $request->ip()
+            );
+
+            return response()->json([
+                'message' => 'Payout acknowledged successfully.',
+                'data' => $reimbursement,
+            ]);
+        } catch (AuthorizationException $e) {
+            return response()->json(['message' => $e->getMessage()], 403);
         }
     }
 

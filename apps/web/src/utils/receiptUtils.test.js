@@ -12,23 +12,23 @@ describe("canEditReceipt (My Expense edit gating)", () => {
     "pending",
     "pending-admin-re-review",
     "final-rejected",
+    "rejected",
+    "automatic-rejected",
   ];
   const editable = [
     "processing",
     "processed",
     "flagged",
-    "rejected",
     "failed",
-    "automatic-rejected",
   ];
 
-  it("blocks the four forbidden statuses", () => {
+  it("blocks all forbidden statuses including rejected and automatic-rejected", () => {
     for (const status of forbidden) {
       expect(canEditReceipt({ status })).toBe(false);
     }
   });
 
-  it("allows processing, processed, rejected, failed, and other non-forbidden statuses", () => {
+  it("allows processing, processed, flagged, failed, and other non-forbidden statuses", () => {
     for (const status of editable) {
       expect(canEditReceipt({ status })).toBe(true);
     }
@@ -38,12 +38,16 @@ describe("canEditReceipt (My Expense edit gating)", () => {
     expect(canEditReceipt({ status: "APPROVED" })).toBe(false);
     expect(canEditReceipt({ status: "Processing" })).toBe(true);
     expect(canEditReceipt({ status: "PENDING-ADMIN-RE-REVIEW" })).toBe(false);
+    expect(canEditReceipt({ status: "REJECTED" })).toBe(false);
+    expect(canEditReceipt({ status: "AUTOMATIC-REJECTED" })).toBe(false);
   });
 
   it("falls back to complianceStatus when status is missing", () => {
     expect(canEditReceipt({ complianceStatus: "pending" })).toBe(false);
     expect(canEditReceipt({ complianceStatus: "processed" })).toBe(true);
     expect(canEditReceipt({ complianceStatus: "final-rejected" })).toBe(false);
+    expect(canEditReceipt({ complianceStatus: "rejected" })).toBe(false);
+    expect(canEditReceipt({ complianceStatus: "automatic-rejected" })).toBe(false);
   });
 
   it("returns false for null/undefined/empty receipt", () => {
@@ -58,11 +62,13 @@ describe("canEditReceipt (My Expense edit gating)", () => {
       "pending",
       "pending-admin-re-review",
       "final-rejected",
+      "rejected",
+      "automatic-rejected",
     ]);
   });
 });
 
-describe("canDeleteReceipt (delete gating, allows final-rejected)", () => {
+describe("canDeleteReceipt (delete gating, allows rejected statuses)", () => {
   const forbidden = [
     "approved",
     "pending",
@@ -90,20 +96,20 @@ describe("canDeleteReceipt (delete gating, allows final-rejected)", () => {
     }
   });
 
-  it("allows final-rejected even though edit does not", () => {
-    expect(canDeleteReceipt({ status: "final-rejected" })).toBe(true);
-    expect(canEditReceipt({ status: "final-rejected" })).toBe(false);
+  it("allows final-rejected, rejected, and automatic-rejected even though edit does not", () => {
+    for (const status of ["final-rejected", "rejected", "automatic-rejected"]) {
+      expect(canDeleteReceipt({ status })).toBe(true);
+      expect(canEditReceipt({ status })).toBe(false);
+    }
   });
 
-  it("matches canEditReceipt for all statuses except final-rejected", () => {
+  it("matches canEditReceipt for all non-rejected statuses", () => {
     const others = [
       ...forbidden,
       "processing",
       "processed",
       "flagged",
-      "rejected",
       "failed",
-      "automatic-rejected",
     ];
     for (const status of others) {
       expect(canDeleteReceipt({ status })).toBe(canEditReceipt({ status }));
@@ -114,12 +120,16 @@ describe("canDeleteReceipt (delete gating, allows final-rejected)", () => {
     expect(canDeleteReceipt({ status: "APPROVED" })).toBe(false);
     expect(canDeleteReceipt({ status: "Processing" })).toBe(true);
     expect(canDeleteReceipt({ status: "PENDING-ADMIN-RE-REVIEW" })).toBe(false);
+    expect(canDeleteReceipt({ status: "REJECTED" })).toBe(true);
+    expect(canDeleteReceipt({ status: "AUTOMATIC-REJECTED" })).toBe(true);
   });
 
   it("falls back to complianceStatus when status is missing", () => {
     expect(canDeleteReceipt({ complianceStatus: "pending" })).toBe(false);
     expect(canDeleteReceipt({ complianceStatus: "processed" })).toBe(true);
     expect(canDeleteReceipt({ complianceStatus: "final-rejected" })).toBe(true);
+    expect(canDeleteReceipt({ complianceStatus: "rejected" })).toBe(true);
+    expect(canDeleteReceipt({ complianceStatus: "automatic-rejected" })).toBe(true);
   });
 
   it("returns false for null/undefined/empty receipt", () => {
@@ -190,4 +200,261 @@ describe("getMissingReceiptFields and isReceiptFieldMissing", () => {
     };
     expect(isReceiptFieldMissing(receipt, "invoiceNumber")).toBe(true);
   });
+
+  it("markOcrReturnedAndGetMissingWarning sets hasOcrReturned and formats missing field labels", async () => {
+    const { markOcrReturnedAndGetMissingWarning } = await import("./receiptUtils");
+    const incomplete = {
+      ...completeReceipt,
+      invoiceNumber: "",
+      tin: "",
+      hasOcrReturned: false,
+    };
+    const warning = markOcrReturnedAndGetMissingWarning(incomplete);
+    expect(incomplete.hasOcrReturned).toBe(true);
+    expect(warning).toContain("Missing required field(s):");
+    expect(warning).toContain("Invoice Number");
+    expect(warning).toContain("TIN Number");
+
+    const full = { ...completeReceipt, hasOcrReturned: false };
+    expect(markOcrReturnedAndGetMissingWarning(full)).toBeNull();
+    expect(full.hasOcrReturned).toBe(true);
+  });
 });
+
+describe("itemGrossAmount and receiptGrossAmount (line-total price contract)", () => {
+  it("treats item.price as already the line total without multiplying by quantity", async () => {
+    const { itemGrossAmount, itemsGrossAmount } = await import("./receiptUtils");
+    expect(itemGrossAmount({ name: "Organic Bananas", quantity: 2, price: 3.18 })).toBe(3.18);
+    expect(
+      itemsGrossAmount([
+        { name: "Organic Bananas", qty: 2, price: 3.18 },
+        { name: "Greek Yogurt 6oz", qty: 3, price: 5.97 },
+      ]),
+    ).toBeCloseTo(9.15, 2);
+  });
+
+  it("prioritizes explicit total_amount over items sum on prefill", async () => {
+    const { buildPrefilledReceiptDraft, receiptGrossAmount } = await import("./receiptUtils");
+    const draft = buildPrefilledReceiptDraft({
+      id: 19,
+      receiptData: {
+        total_amount: 44.04,
+        vat_amount: 2.88,
+        items: [
+          { name: "Organic Bananas", quantity: 2, price: 3.18 },
+          { name: "2% Milk Gallon", quantity: 1, price: 4.99 },
+        ],
+      },
+    });
+    expect(draft.amount).toBe(44.04);
+    expect(draft.items[0]).toEqual({ name: "Organic Bananas", qty: 2, price: 3.18 });
+    expect(receiptGrossAmount({ amount: 0, items: draft.items })).toBeCloseTo(8.17, 2);
+  });
+
+  it("preserves extracted subtotal without forcing automatic 12% calculation", async () => {
+    const { buildPrefilledReceiptDraft } = await import("./receiptUtils");
+    // Receipt with exclusive tax: subtotal 100, vat 12, total 112
+    const draft = buildPrefilledReceiptDraft({
+      id: 20,
+      receiptData: {
+        total_amount: 112.00,
+        subtotal: 100.00,
+        vat_amount: 12.00,
+        vat_classification: "vat",
+      },
+    });
+    expect(draft.subtotal).toBe("100.00");
+    expect(draft.amount).toBe(112);
+    expect(draft.tax).toBe("12.00");
+  });
+
+  it("falls back to calculated subtotal for VAT receipts if subtotal was not extracted", async () => {
+    const { buildPrefilledReceiptDraft } = await import("./receiptUtils");
+    const draft = buildPrefilledReceiptDraft({
+      id: 21,
+      receiptData: {
+        total_amount: 50.00,
+        vat_amount: 5.36,
+        vat_classification: "vat",
+      },
+    });
+    expect(draft.subtotal).toBe("44.64");
+    expect(draft.amount).toBe(50);
+  });
+
+  it("defaults subtotal to total_amount for NON-VAT receipts if subtotal not extracted", async () => {
+    const { buildPrefilledReceiptDraft } = await import("./receiptUtils");
+    const draft = buildPrefilledReceiptDraft({
+      id: 22,
+      receiptData: {
+        total_amount: 80.00,
+        vat_classification: "non-vat",
+      },
+    });
+    expect(draft.subtotal).toBe("80.00");
+    expect(draft.tax).toBe("0.00");
+  });
+
+  it("truncates total amount into two digits without rounding", async () => {
+    const { buildPrefilledReceiptDraft } = await import("./receiptUtils");
+    const draft = buildPrefilledReceiptDraft({
+      id: 23,
+      receiptData: {
+        total_amount: 150.999,
+        vat_classification: "vat",
+      },
+    });
+    expect(draft.amount).toBe(150.99);
+  });
+});
+
+describe("discount handling in receiptUtils", () => {
+  it("normalizes discount types and auto-defaults to 'other' when discount > 0 and type is missing or 'none'", async () => {
+    const { normalizeDiscountType, formatDiscountTypeLabel } = await import("./receiptUtils");
+    expect(normalizeDiscountType("senior", 50)).toBe("senior");
+    expect(normalizeDiscountType("PWD", 20)).toBe("pwd");
+    expect(normalizeDiscountType("student", 15)).toBe("student");
+    expect(normalizeDiscountType("promo", 10)).toBe("promo");
+    expect(normalizeDiscountType("employee", 25)).toBe("employee");
+    expect(normalizeDiscountType("none", 0)).toBe("none");
+    expect(normalizeDiscountType(null, 50)).toBe("other");
+    expect(normalizeDiscountType("none", 50)).toBe("other");
+    expect(normalizeDiscountType("senior", 0)).toBe("senior");
+    expect(formatDiscountTypeLabel("senior")).toBe("Senior Citizen");
+    expect(formatDiscountTypeLabel("promo")).toBe("Promo / Voucher");
+    expect(formatDiscountTypeLabel("none")).toBe("");
+  });
+
+  it("subtracts discount from items gross sum when calculating fallback receiptGrossAmount", async () => {
+    const { receiptGrossAmount } = await import("./receiptUtils");
+    const gross = receiptGrossAmount({
+      amount: 0,
+      discount_amount: 20,
+      discount_type: "senior",
+      items: [
+        { name: "Meal", qty: 1, price: 100 },
+        { name: "Drink", qty: 1, price: 50 },
+      ],
+    });
+    expect(gross).toBe(130);
+  });
+
+  it("prefills discountAmount and discountType in buildPrefilledReceiptDraft and buildReceiptUploadFormPrefill", async () => {
+    const { buildPrefilledReceiptDraft, buildReceiptUploadFormPrefill } = await import("./receiptUtils");
+    const draft = buildPrefilledReceiptDraft({
+      id: 30,
+      receiptData: {
+        total_amount: 80,
+        discount_amount: 20,
+        discount_type: "student",
+        vat_classification: "vat",
+      },
+    });
+    expect(draft.discountAmount).toBe("20.00");
+    expect(draft.discountType).toBe("student");
+
+    const prefill = buildReceiptUploadFormPrefill({
+      id: 30,
+      receiptData: {
+        total_amount: 80,
+        discount_amount: 20,
+        discount_type: "student",
+        vat_classification: "vat",
+      },
+    });
+    expect(prefill.discount_amount).toBe("20.00");
+    expect(prefill.discount_type).toBe("student");
+  });
+});
+
+describe("formatTinValue", () => {
+  it("formats digits into BIR TIN hyphenated blocks", async () => {
+    const { formatTinValue } = await import("./receiptUtils");
+    expect(formatTinValue("")).toBe("");
+    expect(formatTinValue(null)).toBe("");
+    expect(formatTinValue("123456789")).toBe("123-456-789");
+    expect(formatTinValue("123456789000")).toBe("123-456-789-000");
+    expect(formatTinValue("123-456-789-012345")).toBe("123-456-789-012");
+  });
+
+  it("pads a 9-digit TIN with -000 when padLastBlock is true", async () => {
+    const { formatTinValue } = await import("./receiptUtils");
+    expect(formatTinValue("123456789", { padLastBlock: true })).toBe(
+      "123-456-789-000",
+    );
+    expect(formatTinValue("12345678", { padLastBlock: true })).toBe(
+      "123-456-78",
+    );
+  });
+});
+
+describe("getMissingReceiptFields edge cases", () => {
+  it("returns empty array for null/undefined receipt and flags missing subtotal or null/negative amounts", async () => {
+    const { getMissingReceiptFields } = await import("./receiptUtils");
+    expect(getMissingReceiptFields(null)).toEqual([]);
+    expect(getMissingReceiptFields(undefined)).toEqual([]);
+
+    const missing = getMissingReceiptFields({
+      invoiceNumber: "INV-1",
+      date: "2026-10-01",
+      tin: "123-456-789-000",
+      merchantName: "Store",
+      location: "Manila",
+      categoryId: 1,
+      amount: -5,
+      subtotal: null,
+    });
+    expect(missing).toEqual([
+      { key: "amount", label: "Total Amount" },
+      { key: "subtotal", label: "Subtotal" },
+    ]);
+  });
+});
+
+describe("split receipt utilities", () => {
+  it("hasSplitReceipts and formatSplitReceiptsToastMessage detect non-empty split_receipts", async () => {
+    const { hasSplitReceipts, formatSplitReceiptsToastMessage } = await import("./receiptUtils");
+    expect(hasSplitReceipts(null)).toBe(false);
+    expect(hasSplitReceipts({})).toBe(false);
+    expect(hasSplitReceipts({ split_receipts: [] })).toBe(false);
+    expect(hasSplitReceipts({ split_receipts: [{ id: 2 }] })).toBe(true);
+    expect(formatSplitReceiptsToastMessage(3)).toBe(
+      "Detected 3 separate receipts — split into individual receipt cards.",
+    );
+  });
+
+  it("resolveSplitSegmentIndices prefers explicit segment_indices and falls back to sequential file counts", async () => {
+    const { resolveSplitSegmentIndices } = await import("./receiptUtils");
+    expect(
+      resolveSplitSegmentIndices(
+        [
+          { segment_indices: [0, 2], file_path: ["a.jpg", "c.jpg"] },
+          { segment_indices: [1], file_path: ["b.jpg"] },
+        ],
+        3,
+      ),
+    ).toEqual([[0, 2], [1]]);
+
+    expect(
+      resolveSplitSegmentIndices(
+        [
+          { file_path: ["a.jpg", "b.jpg"] },
+          { file_url: ["https://cdn/c.jpg"] },
+          {},
+        ],
+        4,
+      ),
+    ).toEqual([[0, 1], [2], [3]]);
+  });
+
+  it("isDuplicateOcrResponse identifies duplicate codes, flags, and messages", async () => {
+    const { isDuplicateOcrResponse } = await import("./receiptUtils");
+    expect(isDuplicateOcrResponse({ rejection_code: "duplicate" })).toBe(true);
+    expect(isDuplicateOcrResponse({ is_duplicate: true })).toBe(true);
+    expect(isDuplicateOcrResponse({ rejection_reason: "Duplicate receipt detected." })).toBe(true);
+    expect(isDuplicateOcrResponse({ rejection_code: "blurry", rejection_reason: "Too blurry" })).toBe(false);
+  });
+});
+
+
+

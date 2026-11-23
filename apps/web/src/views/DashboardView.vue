@@ -8,7 +8,7 @@ import { useReceiptStore } from "@/stores/receipts";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import SkeletonLoader from "@/components/base/SkeletonLoader.vue";
 import { formatPeso } from "@/utils/formatters";
-import { Bar, Doughnut, Line, Pie } from "vue-chartjs";
+import { Bar, Line, Pie } from "vue-chartjs";
 import {
   Chart as ChartJS,
   CategoryScale,

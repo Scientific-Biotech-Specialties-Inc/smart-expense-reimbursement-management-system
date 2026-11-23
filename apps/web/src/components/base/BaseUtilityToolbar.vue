@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, useSlots } from "vue";
 import { ArrowUpDown, Filter, Search } from "lucide-vue-next";
 
 const props = defineProps({
@@ -23,12 +23,13 @@ const emit = defineEmits([
   "update:sortValue",
 ]);
 
+const slots = useSlots();
 const isOpen = ref(false);
 const isSortOpen = ref(false);
 const root = ref(null);
 
 const hasFilters = computed(
-  () => props.statuses.length > 0 || props.categories.length > 0,
+  () => props.statuses.length > 0 || props.categories.length > 0 || Boolean(slots["extra-filters"]),
 );
 
 const hasSort = computed(() => props.sortOptions.length > 0);
@@ -53,7 +54,7 @@ const currentSortLabel = computed(() => {
 });
 
 const popoverWidthClass = computed(() =>
-  props.statuses.length > 0 && props.categories.length > 0
+  (props.statuses.length > 0 && props.categories.length > 0) || Boolean(slots["extra-filters"])
     ? "w-[min(30rem,calc(100vw-2rem))]"
     : "w-56",
 );
@@ -172,6 +173,9 @@ onBeforeUnmount(() => document.removeEventListener("click", onDocumentClick));
             </button>
             </div>
           </div>
+          </div>
+          <div v-if="$slots['extra-filters']" :class="statuses.length || categories.length ? 'mt-3 pt-3 border-t border-slate-100' : ''">
+            <slot name="extra-filters" />
           </div>
         </div>
       </Transition>

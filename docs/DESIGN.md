@@ -283,8 +283,9 @@ The layout strictly adheres to an **8px grid system**. Arbitrary margins and pad
   - *High-Security Action:* Labeled password confirmation input field.
   - *Rejection Workflow:* Mandatory multiline reason textarea (`textarea` with placeholder and validation).
   - *Pre-Submission Confirmation:* Soft blue tinted summary card displaying key entity metadata.
-- **Centered Action Footer:**
-  - Horizontally centered at bottom of modal with button gap.
+- **Right-Aligned Action Footer:**
+  - Horizontally aligned to the right side of modal with button gap (`justify-end gap-3`).
+  - **Intrinsic Button Sizing Guardrail (Non-Negotiable)**: Action buttons in confirmation dialog footers must never occupy the entire parent container width (`flex-1` or unconstrained `w-full` are strictly prohibited on non-mobile viewports). Buttons must size intrinsically according to their label text plus canonical horizontal padding (`px-5 py-2.5` or `px-4 min-h-10`).
   - **Cancel Button:** Neutral light gray outline button.
   - **Primary Action Button:** Color-coded:
     - Destructive / Delete / Reject: Solid Red (`#EF4444`).
@@ -310,7 +311,8 @@ The layout strictly adheres to an **8px grid system**. Arbitrary margins and pad
   - Container: Dedicated dropzone with dashed border (`border-2 border-dashed border-slate-300`), rounded corners (`rounded-xl`), generous padding (`p-6`).
   - Content: Centered circular cloud upload icon, bold Poppins prompt ("Click to upload or drag & drop"), uppercase caption outlining accepted file formats (`PDF, DOCX, PNG, or JPG — MAX 10 MB`).
 - **Right-Aligned Action Footer:**
-  - Bottom-right aligned with gap.
+  - Bottom-right aligned with gap (`justify-end gap-2 sm:gap-3`).
+  - **Intrinsic Button & Control Sizing (Non-Negotiable)**: Buttons, confirmation CTAs, and dropdown triggers (`select`, `Actions ▾`) in modal footers must never occupy the entire parent container (`w-full` or `flex-1` splits across the modal width are strictly prohibited on tablet/desktop). Each button or action control must size intrinsically to its label text plus standard padding (`px-4` or `px-5` horizontal, `py-2` or `py-2.5` vertical). Use responsive `w-full sm:w-auto` only when mobile viewports (<640px) require stacked touch targets.
   - Soft neutral gray Cancel button alongside solid Brand Navy (`#252578`) Confirm button.
   - Disabled state with spinner graphic during data transmission.
 
@@ -476,6 +478,18 @@ AI agents must strictly utilize the following standardized message strings for s
 | | **Active / Selected**| Solid Brand Accent background (`#2E85D8`), text turns pure white (`#FFFFFF`) |
 | | **Focused** | Automatic keyboard focus matches hover styling (`bg-slate-100`) |
 | | **Disabled** | 40% opacity, non-clickable (`pointer-events-none`) |
+
+### Modal & Dialog Action Button Sizing Standard
+
+All interactive buttons and select controls located in modal dialog footers must strictly adhere to intrinsic geometry:
+- **No Full-Width Stretching**: Buttons must not use `w-full`, `flex-1`, or `grow` across desktop/tablet footers.
+- **Intrinsic Bounds**: Button bounding box is strictly determined by label typography + canonical padding:
+  - Standard Action Button: `h-9 px-4 py-2` or `py-2.5 px-5`, `rounded-md` or `rounded-lg` with `w-full sm:w-auto`.
+  - Dropdown Trigger (`Actions ▾`): `py-2.5 px-4`, `w-full sm:w-auto`.
+- **Alignment Rules**:
+  - Workflow / Detail / Form Modals: Right-aligned (`flex sm:justify-end gap-2 sm:gap-3`).
+  - Action Confirmation Dialogs: Centered (`flex justify-center gap-3`).
+  - Mobile Fallback: If full-width tap targets are needed on mobile (<640px), use responsive `w-full sm:w-auto`.
 
 ---
 

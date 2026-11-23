@@ -10,6 +10,8 @@ class CashAdvance extends Model
     protected $fillable = [
         'user_id',
         'purpose',
+        'contract_id',
+        'client_name',
         'amount',
         'outstanding_balance',
         'expected_disbursement_date',
@@ -18,14 +20,17 @@ class CashAdvance extends Model
         'revision_count',
         'signature',
         'acknowledged_at',
+        'report_template_data',
     ];
 
     protected $casts = [
+        'contract_id'         => 'integer',
         'amount'              => 'decimal:2',
         'outstanding_balance' => 'decimal:2',
         'expected_disbursement_date' => 'date',
         'expected_liquidation_date'  => 'date',
         'acknowledged_at'    => 'datetime',
+        'report_template_data' => 'array',
     ];
 
     public function requester()

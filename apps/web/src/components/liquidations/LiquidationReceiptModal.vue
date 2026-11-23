@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
-import { formatPeso, formatDate } from "@/utils/formatters";
+import { formatDate } from "@/utils/formatters";
+import { extractReceiptFxSnapshot } from "@/composables/useCurrencyRates";
 import BaseReceiptDetailModal from "@/components/base/BaseReceiptDetailModal.vue";
 import { CheckCircle, XCircle } from "lucide-vue-next";
 
@@ -12,7 +13,7 @@ const props = defineProps({
   getFileUrl: { type: Function, required: true },
 });
 
-const emit = defineEmits(["close", "close-review", "request-decision", "cancel-decision", "confirm-decision"]);
+const emit = defineEmits(["close", "request-decision", "cancel-decision", "confirm-decision"]);
 
 /** Normalize to shared shape */
 const normalizedReceipt = computed(() => {
@@ -24,11 +25,14 @@ const normalizedReceipt = computed(() => {
     vendor: props.receipt.merchantName || "Unknown Vendor",
     category: props.receipt.category || "—",
     tin: props.receipt.tinNumber || "—",
-    vatClassification: "VAT",
-    currency: "PHP",
+    vatClassification: props.receipt.vatClassification ?? props.receipt.vat_classification ?? "VAT",
+    currency: props.receipt.currency || "PHP",
+    ...extractReceiptFxSnapshot(props.receipt, props.receipt.currency || "PHP"),
     items: props.receipt.items || [],
     amount: props.receipt.amount || 0,
     vat: props.receipt.vat || 0,
+    discountAmount: props.receipt.discountAmount ?? props.receipt.discount_amount ?? 0,
+    discountType: props.receipt.discountType ?? props.receipt.discount_type ?? "none",
     status: props.receipt.decision === "accepted" ? "approved" : props.receipt.decision || "pending",
   };
 });
@@ -52,15 +56,15 @@ const normalizedReceipt = computed(() => {
         </div>
 
         <!-- Decision Buttons -->
-        <div v-else class="flex gap-2">
+        <div v-else class="flex items-center justify-end gap-2">
           <button
-            class="flex-1 py-2.5 border border-red-200 text-red-600 text-xs font-medium rounded-lg hover:bg-red-50 flex items-center justify-center gap-1.5"
+            class="px-4 py-2 border border-red-200 text-red-600 text-xs font-medium rounded-lg hover:bg-red-50 flex items-center justify-center gap-1.5 transition-colors"
             @click="emit('request-decision', 'rejected')"
           >
             <XCircle class="w-3.5 h-3.5" /> Reject
           </button>
           <button
-            class="flex-1 py-2.5 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary/90 flex items-center justify-center gap-1.5"
+            class="px-5 py-2 bg-primary text-white text-xs font-medium rounded-lg hover:bg-primary/90 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
             @click="emit('request-decision', 'accepted')"
           >
             <CheckCircle class="w-3.5 h-3.5" /> Accept

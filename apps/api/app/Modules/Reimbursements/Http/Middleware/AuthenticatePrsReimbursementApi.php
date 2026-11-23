@@ -2,25 +2,17 @@
 
 namespace App\Modules\Reimbursements\Http\Middleware;
 
-use Closure;
-use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\Response;
+use App\Modules\Shared\Http\Middleware\BaseBearerTokenMiddleware;
 
-class AuthenticatePrsReimbursementApi
+class AuthenticatePrsReimbursementApi extends BaseBearerTokenMiddleware
 {
-    public function handle(Request $request, Closure $next): Response
+    protected function configKey(): string
     {
-        $apiKey = config('services.prs.reimbursement_api_key')
-            ?: getenv('PRS_REIMBURSEMENT_API_KEY')
-            ?: ($_ENV['PRS_REIMBURSEMENT_API_KEY'] ?? null)
-            ?: ($_SERVER['PRS_REIMBURSEMENT_API_KEY'] ?? null);
+        return 'services.prs.reimbursement_api_key';
+    }
 
-        $token = $request->bearerToken();
-
-        if (!$apiKey || !$token || !hash_equals((string) $apiKey, $token)) {
-            return response()->json(['message' => 'Unauthorized.'], 401);
-        }
-
-        return $next($request);
+    protected function envKey(): string
+    {
+        return 'PRS_REIMBURSEMENT_API_KEY';
     }
 }

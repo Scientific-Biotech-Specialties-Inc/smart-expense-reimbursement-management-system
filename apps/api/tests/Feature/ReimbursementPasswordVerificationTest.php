@@ -56,7 +56,6 @@ class ReimbursementPasswordVerificationTest extends TestCase
             'category' => 'Travel',
             'amount' => 1250.00,
             'date' => '2026-06-01',
-            'cutoff_period' => '2026-06-A',
             'status' => 'submitted',
             'submitted_by_name' => $this->employee->name,
         ]);

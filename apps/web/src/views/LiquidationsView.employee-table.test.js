@@ -4,10 +4,11 @@ import { mount } from "@vue/test-utils";
 import { ref } from "vue";
 import LiquidationsView from "@/views/LiquidationsView.vue";
 import LiquidationTable from "@/components/liquidations/LiquidationTable.vue";
-import LiquidationAdvancesList from "@/components/liquidations/LiquidationAdvancesList.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import ActionDropdownMenu from "@/components/base/ActionDropdownMenu.vue";
+import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
+import StatusBadge from "@/components/base/StatusBadge.vue";
 
 const { addToastMock, mockItems, mockSettlements } = vi.hoisted(() => ({
   addToastMock: vi.fn(),
@@ -58,13 +59,6 @@ vi.mock("@/stores/auth", () => ({
 
 vi.mock("@/composables/useToast", () => ({
   useToast: () => ({ addToast: addToastMock }),
-}));
-
-vi.mock("@/composables/useOcrMode", () => ({
-  useOcrMode: () => ({
-    isMockOcr: ref(false),
-    setMockMode: vi.fn(),
-  }),
 }));
 
 vi.mock("@/composables/useUnsavedChanges", () => ({
@@ -165,7 +159,7 @@ describe("LiquidationsView — Employee table plumbing", () => {
             template: "<div class='settlement-form-stub' />",
           },
           // Deliberately NOT stubbed: LiquidationTable, BasePagination,
-          // LiquidationAdvancesList, BaseButton, StatusBadge, ConfirmModal.
+          // BaseButton, StatusBadge, ConfirmModal.
         },
       },
     });
@@ -270,7 +264,6 @@ describe("LiquidationsView — Employee table plumbing", () => {
       "Action",
     ]);
 
-    expect(wrapper.findComponent(LiquidationAdvancesList).exists()).toBe(false);
     expect(wrapper.find("div.grid.grid-cols-1.gap-6").exists()).toBe(false);
   });
 
@@ -545,4 +538,74 @@ describe("LiquidationsView — Employee table plumbing", () => {
       mockItems.push(...backup);
     }
   });
+
+  it("truncates purpose text longer than 18 characters (< 20) in the table cell while preserving full text in title attribute", async () => {
+    mockItems[0].purpose = "Purchased office supplies and materials for Q4 conference";
+    try {
+      const wrapper = mountView();
+      const firstRow = wrapper.find("tbody tr");
+      const purposeDiv = firstRow.find(".max-w-\\[18ch\\]");
+      expect(purposeDiv.exists()).toBe(true);
+
+      const purposeSpan = purposeDiv.find("span.truncate");
+      expect(purposeSpan.exists()).toBe(true);
+      expect(purposeSpan.text()).toBe("Purchased office s...");
+      expect(purposeSpan.attributes("title")).toBe(
+        "Purchased office supplies and materials for Q4 conference",
+      );
+    } finally {
+      mockItems[0].purpose = "Purpose 1";
+    }
+  });
+
+  it("renders DaysLeftBadge before StatusBadge in settlement modal header when viewing or settling an advance", async () => {
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 5);
+    const dueDateStr = futureDate.toISOString().split("T")[0];
+
+    const originalDue = mockItems[0].dueDate;
+    mockItems[0].dueDate = dueDateStr;
+    try {
+      const wrapper = mountView();
+      wrapper.vm.openSettlementModal(mockItems[0], "view");
+      await wrapper.vm.$nextTick();
+
+      const modalHeader = wrapper.find(".base-modal-stub .border-b");
+      expect(modalHeader.exists()).toBe(true);
+
+      const daysLeftBadge = modalHeader.findComponent(DaysLeftBadge);
+      const statusBadge = modalHeader.findComponent(StatusBadge);
+
+      expect(daysLeftBadge.exists()).toBe(true);
+      expect(statusBadge.exists()).toBe(true);
+      expect(daysLeftBadge.text()).toContain("days left");
+
+      // Verify ordering: DaysLeftBadge precedes StatusBadge in the DOM tree
+      expect(daysLeftBadge.element.nextElementSibling).toBe(statusBadge.element);
+    } finally {
+      mockItems[0].dueDate = originalDue;
+    }
+  });
+
+  it("renders overdue DaysLeftBadge in settlement modal header when advance is overdue", async () => {
+    const pastDate = new Date();
+    pastDate.setDate(pastDate.getDate() - 5);
+    const dueDateStr = pastDate.toISOString().split("T")[0];
+
+    const originalDue = mockItems[0].dueDate;
+    mockItems[0].dueDate = dueDateStr;
+    try {
+      const wrapper = mountView();
+      wrapper.vm.openSettlementModal(mockItems[0], "view");
+      await wrapper.vm.$nextTick();
+
+      const modalHeader = wrapper.find(".base-modal-stub .border-b");
+      const daysLeftBadge = modalHeader.findComponent(DaysLeftBadge);
+      expect(daysLeftBadge.exists()).toBe(true);
+      expect(daysLeftBadge.text()).toContain("0 days left");
+    } finally {
+      mockItems[0].dueDate = originalDue;
+    }
+  });
 });
+
