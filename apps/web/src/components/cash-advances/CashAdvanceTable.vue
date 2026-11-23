@@ -5,6 +5,7 @@ import {
   ChevronUp,
   ChevronsUpDown,
   Eye,
+  MapPin,
   Pencil,
   Trash2,
 } from "lucide-vue-next";
@@ -257,6 +258,23 @@ function isSorted(column) {
                 <span class="block truncate" :title="row.purpose">
                   {{ row.purpose || "—" }}
                 </span>
+                <div
+                  v-if="row.source_system === 'prs' || row.itinerary_id"
+                  class="mt-1 flex flex-wrap items-center gap-1.5"
+                >
+                  <span
+                    class="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700"
+                  >
+                    <MapPin class="w-2.5 h-2.5" aria-hidden="true" />
+                    <span>From PRS</span>
+                  </span>
+                  <span
+                    v-if="row.itinerary_id"
+                    class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700"
+                  >
+                    Planned Activity #{{ row.itinerary_id }}
+                  </span>
+                </div>
               </td>
               <td v-if="isAdmin" class="px-5 py-5">
                 <div class="flex items-center gap-2">

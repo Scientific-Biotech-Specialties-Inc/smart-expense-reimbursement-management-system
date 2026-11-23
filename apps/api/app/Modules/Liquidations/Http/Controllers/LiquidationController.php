@@ -5,6 +5,7 @@ namespace App\Modules\Liquidations\Http\Controllers;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Modules\Liquidations\Models\Liquidation;
+use App\Modules\CashAdvances\Jobs\UpdatePrsCashAdvanceStatusJob;
 use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Shared\Services\CashAdvanceEnrichmentService;
@@ -751,6 +752,22 @@ class LiquidationController extends Controller
                     recordType: 'liquidation',
                     recordId: $liquidation->id
                 );
+            }
+
+            if ($advance->source_system === 'prs' || !empty($advance->itinerary_id)) {
+                $advanceId = (int) $advance->id;
+                $itineraryId = $advance->itinerary_id ? (int) $advance->itinerary_id : null;
+                $advanceStatus = (string) $advance->status;
+                $rejectionComment = $validated['status'] !== 'approved' ? ($validated['admin_note'] ?? null) : null;
+
+                DB::afterCommit(function () use ($advanceId, $itineraryId, $advanceStatus, $rejectionComment) {
+                    UpdatePrsCashAdvanceStatusJob::dispatch(
+                        cashAdvanceId: $advanceId,
+                        itineraryId: $itineraryId,
+                        status: $advanceStatus,
+                        rejectionComment: $rejectionComment
+                    );
+                });
             }
 
             return response()->json([

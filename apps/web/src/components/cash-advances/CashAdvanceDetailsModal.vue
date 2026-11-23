@@ -26,6 +26,7 @@ import {
   FileText,
   Loader2,
   Eye,
+  MapPin,
 } from "lucide-vue-next";
 
 const props = defineProps({
@@ -637,9 +638,24 @@ async function confirmAcknowledge() {
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">
                 Cash Advance Ref #{{ record.id }}
               </p>
-              <h2 class="text-2xl font-bold text-slate-800">
-                {{ formatPeso(record.amount) }}
-              </h2>
+              <div class="flex flex-wrap items-center gap-2.5">
+                <h2 class="text-2xl font-bold text-slate-800">
+                  {{ formatPeso(record.amount) }}
+                </h2>
+                <span
+                  v-if="record.source_system === 'prs' || record.itinerary_id"
+                  class="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-0.5 text-[11px] font-semibold text-teal-700"
+                >
+                  <MapPin class="w-3 h-3" aria-hidden="true" />
+                  <span>From PRS</span>
+                </span>
+                <span
+                  v-if="record.itinerary_id"
+                  class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
+                >
+                  Planned Activity #{{ record.itinerary_id }}
+                </span>
+              </div>
             </div>
             <StatusBadge :status="record.status" />
           </div>
@@ -914,9 +930,24 @@ async function confirmAcknowledge() {
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">
                 Cash Advance Ref #{{ record.id }}
               </p>
-              <h2 class="text-2xl font-bold text-slate-800">
-                {{ formatPeso(record.amount) }}
-              </h2>
+              <div class="flex flex-wrap items-center gap-2.5">
+                <h2 class="text-2xl font-bold text-slate-800">
+                  {{ formatPeso(record.amount) }}
+                </h2>
+                <span
+                  v-if="record.source_system === 'prs' || record.itinerary_id"
+                  class="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-0.5 text-[11px] font-semibold text-teal-700"
+                >
+                  <MapPin class="w-3 h-3" aria-hidden="true" />
+                  <span>From PRS</span>
+                </span>
+                <span
+                  v-if="record.itinerary_id"
+                  class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
+                >
+                  Planned Activity #{{ record.itinerary_id }}
+                </span>
+              </div>
             </div>
             <StatusBadge :status="record.status" />
           </div>

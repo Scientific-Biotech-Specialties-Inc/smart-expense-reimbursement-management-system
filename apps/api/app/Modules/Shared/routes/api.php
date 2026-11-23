@@ -6,6 +6,7 @@ use App\Modules\Shared\Http\Controllers\CmsController;
 use App\Modules\Shared\Http\Controllers\CryptoController;
 use App\Modules\Shared\Http\Controllers\CurrencyRateController;
 use App\Modules\Shared\Http\Controllers\InternalCmsController;
+use App\Modules\Shared\Http\Controllers\InternalPrsController;
 use App\Modules\Shared\Http\Controllers\InternalTsController;
 use App\Modules\Shared\Http\Controllers\ReportController;
 use App\Modules\Shared\Http\Controllers\TsController;
@@ -22,6 +23,16 @@ Route::prefix('api')->group(function () {
         Route::post('/ts/reimbursements', [InternalTsController::class, 'storeReimbursement']);
         Route::get('/ts/reimbursements/by-ticket/{ticketId}', [InternalTsController::class, 'reimbursementByTicket'])
             ->whereNumber('ticketId');
+
+        Route::post('/prs/reimbursements', [InternalPrsController::class, 'storeReimbursement']);
+        Route::get('/prs/reimbursements/by-activity/{activityId}', [InternalPrsController::class, 'reimbursementByActivity'])
+            ->whereNumber('activityId');
+
+        Route::post('/prs/cash-advances', [InternalPrsController::class, 'storeCashAdvance']);
+        Route::get('/prs/cash-advances/by-itinerary/{itineraryId}', [InternalPrsController::class, 'cashAdvanceByItinerary'])
+            ->whereNumber('itineraryId');
+        Route::delete('/prs/cash-advances/by-itinerary/{itineraryId}', [InternalPrsController::class, 'removeCashAdvanceByItinerary'])
+            ->whereNumber('itineraryId');
     });
 
     Route::middleware('auth.external')->group(function () {

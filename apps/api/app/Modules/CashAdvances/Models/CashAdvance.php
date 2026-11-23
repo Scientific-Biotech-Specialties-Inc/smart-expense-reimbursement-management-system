@@ -7,6 +7,10 @@ use App\Modules\Users\Models\User;
 
 class CashAdvance extends Model
 {
+    protected $appends = [
+        'reference_no',
+    ];
+
     protected $fillable = [
         'user_id',
         'purpose',
@@ -21,10 +25,13 @@ class CashAdvance extends Model
         'signature',
         'acknowledged_at',
         'report_template_data',
+        'source_system',
+        'itinerary_id',
     ];
 
     protected $casts = [
         'contract_id'         => 'integer',
+        'itinerary_id'        => 'integer',
         'amount'              => 'decimal:2',
         'outstanding_balance' => 'decimal:2',
         'expected_disbursement_date' => 'date',
@@ -32,6 +39,17 @@ class CashAdvance extends Model
         'acknowledged_at'    => 'datetime',
         'report_template_data' => 'array',
     ];
+
+    public function getReferenceNoAttribute(): string
+    {
+        if (!$this->id) {
+            return '';
+        }
+
+        $year = $this->created_at ? $this->created_at->format('Y') : date('Y');
+
+        return 'CA-' . $year . '-' . str_pad((string) $this->id, 5, '0', STR_PAD_LEFT);
+    }
 
     public function requester()
     {

@@ -7,6 +7,7 @@ use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Jobs\DispatchReceiptToAiService;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -525,6 +526,10 @@ class ReceiptService
                     continue;
                 }
 
+                if ($file instanceof UploadedFile) {
+                    $file = $this->normalizeUploadedImageFile($file);
+                }
+
                 $fileType = $file->extension();
                 if ($fileType === 'jpg') {
                     $fileType = 'jpeg';
@@ -546,6 +551,109 @@ class ReceiptService
             'file_type'       => $fileTypes,
             'file_size_bytes' => $fileSizes,
         ];
+    }
+
+    /**
+     * Normalize non-JPEG/PNG raster images (WEBP, GIF, BMP, JFIF) to PNG/JPEG <= 2MB via PHP GD.
+     * Standard JPEG, PNG, and PDF files are returned untouched.
+     */
+    public function normalizeUploadedImageFile(UploadedFile $file): UploadedFile
+    {
+        $clientExt = strtolower((string) $file->getClientOriginalExtension());
+        $guessedExt = strtolower((string) $file->extension());
+        $mime = strtolower((string) $file->getMimeType());
+
+        if ($clientExt === 'pdf' || $guessedExt === 'pdf' || $mime === 'application/pdf') {
+            return $file;
+        }
+
+        if (
+            in_array($clientExt, ['jpg', 'jpeg', 'png'], true)
+            || ($clientExt === '' && in_array($guessedExt, ['jpg', 'jpeg', 'png'], true))
+        ) {
+            return $file;
+        }
+
+        $isRasterImage = str_starts_with($mime, 'image/')
+            || in_array($clientExt, ['webp', 'gif', 'bmp', 'jfif'], true)
+            || in_array($guessedExt, ['webp', 'gif', 'bmp', 'jfif'], true);
+
+        if (!$isRasterImage) {
+            return $file;
+        }
+
+        if (!function_exists('imagecreatefromstring')) {
+            throw new \RuntimeException('PHP GD extension is required to normalize uploaded images.');
+        }
+
+        $realPath = $file->getRealPath();
+        $raw = $realPath ? @file_get_contents($realPath) : false;
+        $gdImage = $raw !== false ? @imagecreatefromstring($raw) : false;
+
+        if ($gdImage === false) {
+            throw ValidationException::withMessages([
+                'receipts' => ['Unable to decode uploaded image file.'],
+            ]);
+        }
+
+        $maxBytes = 2 * 1024 * 1024;
+        $baseTemp = tempnam(sys_get_temp_dir(), 'serms_img_');
+        if ($baseTemp === false) {
+            imagedestroy($gdImage);
+            throw new \RuntimeException('Failed to allocate temporary file for image normalization.');
+        }
+
+        $pngPath = $baseTemp . '.png';
+        $jpgPath = $baseTemp . '.jpg';
+        @unlink($baseTemp);
+
+        $targetPath = null;
+        $targetExt = null;
+        $targetMime = null;
+
+        try {
+            imagealphablending($gdImage, false);
+            imagesavealpha($gdImage, true);
+            if (@imagepng($gdImage, $pngPath, 6) && file_exists($pngPath) && filesize($pngPath) <= $maxBytes) {
+                $targetPath = $pngPath;
+                $targetExt = 'png';
+                $targetMime = 'image/png';
+            } else {
+                @unlink($pngPath);
+
+                $width = imagesx($gdImage);
+                $height = imagesy($gdImage);
+                $flattened = imagecreatetruecolor($width, $height);
+                $white = imagecolorallocate($flattened, 255, 255, 255);
+                imagefill($flattened, 0, 0, $white);
+                imagecopy($flattened, $gdImage, 0, 0, 0, 0, $width, $height);
+
+                foreach ([90, 80, 70, 60, 50] as $quality) {
+                    if (@imagejpeg($flattened, $jpgPath, $quality) && file_exists($jpgPath) && filesize($jpgPath) <= $maxBytes) {
+                        $targetPath = $jpgPath;
+                        $targetExt = 'jpg';
+                        $targetMime = 'image/jpeg';
+                        break;
+                    }
+                }
+
+                imagedestroy($flattened);
+            }
+        } finally {
+            imagedestroy($gdImage);
+        }
+
+        if ($targetPath === null) {
+            @unlink($pngPath);
+            @unlink($jpgPath);
+            throw ValidationException::withMessages([
+                'receipts' => ['Normalized image exceeds the 2MB maximum file size.'],
+            ]);
+        }
+
+        $baseName = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME) ?: 'receipt';
+
+        return new UploadedFile($targetPath, "{$baseName}.{$targetExt}", $targetMime, null, true);
     }
 
     /**

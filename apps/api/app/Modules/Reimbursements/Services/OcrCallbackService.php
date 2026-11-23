@@ -4,8 +4,10 @@ namespace App\Modules\Reimbursements\Services;
 
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
+use App\Modules\Reimbursements\Jobs\UpdatePrsReimbursementStatusJob;
 use App\Modules\Reimbursements\Models\ExpenseCategory;
 use App\Modules\Reimbursements\Models\Receipt;
+use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\Shared\Services\CmsVendorVerificationService;
 use App\Modules\Shared\Services\CurrencyConversionService;
 use App\Modules\Shared\Traits\HydratesSplitReceipts;
@@ -37,8 +39,9 @@ class OcrCallbackService
     public function handle(int $receiptId, array $data): Receipt
     {
         $splitCachePayload = null;
+        $prsReimbursementsToSync = [];
 
-        $result = DB::transaction(function () use ($receiptId, $data, &$splitCachePayload) {
+        $result = DB::transaction(function () use ($receiptId, $data, &$splitCachePayload, &$prsReimbursementsToSync) {
             $receipt = Receipt::with('items')->findOrFail($receiptId);
 
             // Replay guard — do not overwrite already-confirmed or already-rejected receipts.
@@ -68,12 +71,16 @@ class OcrCallbackService
                 $hasHashDuplicate = count($hashes) > 1
                     && $this->duplicateReceiptExists($hashes, $receipt->id);
 
-                return $this->applyOcrResultToReceipt(
+                $updated = $this->applyOcrResultToReceipt(
                     receipt: $receipt,
                     data: $data,
                     hasHashDuplicate: $hasHashDuplicate,
                     beforeState: $beforeState,
                 );
+
+                $this->syncLinkedReimbursementsAfterOcr($updated, [], $prsReimbursementsToSync);
+
+                return $updated;
             }
 
             $originalFiles = $this->extractFileArrays($receipt);
@@ -165,6 +172,8 @@ class OcrCallbackService
             $receipt->setAttribute('split_receipt_ids', $splitIds);
             $receipt->setAttribute('split_receipts', $splitChildrenModels);
 
+            $this->syncLinkedReimbursementsAfterOcr($receipt, $splitIds, $prsReimbursementsToSync);
+
             return $receipt;
         });
 
@@ -176,7 +185,74 @@ class OcrCallbackService
             );
         }
 
+        foreach ($prsReimbursementsToSync as $prsReimbursement) {
+            $activityId = $prsReimbursement->prs_activity_id
+                ? (int) $prsReimbursement->prs_activity_id
+                : (is_numeric($prsReimbursement->source_submission_id) ? (int) $prsReimbursement->source_submission_id : null);
+
+            UpdatePrsReimbursementStatusJob::dispatch(
+                $prsReimbursement->source_submission_id ?? ($activityId !== null ? (string) $activityId : null),
+                (int) $prsReimbursement->id,
+                $activityId,
+                (string) $prsReimbursement->status,
+                $prsReimbursement->rejection_comment
+            );
+        }
+
         return $result;
+    }
+
+    /**
+     * Sync split receipts, authoritative PHP total, and expense category to linked reimbursements after OCR.
+     *
+     * @param  array<int, int>           $splitIds
+     * @param  array<int, Reimbursement> $prsReimbursementsToSync
+     */
+    private function syncLinkedReimbursementsAfterOcr(
+        Receipt $receipt,
+        array $splitIds,
+        array &$prsReimbursementsToSync
+    ): void {
+        $linkedReimbursements = Reimbursement::whereIn('status', ['pending', 'submitted', 'processing'])
+            ->where(function ($q) use ($receipt) {
+                $q->where('receipt_id', $receipt->id)
+                    ->orWhereHas('receipts', fn ($r) => $r->where('receipts.id', $receipt->id));
+            })
+            ->lockForUpdate()
+            ->get();
+
+        foreach ($linkedReimbursements as $reimbursement) {
+            if (!empty($splitIds)) {
+                $reimbursement->receipts()->syncWithoutDetaching($splitIds);
+            }
+
+            $allReceiptIds = $reimbursement->receipts()->pluck('receipts.id')->all();
+            if (empty($allReceiptIds) && $reimbursement->receipt_id) {
+                $allReceiptIds = [$reimbursement->receipt_id];
+            }
+
+            $authoritativeTotal = app(CurrencyConversionService::class)->resolveAuthoritativePhpTotal(
+                $allReceiptIds,
+                $reimbursement->amount !== null ? (float) $reimbursement->amount : null,
+                true
+            );
+
+            $updates = [];
+            if ($authoritativeTotal !== null) {
+                $updates['amount'] = $authoritativeTotal;
+            }
+            if ($reimbursement->expense_category_id === null && $receipt->expense_category_id !== null) {
+                $updates['expense_category_id'] = $receipt->expense_category_id;
+            }
+
+            if (!empty($updates)) {
+                $reimbursement->update($updates);
+            }
+
+            if ($reimbursement->source_system === 'prs' || !empty($reimbursement->prs_activity_id)) {
+                $prsReimbursementsToSync[] = $reimbursement->fresh();
+            }
+        }
     }
 
     /**

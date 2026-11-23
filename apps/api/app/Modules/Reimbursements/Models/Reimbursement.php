@@ -45,12 +45,14 @@ class Reimbursement extends Model
         'secondary_audit_note',
         'source_system',
         'source_submission_id',
+        'prs_activity_id',
         'is_request',
     ];
 
     protected $casts = [
         'contract_id' => 'integer',
         'ticket_id' => 'integer',
+        'prs_activity_id' => 'integer',
         'amount' => 'decimal:2',
         'date' => 'date',
         'approved_at' => 'datetime',

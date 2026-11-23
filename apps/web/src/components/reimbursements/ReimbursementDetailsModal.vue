@@ -16,6 +16,7 @@ import {
   FileText,
   Download,
   Eye,
+  MapPin,
   Ticket,
   Wallet,
 } from "lucide-vue-next";
@@ -168,6 +169,19 @@ function categoryName(record) {
                   class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
                 >
                   Ticket {{ viewingRecord.ticket_number || `#${viewingRecord.ticket_id}` }}
+                </span>
+                <span
+                  v-if="viewingRecord.source_system === 'prs' || viewingRecord.prs_activity_id"
+                  class="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-0.5 text-[11px] font-semibold text-teal-700"
+                >
+                  <MapPin class="w-3 h-3" aria-hidden="true" />
+                  <span>From PRS</span>
+                </span>
+                <span
+                  v-if="(viewingRecord.source_system === 'prs' || viewingRecord.prs_activity_id) && (viewingRecord.prs_activity_id || viewingRecord.source_submission_id)"
+                  class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700"
+                >
+                  Activity #{{ viewingRecord.prs_activity_id || viewingRecord.source_submission_id }}
                 </span>
                 <span
                   v-if="viewingRecord.fast_track_eligible"

@@ -16,6 +16,10 @@ class AuthenticateInternalService
         $secret = $this->resolveExpectedSecret($request);
         $provided = $request->header('X-Internal-Secret');
 
+        if ((!is_string($provided) || $provided === '') && $request->is('api/internal/prs*')) {
+            $provided = $request->bearerToken();
+        }
+
         if (empty($secret) || !is_string($provided) || $provided === '' || !hash_equals((string) $secret, $provided)) {
             return response()->json(['message' => 'Unauthorized.'], 401);
         }
@@ -25,6 +29,22 @@ class AuthenticateInternalService
 
     private function resolveExpectedSecret(Request $request): ?string
     {
+        if ($request->is('api/internal/prs*')) {
+            $prsSecret = config('services.prs.internal_secret');
+            if (!empty($prsSecret)) {
+                return (string) $prsSecret;
+            }
+
+            foreach (['PRS_INTERNAL_SECRET', 'INTERNAL_SERVICE_SECRET'] as $key) {
+                $val = getenv($key) ?: ($_ENV[$key] ?? null) ?: ($_SERVER[$key] ?? null);
+                if (!empty($val)) {
+                    return (string) $val;
+                }
+            }
+
+            return null;
+        }
+
         $primary = $request->is('api/internal/ts*')
             ? config('services.ts.internal_secret')
             : config('services.cms.internal_secret');

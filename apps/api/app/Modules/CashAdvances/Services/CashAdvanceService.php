@@ -2,6 +2,7 @@
 
 namespace App\Modules\CashAdvances\Services;
 
+use App\Modules\CashAdvances\Jobs\UpdatePrsCashAdvanceStatusJob;
 use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\CashAdvances\Models\CashAdvanceDocument;
 use App\Modules\CashAdvances\Models\CashAdvanceApprovalAction;
@@ -135,6 +136,8 @@ class CashAdvanceService
                 afterState: ['status' => 'approved', 'comment' => $comment]
             );
 
+            $this->dispatchPrsStatusUpdate($advance);
+
             return $advance;
         });
     }
@@ -243,6 +246,8 @@ class CashAdvanceService
                 afterState: ['status' => $newStatus, 'comment' => $comment, 'revision_count' => $newCount]
             );
 
+            $this->dispatchPrsStatusUpdate($advance, $comment);
+
             return $advance;
         });
     }
@@ -319,6 +324,8 @@ class CashAdvanceService
                 ]
             );
 
+            $this->dispatchPrsStatusUpdate($advance);
+
             return $advance;
         });
     }
@@ -363,6 +370,8 @@ class CashAdvanceService
                 beforeState: ['status' => $oldStatus],
                 afterState: ['status' => 'signed']
             );
+
+            $this->dispatchPrsStatusUpdate($advance);
 
             return $advance;
         });
@@ -461,6 +470,8 @@ class CashAdvanceService
                 excludeUserId: $user->id
             );
 
+            $this->dispatchPrsStatusUpdate($advance);
+
             return $advance;
         });
     }
@@ -493,6 +504,26 @@ class CashAdvanceService
             $advance->delete();
 
             return true;
+        });
+    }
+
+    private function dispatchPrsStatusUpdate(CashAdvance $advance, ?string $rejectionComment = null): void
+    {
+        if ($advance->source_system !== 'prs' && empty($advance->itinerary_id)) {
+            return;
+        }
+
+        $advanceId = (int) $advance->id;
+        $itineraryId = $advance->itinerary_id ? (int) $advance->itinerary_id : null;
+        $status = (string) $advance->status;
+
+        DB::afterCommit(function () use ($advanceId, $itineraryId, $status, $rejectionComment) {
+            UpdatePrsCashAdvanceStatusJob::dispatch(
+                cashAdvanceId: $advanceId,
+                itineraryId: $itineraryId,
+                status: $status,
+                rejectionComment: $rejectionComment
+            );
         });
     }
 }
