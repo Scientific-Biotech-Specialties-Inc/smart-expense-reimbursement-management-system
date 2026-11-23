@@ -21,6 +21,9 @@ class GrantReimbursementRequest extends FormRequest
     {
         return [
             'password' => 'nullable|string',
+            'encryptedKey' => 'nullable|string',
+            'iv' => 'nullable|string',
+            'ciphertext' => 'nullable|string',
             'approved_by' => 'nullable|string|max:255',
             'granted_by' => 'required|string|max:255',
             'payout_method' => 'required|string|in:Cash,E-wallet,Card,Visa,Other',

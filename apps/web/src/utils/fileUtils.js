@@ -1,4 +1,12 @@
-const SUPABASE_STORAGE_BASE_URL = "https://vbabvrcfqcmvvjwmzuwx.supabase.co/storage/v1/object/public";
+const DEFAULT_SUPABASE_STORAGE_BASE_URL =
+  "https://vbabvrcfqcmvvjwmzuwx.supabase.co/storage/v1/object/public";
+
+function getSupabaseStorageBaseUrl() {
+  return (
+    import.meta.env?.VITE_SUPABASE_STORAGE_BASE_URL ||
+    DEFAULT_SUPABASE_STORAGE_BASE_URL
+  ).replace(/\/+$/, "");
+}
 
 /**
  * Resolves a full URL for a file path stored in Supabase.
@@ -18,6 +26,6 @@ export function getFileUrl(filePath, bucket = "cash_advances") {
   ) {
     return pathStr;
   }
-  return `${SUPABASE_STORAGE_BASE_URL}/${bucket}/${pathStr.replace(/^\/+/, "")}`;
+  return `${getSupabaseStorageBaseUrl()}/${bucket}/${pathStr.replace(/^\/+/, "")}`;
 }
 

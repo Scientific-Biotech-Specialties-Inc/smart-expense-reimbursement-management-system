@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { apiFetch } from "../utils/apiFetch";
+import { withEncryptedPassword } from "../utils/crypto";
 export const useCashAdvanceStore = defineStore("cashAdvance", () => {
   const items = ref([]);
   const isLoading = ref(false);
@@ -155,10 +156,11 @@ export const useCashAdvanceStore = defineStore("cashAdvance", () => {
 
   async function approveRequest(id, comment, password) {
     try {
+      const body = await withEncryptedPassword(password, { comment });
       const response = await apiFetch(`/api/serms/cash-advances/${id}/approve`, {
         method: "POST",
         credentials: "include",
-        body: JSON.stringify({ comment, password }),
+        body: JSON.stringify(body),
       });
       if (response.ok) {
         const result = await response.json();
@@ -194,14 +196,14 @@ export const useCashAdvanceStore = defineStore("cashAdvance", () => {
       effectiveAction = "revise";
     }
     try {
+      const body = await withEncryptedPassword(effectivePassword, {
+        comment,
+        action: effectiveAction,
+      });
       const response = await apiFetch(`/api/serms/cash-advances/${id}/reject`, {
         method: "POST",
         credentials: "include",
-        body: JSON.stringify({
-          comment,
-          action: effectiveAction,
-          password: effectivePassword,
-        }),
+        body: JSON.stringify(body),
       });
       if (response.ok) {
         const result = await response.json();
@@ -243,15 +245,12 @@ export const useCashAdvanceStore = defineStore("cashAdvance", () => {
         effectivePassword = payload.password;
       }
     }
-    if (effectivePassword !== undefined) {
-      requestBody.password = effectivePassword;
-    }
-
     try {
+      const body = await withEncryptedPassword(effectivePassword, requestBody);
       const response = await apiFetch(`/api/serms/cash-advances/${id}/disburse`, {
         method: "POST",
         credentials: "include",
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(body),
       });
       if (response.ok) {
         const result = await response.json();
@@ -360,10 +359,11 @@ export const useCashAdvanceStore = defineStore("cashAdvance", () => {
    */
   async function deleteRequest(id, password) {
     try {
+      const body = await withEncryptedPassword(password);
       const response = await apiFetch(`/api/serms/cash-advances/${id}`, {
         method: "DELETE",
         credentials: "include",
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(body),
       });
       if (response.ok) {
         items.value = items.value.filter((i) => i.id != id);

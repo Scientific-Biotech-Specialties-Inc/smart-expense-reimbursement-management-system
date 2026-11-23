@@ -916,89 +916,104 @@ describe("useCashAdvanceStore — Payout Normalization & Disbursement", () => {
     });
 
     it("supports both legacy { channel, reference } and GrantPayoutModal payloads in disburseRequest and extracts validation errors", async () => {
-      const store = useCashAdvanceStore();
+      const originalCrypto = globalThis.crypto;
+      Object.defineProperty(globalThis, "crypto", {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      });
 
-      // 1. New GrantPayoutModal payload
-      fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          data: {
-            id: 55,
-            user_id: 10,
-            status: "disbursed",
-            payout: {
-              payout_method: "Other",
-              payout_method_other: "GCash Corporate",
-              granted_by: "Admin User",
-              granter_signature: "data:image/png;base64,sig55",
+      try {
+        const store = useCashAdvanceStore();
+
+        // 1. New GrantPayoutModal payload
+        fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: {
+              id: 55,
+              user_id: 10,
+              status: "disbursed",
+              payout: {
+                payout_method: "Other",
+                payout_method_other: "GCash Corporate",
+                granted_by: "Admin User",
+                granter_signature: "data:image/png;base64,sig55",
+              },
             },
-          },
-        }),
-      });
+          }),
+        });
 
-      const modalRes = await store.disburseRequest(55, {
-        granted_by: "Admin User",
-        payout_method: "Other",
-        payout_method_other: "GCash Corporate",
-        granter_signature: "data:image/png;base64,sig55",
-        password: "secret",
-      });
-
-      const [, modalFetchOpts] = fetchSpy.mock.calls[0];
-      expect(JSON.parse(modalFetchOpts.body)).toEqual({
-        granted_by: "Admin User",
-        payout_method: "Other",
-        payout_method_other: "GCash Corporate",
-        granter_signature: "data:image/png;base64,sig55",
-        password: "secret",
-      });
-      expect(modalRes.payoutMethod).toBe("Other");
-
-      // 2. Legacy { channel, reference }, password signature
-      fetchSpy.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          data: {
-            id: 56,
-            user_id: 10,
-            status: "disbursed",
-            disbursement: { channel: "Bank Transfer", reference_number: "REF-56" },
-          },
-        }),
-      });
-
-      const legacyRes = await store.disburseRequest(
-        56,
-        { channel: "Bank Transfer", reference: "REF-56" },
-        "legacyPass",
-      );
-      const [, legacyFetchOpts] = fetchSpy.mock.calls[1];
-      expect(JSON.parse(legacyFetchOpts.body)).toEqual({
-        channel: "Bank Transfer",
-        reference: "REF-56",
-        password: "legacyPass",
-      });
-      expect(legacyRes.payoutMethod).toBe("Bank Transfer");
-
-      // 3. Validation error extraction (e.g. payout_method_other)
-      fetchSpy.mockResolvedValueOnce({
-        ok: false,
-        json: async () => ({
-          message: "Validation failed",
-          errors: {
-            payout_method_other: ["Please specify the payout method."],
-          },
-        }),
-      });
-
-      await expect(
-        store.disburseRequest(57, {
+        const modalRes = await store.disburseRequest(55, {
           granted_by: "Admin User",
           payout_method: "Other",
-          payout_method_other: "",
-          granter_signature: "data:image/png;base64,sig57",
+          payout_method_other: "GCash Corporate",
+          granter_signature: "data:image/png;base64,sig55",
           password: "secret",
-        }),
-      ).rejects.toThrow("Please specify the payout method.");
+        });
+
+        const [, modalFetchOpts] = fetchSpy.mock.calls[0];
+        expect(JSON.parse(modalFetchOpts.body)).toEqual({
+          granted_by: "Admin User",
+          payout_method: "Other",
+          payout_method_other: "GCash Corporate",
+          granter_signature: "data:image/png;base64,sig55",
+          password: "secret",
+        });
+        expect(modalRes.payoutMethod).toBe("Other");
+
+        // 2. Legacy { channel, reference }, password signature
+        fetchSpy.mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: {
+              id: 56,
+              user_id: 10,
+              status: "disbursed",
+              disbursement: { channel: "Bank Transfer", reference_number: "REF-56" },
+            },
+          }),
+        });
+
+        const legacyRes = await store.disburseRequest(
+          56,
+          { channel: "Bank Transfer", reference: "REF-56" },
+          "legacyPass",
+        );
+        const [, legacyFetchOpts] = fetchSpy.mock.calls[1];
+        expect(JSON.parse(legacyFetchOpts.body)).toEqual({
+          channel: "Bank Transfer",
+          reference: "REF-56",
+          password: "legacyPass",
+        });
+        expect(legacyRes.payoutMethod).toBe("Bank Transfer");
+
+        // 3. Validation error extraction (e.g. payout_method_other)
+        fetchSpy.mockResolvedValueOnce({
+          ok: false,
+          json: async () => ({
+            message: "Validation failed",
+            errors: {
+              payout_method_other: ["Please specify the payout method."],
+            },
+          }),
+        });
+
+        await expect(
+          store.disburseRequest(57, {
+            granted_by: "Admin User",
+            payout_method: "Other",
+            payout_method_other: "",
+            granter_signature: "data:image/png;base64,sig57",
+            password: "secret",
+          }),
+        ).rejects.toThrow("Please specify the payout method.");
+      } finally {
+        Object.defineProperty(globalThis, "crypto", {
+          value: originalCrypto,
+          configurable: true,
+          writable: true,
+        });
+      }
     });
 });

@@ -28,7 +28,10 @@ class DisburseCashAdvanceRequest extends FormRequest
             'payout_method' => 'required_without:channel|nullable|string|in:Cash,E-wallet,Card,Visa,Other',
             'payout_method_other' => 'required_if:payout_method,Other|nullable|string|max:255',
             'granter_signature' => 'required_with:payout_method|nullable|string',
-            'password' => 'required|string',
+            'password' => 'required_without_all:encryptedKey,iv,ciphertext|nullable|string',
+            'encryptedKey' => 'nullable|string',
+            'iv' => 'nullable|string',
+            'ciphertext' => 'nullable|string',
         ];
     }
 }

@@ -9,13 +9,13 @@ use App\Modules\Reimbursements\Http\Controllers\PrsWebhookController;
 use App\Modules\Reimbursements\Http\Controllers\OcrCallbackController;
 
 Route::post('/prs-requests', PrsReimbursementRequestController::class)->middleware('auth.prs-reimbursement-api');
-Route::post('/webhooks/prs', PrsWebhookController::class);
+Route::post('/webhooks/prs', PrsWebhookController::class)->middleware('throttle:serms-api');
 
 // AI OCR service callback — authenticated by the AI service API key (bearer token).
 // This route is outside auth.external because the caller is the AI service, not a user.
 Route::post('/receipts/{id}/ocr-callback', OcrCallbackController::class)->middleware('auth.ai-service-api');
 
-Route::middleware(['auth.external'])->group(function () {
+Route::middleware(['auth.external', 'throttle:serms-api'])->group(function () {
     Route::get('/', [ReimbursementController::class, 'index']);
     Route::post('/', [ReimbursementController::class, 'store']);
 
@@ -25,7 +25,7 @@ Route::middleware(['auth.external'])->group(function () {
     Route::post('/receipts', [ReceiptController::class, 'store']);
     Route::post('/receipts/segmented', [ReceiptController::class, 'storeSegmented']);
     Route::post('/receipts/{id}/resubmit', [ReceiptController::class, 'resubmit']);
-    Route::post('/receipts/{id}/retry-ocr', [ReceiptController::class, 'retryOcr']);
+    Route::post('/receipts/{id}/retry-ocr', [ReceiptController::class, 'retryOcr'])->middleware('throttle:serms-exports-ocr');
     Route::patch('/receipts/{id}', [ReceiptController::class, 'update']);
     Route::delete('/receipts/{id}', [ReceiptController::class, 'destroy']);
 
@@ -33,13 +33,13 @@ Route::middleware(['auth.external'])->group(function () {
     Route::get('/categories', [ExpenseCategoryController::class, 'index']);
 
     // Specific actions must be BEFORE dynamic {id} routes
-    Route::post('/{id}/approve', [ReimbursementController::class, 'approve']);
-    Route::post('/{id}/reject', [ReimbursementController::class, 'reject']);
-    Route::post('/{id}/grant', [ReimbursementController::class, 'grant']);
+    Route::post('/{id}/approve', [ReimbursementController::class, 'approve'])->middleware('throttle:serms-password');
+    Route::post('/{id}/reject', [ReimbursementController::class, 'reject'])->middleware('throttle:serms-password');
+    Route::post('/{id}/grant', [ReimbursementController::class, 'grant'])->middleware('throttle:serms-password');
     Route::post('/{id}/acknowledge', [ReimbursementController::class, 'acknowledge']);
 
     // Dynamic routes must be at the bottom
     Route::get('/{id}', [ReimbursementController::class, 'show']);
     Route::patch('/{id}', [ReimbursementController::class, 'update']);
-    Route::delete('/{id}', [ReimbursementController::class, 'destroy']);
+    Route::delete('/{id}', [ReimbursementController::class, 'destroy'])->middleware('throttle:serms-password');
 });

@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { apiFetch } from "../utils/apiFetch";
+import { withEncryptedPassword } from "../utils/crypto";
 
 export const useReimbursementStore = defineStore("reimbursement", () => {
   const items = ref([]);
@@ -69,18 +70,19 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
   async function approve(id, password, auditOptions = {}) {
     isLoading.value = true;
     try {
-      const payload = { password };
+      const payload = {};
       if (auditOptions.secondaryAuditConfirmed) {
         payload.secondary_audit_confirmed = true;
       }
       if (auditOptions.secondaryAuditNote?.trim()) {
         payload.secondary_audit_note = auditOptions.secondaryAuditNote.trim();
       }
+      const body = await withEncryptedPassword(password, payload);
       const response = await apiFetch(
         `/api/serms/reimbursements/${id}/approve`,
         {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify(body),
         },
       );
       if (!response.ok) {
@@ -108,11 +110,12 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
   async function reject(id, comment, password, action = "revise") {
     isLoading.value = true;
     try {
+      const body = await withEncryptedPassword(password, { comment, action });
       const response = await apiFetch(
         `/api/serms/reimbursements/${id}/reject`,
         {
           method: "POST",
-          body: JSON.stringify({ comment, password, action }),
+          body: JSON.stringify(body),
         },
       );
       if (!response.ok) {
@@ -169,9 +172,10 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
   async function deleteRequest(id, password) {
     isLoading.value = true;
     try {
+      const body = await withEncryptedPassword(password);
       const response = await apiFetch(`/api/serms/reimbursements/${id}`, {
         method: "DELETE",
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(body),
       });
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
@@ -192,7 +196,9 @@ export const useReimbursementStore = defineStore("reimbursement", () => {
   async function grant(id, payload) {
     isLoading.value = true;
     try {
-      const body = typeof payload === "string" ? { password: payload } : payload;
+      const rawPayload = typeof payload === "string" ? {} : payload;
+      const rawPassword = typeof payload === "string" ? payload : payload?.password;
+      const body = await withEncryptedPassword(rawPassword, rawPayload);
       const response = await apiFetch(`/api/serms/reimbursements/${id}/grant`, {
         method: "POST",
         body: JSON.stringify(body),

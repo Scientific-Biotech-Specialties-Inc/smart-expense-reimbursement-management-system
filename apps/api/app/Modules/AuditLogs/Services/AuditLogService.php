@@ -37,6 +37,7 @@ class AuditLogService
         'LIQUIDATION_APPROVED' => ['label' => 'Approved & Settled', 'tone' => 'success', 'domain' => 'liquidation', 'domain_label' => 'Liquidation'],
         'LIQUIDATION_REVISED' => ['label' => 'Revision Requested', 'tone' => 'warning', 'domain' => 'liquidation', 'domain_label' => 'Liquidation'],
         'LIQUIDATION_REJECTED' => ['label' => 'Rejected', 'tone' => 'danger', 'domain' => 'liquidation', 'domain_label' => 'Liquidation'],
+        'LIQUIDATION_DELETED' => ['label' => 'Deleted', 'tone' => 'danger', 'domain' => 'liquidation', 'domain_label' => 'Liquidation'],
 
         'OVERDUE_PENALTY' => ['label' => 'Daily Penalty Applied', 'tone' => 'danger', 'domain' => 'cash_advance', 'domain_label' => 'Cash Advance'],
 

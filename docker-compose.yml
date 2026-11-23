@@ -5,8 +5,8 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: serms
-      MYSQL_ROOT_PASSWORD: secret
-      MYSQL_PASSWORD: secret
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-secret}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-secret}
       MYSQL_USER: serms_user
     ports:
       - "3306:3306"
@@ -22,7 +22,7 @@ services:
           "localhost",
           "-u",
           "serms_user",
-          "-psecret",
+          "-p${MYSQL_PASSWORD:-secret}",
         ]
       interval: 5s
       timeout: 5s
@@ -57,17 +57,17 @@ services:
       - DB_HOST=mysql
       - DB_DATABASE=serms
       - DB_USERNAME=root
-      - DB_PASSWORD=secret
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
       - REDIS_HOST=redis
       - CACHE_STORE=redis
       - SERMS_SERVICE_ROLE=api
       - JWT_PUBLIC_KEY_PATH=/var/www/storage/oauth-public.key
-      - PRS_REIMBURSEMENT_API_KEY=prs-serms-local-service-key
+      - PRS_REIMBURSEMENT_API_KEY=${PRS_REIMBURSEMENT_API_KEY:-prs-serms-local-service-key}
       - PRS_REIMBURSEMENT_STATUS_API_URL=http://prs_api:8000/api/integrations/serms/reimbursement-status
-      - PRS_REIMBURSEMENT_STATUS_API_KEY=serms-prs-local-service-key
+      - PRS_REIMBURSEMENT_STATUS_API_KEY=${PRS_REIMBURSEMENT_STATUS_API_KEY:-serms-prs-local-service-key}
       - PRS_REIMBURSEMENT_STATUS_API_TIMEOUT=10
       - AI_SERVICE_URL=http://ocr_api:8010
-      - AI_SERVICE_API_KEY=ocr-callback-key-change-me
+      - AI_SERVICE_API_KEY=${AI_SERVICE_API_KEY:-ocr-callback-key-change-me}
       - AI_SERVICE_CALLBACK_BASE_URL=http://serms_api:8000
       - AI_SERVICE_TIMEOUT=10
       - CMS_CONTRACT_URL=${CMS_CONTRACT_URL:-http://contract-management:8000/api}
@@ -123,17 +123,17 @@ services:
       - DB_HOST=mysql
       - DB_DATABASE=serms
       - DB_USERNAME=root
-      - DB_PASSWORD=secret
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
       - REDIS_HOST=redis
       - CACHE_STORE=redis
       - SERMS_SERVICE_ROLE=worker
       - JWT_PUBLIC_KEY_PATH=/var/www/storage/oauth-public.key
-      - PRS_REIMBURSEMENT_API_KEY=prs-serms-local-service-key
+      - PRS_REIMBURSEMENT_API_KEY=${PRS_REIMBURSEMENT_API_KEY:-prs-serms-local-service-key}
       - PRS_REIMBURSEMENT_STATUS_API_URL=http://prs_api:8000/api/integrations/serms/reimbursement-status
-      - PRS_REIMBURSEMENT_STATUS_API_KEY=serms-prs-local-service-key
+      - PRS_REIMBURSEMENT_STATUS_API_KEY=${PRS_REIMBURSEMENT_STATUS_API_KEY:-serms-prs-local-service-key}
       - PRS_REIMBURSEMENT_STATUS_API_TIMEOUT=10
       - AI_SERVICE_URL=http://ocr_api:8010
-      - AI_SERVICE_API_KEY=ocr-callback-key-change-me
+      - AI_SERVICE_API_KEY=${AI_SERVICE_API_KEY:-ocr-callback-key-change-me}
       - AI_SERVICE_CALLBACK_BASE_URL=http://serms_api:8000
       - AI_SERVICE_TIMEOUT=10
       - CMS_CONTRACT_URL=${CMS_CONTRACT_URL:-http://contract-management:8000/api}
@@ -178,11 +178,11 @@ services:
     ports:
       - "8080:80"
     environment:
-      - PMA_ARBITRARY=1
+      - PMA_ARBITRARY=${PMA_ARBITRARY:-1}
       - PMA_HOST=mysql
       - PMA_PORT=3306
       - PMA_USER=root
-      - PMA_PASSWORD=secret
+      - PMA_PASSWORD=${PMA_PASSWORD:-secret}
     depends_on:
       - mysql
     networks:

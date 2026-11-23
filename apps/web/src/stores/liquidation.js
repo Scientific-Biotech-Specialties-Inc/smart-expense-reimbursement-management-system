@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch } from '../utils/apiFetch'
+import { withEncryptedPassword } from '../utils/crypto'
 import {
   DAILY_PENALTY_PHP,
   computePenaltyDaysPastGrace,
@@ -163,10 +164,11 @@ export const useLiquidationStore = defineStore('liquidation', () => {
    */
   async function auditSettlement(id, payload) {
     try {
+      const body = await withEncryptedPassword(payload?.password, payload);
       const response = await apiFetch(`/api/serms/liquidations/${id}/audit`, {
         method: 'POST',
         credentials: 'include',
-        body: JSON.stringify(payload), // contains status, password, admin_note
+        body: JSON.stringify(body), // contains status, encrypted password envelope, admin_note
       })
 
       if (!response.ok) {
@@ -249,10 +251,11 @@ export const useLiquidationStore = defineStore('liquidation', () => {
   async function deleteSettlement(id, password) {
     isLoading.value = true
     try {
+      const body = await withEncryptedPassword(password);
       const response = await apiFetch(`/api/serms/liquidations/${id}`, {
         method: 'DELETE',
         credentials: 'include',
-        body: JSON.stringify({ password }),
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {
