@@ -5,6 +5,10 @@ import { useNotificationStore } from "./notification";
 import { apiFetch } from "../utils/apiFetch";
 import { getFileUrl } from "../utils/fileUtils";
 import { canEditReceipt, firstFilePathField } from "../utils/receiptUtils";
+import {
+  clearReceiptExchangeRateSnapshot,
+  extractReceiptFxSnapshot,
+} from "../composables/useCurrencyRates";
 
 export const useReceiptStore = defineStore("receipts", () => {
   const auth = useAuthStore();
@@ -31,15 +35,6 @@ export const useReceiptStore = defineStore("receipts", () => {
     status: "",
     sort: "newest",
     amountRange: { min: null, max: null },
-  });
-
-  // Hash Map for Duplicate Checks
-  const existingHashes = computed(() => {
-    const map = new Set();
-    receipts.value.forEach((r) => {
-      if (!r.isDeleted) map.add(r.hash);
-    });
-    return map;
   });
 
   // Getters
@@ -155,6 +150,8 @@ export const useReceiptStore = defineStore("receipts", () => {
         "automatic-rejected",
         "processing",
         "final-rejected",
+        "flagged",
+        "failed",
       ].includes(normalizedStatus)
     ) {
       return normalizedStatus;
@@ -173,6 +170,19 @@ export const useReceiptStore = defineStore("receipts", () => {
     );
     const fileUrl =
       firstFilePathField(r.file_url) || firstFilePathField(r.file_path) || "";
+    const rawFiles =
+      Array.isArray(r.file_url) && r.file_url.length > 1
+        ? r.file_url
+        : Array.isArray(r.file_path) && r.file_path.length > 1
+          ? r.file_path
+          : null;
+    const multiImages = rawFiles
+      ? rawFiles.map((f, i) => ({
+          id: `seg-${r.id}-${i}`,
+          url: getFileUrl(f),
+          name: `Segment ${i + 1}`,
+        }))
+      : null;
 
     return {
       id: `RCPT-2026-${String(r.id).padStart(3, "0")}`,
@@ -184,8 +194,10 @@ export const useReceiptStore = defineStore("receipts", () => {
       fileSize: Number(firstFilePathField(r.file_size_bytes)) || 0,
       date: r.transaction_date || r.created_at,
       amount: Number(r.total_amount) || 0,
+      subtotal: r.subtotal != null ? Number(r.subtotal) : null,
       category: r.category?.name || "Uncategorized",
       categoryId: r.expense_category_id || null,
+      eventType: r.event_type || "",
       status: complianceStatus,
       complianceStatus,
       complianceReason:
@@ -200,21 +212,33 @@ export const useReceiptStore = defineStore("receipts", () => {
       adminNotes: r.admin_notes || "",
       hash: firstFilePathField(r.file_hash),
       thumbnail: getFileUrl(fileUrl) || null,
+      images: multiImages,
+      isMultiReceipt: Boolean(multiImages),
       isDeleted: !!r.deleted_at,
       reimbursementCount,
       isReimbursed: reimbursementCount > 0,
       vendorName: r.vendor_name,
       vatAmount: Number(r.vat_amount) || 0,
+      discountAmount: Number(r.discount_amount) || 0,
+      discountType: r.discount_type || (Number(r.discount_amount) > 0 ? "other" : "none"),
       tin: r.tin,
       invoiceNumber: r.invoice_number,
       vatClassification: r.vat_classification,
       currency: r.currency || null,
+      ...extractReceiptFxSnapshot(r, r.currency || ""),
       location: r.location || null,
       ocrConfidenceScore: r.ocr_confidence_score,
       ocrFlagged: r.ocr_flagged,
       rejectionCode: r.rejection_code || null,
       rejectionReason: r.rejection_reason || null,
       duplicateSimilarity: r.duplicate_similarity ?? null,
+      vendorMatched: Boolean(r.vendor_matched),
+      vendorAccredited: Boolean(r.vendor_accredited),
+      vendorAuditRequired: Boolean(r.vendor_audit_required),
+      vendorFlagged: Boolean(r.vendor_flagged),
+      vendorCmsSupplierId: r.vendor_cms_supplier_id ?? null,
+      vendorStatusTag: r.vendor_status_tag || null,
+      vendorSuggestedAt: r.vendor_suggested_at || null,
       createdAt: r.created_at,
       items: r.items || [],
     };
@@ -341,6 +365,10 @@ export const useReceiptStore = defineStore("receipts", () => {
       formData.append("total_amount", metadata.total_amount);
     if (metadata.vat_amount != null)
       formData.append("vat_amount", metadata.vat_amount);
+    if (metadata.discount_amount != null)
+      formData.append("discount_amount", metadata.discount_amount);
+    if (metadata.discount_type)
+      formData.append("discount_type", metadata.discount_type);
     if (metadata.tin) formData.append("tin", metadata.tin);
     if (metadata.invoice_number)
       formData.append("invoice_number", metadata.invoice_number);
@@ -433,16 +461,36 @@ export const useReceiptStore = defineStore("receipts", () => {
         return rx;
       }
 
+      const nextCurrency = metadata.currency || rx.currency;
+      const currencyChanged =
+        metadata.currency &&
+        String(metadata.currency).trim().toUpperCase() !==
+          String(rx.currency || "").trim().toUpperCase();
+      if (currencyChanged) {
+        clearReceiptExchangeRateSnapshot(rx);
+      }
+
       Object.assign(rx, {
         vendorName: metadata.vendor_name || rx.vendorName,
         date: metadata.transaction_date || rx.date,
         amount: Number(metadata.total_amount) || rx.amount,
+        subtotal:
+          metadata.subtotal != null && metadata.subtotal !== ""
+            ? Number(metadata.subtotal)
+            : rx.subtotal,
         vatAmount: Number(metadata.vat_amount) || 0,
+        discountAmount: Number(metadata.discount_amount) || 0,
+        discountType: metadata.discount_type || rx.discountType || "none",
         tin: metadata.tin || rx.tin,
         invoiceNumber: metadata.invoice_number || rx.invoiceNumber,
         vatClassification: metadata.vat_classification || rx.vatClassification,
+        currency: nextCurrency,
         location: metadata.location || rx.location,
         categoryId: metadata.expense_category_id || rx.categoryId,
+        eventType:
+          metadata.event_type !== undefined
+            ? metadata.event_type || ""
+            : rx.eventType || "",
         items: metadata.items || rx.items,
         ...payload,
       });
@@ -545,34 +593,40 @@ export const useReceiptStore = defineStore("receipts", () => {
   async function updateReceipt(id, payload) {
     isSaving.value = true;
 
-    const formData = new FormData();
+    // Send JSON on PATCH: PHP does not parse multipart/form-data on PATCH requests,
+    // which caused FormData payloads (including is_draft = false) to arrive empty.
     // Skip null/undefined AND empty strings: the backend's `numeric`/`date`/
     // `exists` rules reject "" (e.g. an unextracted total_amount), and we want
     // to leave those columns untouched rather than overwrite them with blanks.
-    const shouldAppend = (v) => v != null && v !== "";
-    if (shouldAppend(payload.expense_category_id))
-      formData.append("expense_category_id", payload.expense_category_id);
-    if (shouldAppend(payload.vendor_name))
-      formData.append("vendor_name", payload.vendor_name);
-    if (shouldAppend(payload.transaction_date))
-      formData.append("transaction_date", payload.transaction_date);
-    if (shouldAppend(payload.total_amount))
-      formData.append("total_amount", payload.total_amount);
-    if (shouldAppend(payload.vat_amount))
-      formData.append("vat_amount", payload.vat_amount);
-    if (shouldAppend(payload.tin)) formData.append("tin", payload.tin);
-    if (shouldAppend(payload.invoice_number))
-      formData.append("invoice_number", payload.invoice_number);
-    if (shouldAppend(payload.vat_classification))
-      formData.append("vat_classification", payload.vat_classification);
-    if (shouldAppend(payload.currency))
-      formData.append("currency", payload.currency);
-    if (shouldAppend(payload.location))
-      formData.append("location", payload.location);
-    if (shouldAppend(payload.status))
-      formData.append("status", payload.status);
+    const body = {};
+    const shouldInclude = (v) => v != null && v !== "";
+    const scalarFields = [
+      "expense_category_id",
+      "vendor_name",
+      "transaction_date",
+      "total_amount",
+      "subtotal",
+      "vat_amount",
+      "discount_amount",
+      "discount_type",
+      "tin",
+      "invoice_number",
+      "vat_classification",
+      "currency",
+      "location",
+      "event_type",
+      "status",
+    ];
+    for (const field of scalarFields) {
+      if (shouldInclude(payload[field])) {
+        body[field] = payload[field];
+      }
+    }
+    if (payload.is_draft !== undefined && payload.is_draft !== null) {
+      body.is_draft = Boolean(payload.is_draft);
+    }
     if (payload.items && Array.isArray(payload.items)) {
-      formData.append("items", JSON.stringify(payload.items));
+      body.items = payload.items;
     }
 
     try {
@@ -581,7 +635,7 @@ export const useReceiptStore = defineStore("receipts", () => {
         {
           method: "PATCH",
           credentials: "include",
-          body: formData,
+          body: JSON.stringify(body),
         },
       );
 
@@ -630,64 +684,18 @@ export const useReceiptStore = defineStore("receipts", () => {
     return rx;
   }
 
-  // Legacy: keep simulateUpload for backward compatibility
-  async function simulateUpload(fileMeta, mockHash) {
-    return new Promise((resolve, reject) => {
-      // Duplicate check (Client-side)
-      if (existingHashes.value.has(mockHash)) {
-        reject(
-          new Error(
-            "This file has already been uploaded (Duplicate detected).",
-          ),
-        );
-        return;
-      }
-
-      if (fileMeta.size > 2 * 1024 * 1024) {
-        reject(new Error("File size exceeds 2MB."));
-        return;
-      }
-
-      // Optimistic Upload creation
-      const newReceipt = {
-        id: `RCPT-2026-00${receipts.value.length + 1}`,
-        uploader: auth.user?.name || "Unknown",
-        fileName: fileMeta.name,
-        fileType: fileMeta.type,
-        fileSize: fileMeta.size,
-        date: new Date().toLocaleDateString("en-US", {
-          month: "2-digit",
-          day: "2-digit",
-          year: "numeric",
-        }),
-        amount: 0, // Requires manual entry after processing
-        category: "Uncategorized",
-        status: "Processing",
-        hash: mockHash,
-        thumbnail: null,
-        isDeleted: false,
-      };
-
-      receipts.value.unshift(newReceipt);
-
-      // Simulate Hash verification and Server Processing (optimistic UI)
-      setTimeout(() => {
-        const index = receipts.value.findIndex((r) => r.id === newReceipt.id);
-        if (index !== -1) {
-          receipts.value[index].status = "Pending"; // Finish processing
-        }
-        resolve(newReceipt);
-      }, 2500);
-    });
-  }
-
   async function softDelete(id) {
-    const rx = receipts.value.find((r) => r.id === id);
-    if (!rx) return;
+    const rx = receipts.value.find(
+      (r) => r.id === id || r.dbId === id || String(r.dbId) === String(id),
+    );
+    const targetDbId =
+      rx?.dbId ??
+      (typeof id === "number" ? id : parseInt(String(id).replace(/\D/g, ""), 10));
+    if (!targetDbId) return;
 
     try {
       const response = await apiFetch(
-        `/api/serms/reimbursements/receipts/${rx.dbId}`,
+        `/api/serms/reimbursements/receipts/${targetDbId}`,
         {
           method: "DELETE",
           credentials: "include",
@@ -696,13 +704,17 @@ export const useReceiptStore = defineStore("receipts", () => {
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(
+        const message =
           errData.message ||
-            `Failed to delete receipt (Status ${response.status})`,
-        );
+          errData.errors?.receipt?.[0] ||
+          (errData.errors && Object.values(errData.errors)[0]?.[0]) ||
+          `Failed to delete receipt (Status ${response.status})`;
+        throw new Error(message);
       }
 
-      rx.isDeleted = true;
+      if (rx) {
+        rx.isDeleted = true;
+      }
       const notif = useNotificationStore();
       if (notif) notif.success("Receipt deleted successfully.");
     } catch (error) {
@@ -713,21 +725,6 @@ export const useReceiptStore = defineStore("receipts", () => {
     }
   }
 
-  function hardDelete(id) {
-    receipts.value = receipts.value.filter((r) => r.id !== id);
-  }
-
-  function clearFilters() {
-    filters.value = {
-      dateRange: { start: "", end: "" },
-      uploader: "",
-      category: "",
-      status: "",
-      sort: "newest",
-      amountRange: { min: null, max: null },
-    };
-  }
-
   return {
     receipts,
     reReviewReceipts,
@@ -735,7 +732,6 @@ export const useReceiptStore = defineStore("receipts", () => {
     isLoading,
     isSaving,
     filters,
-    existingHashes,
     pagination,
     visibleReceipts,
     fetchAll,
@@ -747,9 +743,6 @@ export const useReceiptStore = defineStore("receipts", () => {
     refreshReceipt,
     updateReceipt,
     finalizeReReview,
-    simulateUpload,
     softDelete,
-    hardDelete,
-    clearFilters,
   };
 });

@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
+import * as vueRouter from "vue-router";
 import { useReimbursementStore } from "@/stores/reimbursement";
+import { useCashAdvanceStore } from "@/stores/cashAdvance";
 import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
@@ -18,13 +20,17 @@ import {
 } from "lucide-vue-next";
 
 const store = useReimbursementStore();
+const cashAdvanceStore = useCashAdvanceStore();
 const auth = useAuthStore();
 const { addToast } = useToast();
+
+const isLoading = computed(() => store.isLoading || cashAdvanceStore.isLoading);
 
 const statusFilters = ["All", "Acknowledged", "Awaiting Acknowledgement"];
 
 const employeePayoutColumns = [
   { key: "referenceNumber", sortKey: "id", label: "Reference Number" },
+  { key: "typeLabel", sortKey: "typeLabel", label: "Type" },
   { key: "amount", label: "Amount", align: "right" },
   { key: "payoutMethod", label: "Payout Method" },
   { key: "grantedDate", label: "Granted Date" },
@@ -38,6 +44,7 @@ const employeePayoutColumns = [
 
 const adminPayoutColumns = [
   { key: "referenceNumber", sortKey: "id", label: "Reference Number" },
+  { key: "typeLabel", sortKey: "typeLabel", label: "Type" },
   { key: "employeeName", sortKey: "employeeName", label: "Employee" },
   { key: "amount", label: "Amount", align: "right" },
   { key: "payoutMethod", label: "Payout Method" },
@@ -56,6 +63,8 @@ const payoutColumns = computed(() =>
 
 const {
   searchQuery,
+  activeType,
+  typeOptions,
   activeStatus,
   activeEmployee,
   activeMethod,
@@ -71,7 +80,7 @@ const {
   sortedTableRows,
   paginatedTableRows,
   toggleSort,
-} = usePayoutFilters(store, auth);
+} = usePayoutFilters(store, auth, cashAdvanceStore);
 
 const payoutKpis = computed(() => {
   const allGranted = tableRows.value;
@@ -167,12 +176,23 @@ function closeDetails() {
 
 async function handleAcknowledge(signature) {
   if (!viewingRecord.value) return;
+  const target = viewingRecord.value;
   isAcknowledgeSubmitting.value = true;
   try {
-    await store.acknowledgePayout(viewingRecord.value.id, signature);
+    if (target.type === "cash_advance") {
+      await cashAdvanceStore.acknowledgeRequest(
+        target.rawId ?? target.id,
+        signature,
+      );
+      await cashAdvanceStore.fetchAll();
+    } else {
+      await store.acknowledgePayout(target.rawId ?? target.id, signature);
+      await store.fetchAll();
+    }
     addToast({ message: "Payout acknowledged successfully!", type: "success" });
-    await store.fetchAll();
-    const updated = tableRows.value.find((r) => r.id === viewingRecord.value.id);
+    const updated = tableRows.value.find(
+      (r) => String(r.id) === String(target.id) && r.type === target.type,
+    );
     if (updated) {
       viewingRecord.value = updated;
     } else {
@@ -188,16 +208,38 @@ async function handleAcknowledge(signature) {
   }
 }
 
+let route = null;
+try {
+  route =
+    typeof vueRouter.useRoute === "function" ? vueRouter.useRoute() : null;
+} catch {
+  route = null;
+}
+
+const isCashAdvanceDeepLink = () =>
+  String(route?.query?.type || "").toLowerCase() === "cash_advance";
+
 const { checkDeepLink } = useNotificationDeepLink({
-  verifyUrl: (id) => `/api/serms/reimbursements/${id}`,
+  verifyUrl: (id) =>
+    isCashAdvanceDeepLink()
+      ? `/api/serms/cash-advances/${id}`
+      : `/api/serms/reimbursements/${id}`,
   onOpenRecord: (record) => {
-    const row = tableRows.value.find((r) => String(r.id) === String(record.id));
+    const targetType =
+      isCashAdvanceDeepLink() ||
+      "purpose" in (record || {}) ||
+      "expected_liquidation_date" in (record || {})
+        ? "cash_advance"
+        : "reimbursement";
+    const row = tableRows.value.find(
+      (r) => String(r.id) === String(record.id) && r.type === targetType,
+    );
     if (row) openDetails(row);
   },
 });
 
 onMounted(async () => {
-  await store.fetchAll();
+  await Promise.all([store.fetchAll(), cashAdvanceStore.fetchAll()]);
   checkDeepLink();
 });
 </script>
@@ -215,7 +257,7 @@ onMounted(async () => {
           Payout
         </h1>
         <p class="mt-1 text-sm text-slate-400">
-          {{ auth.isAdmin ? "Monitor, audit, and track all granted reimbursement payouts across employees." : "View and track all granted reimbursement payouts released to you." }}
+          {{ auth.isAdmin ? "Monitor, audit, and track all granted reimbursement and cash advance payouts across employees." : "View and track all granted reimbursement and cash advance payouts released to you." }}
         </p>
       </div>
     </div>
@@ -224,7 +266,7 @@ onMounted(async () => {
     <BaseKpiGrid
       :kpis="payoutKpis"
       :gridClasses="auth.isAdmin ? 'grid-cols-1 sm:grid-cols-3 gap-4' : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4'"
-      :isLoading="store.isLoading"
+      :isLoading="isLoading"
       :skeletonCount="auth.isAdmin ? 3 : 4"
     />
 
@@ -233,72 +275,89 @@ onMounted(async () => {
       v-model:search="searchQuery"
       v-model:status-value="activeStatus"
       :statuses="statusFilters"
-      search-placeholder="Search reference number, payout method, or amount..."
+      search-placeholder="Search reference number, type, payout method, or amount..."
     >
-      <template v-if="auth.isAdmin" #extra-filters>
+      <template #extra-filters>
         <div class="flex flex-col gap-3 p-1">
           <div>
             <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
-              Employee
+              Type
             </label>
             <select
-              id="admin-employee-filter"
-              v-model="activeEmployee"
+              id="payout-type-filter"
+              v-model="activeType"
               class="w-full text-xs rounded-lg border border-slate-200 bg-white p-2 text-slate-700"
             >
-              <option value="All">All Employees</option>
-              <option v-for="emp in employeeOptions" :key="emp" :value="emp">
-                {{ emp }}
+              <option v-for="t in typeOptions" :key="t" :value="t">
+                {{ t === "All" ? "All Types" : t }}
               </option>
             </select>
           </div>
 
-          <div>
-            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
-              Payout Method
-            </label>
-            <select
-              id="admin-method-filter"
-              v-model="activeMethod"
-              class="w-full text-xs rounded-lg border border-slate-200 bg-white p-2 text-slate-700"
-            >
-              <option v-for="m in methodOptions" :key="m" :value="m">
-                {{ m === "All" ? "All Methods" : m }}
-              </option>
-            </select>
-          </div>
+          <template v-if="auth.isAdmin">
+            <div>
+              <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
+                Employee
+              </label>
+              <select
+                id="admin-employee-filter"
+                v-model="activeEmployee"
+                class="w-full text-xs rounded-lg border border-slate-200 bg-white p-2 text-slate-700"
+              >
+                <option value="All">All Employees</option>
+                <option v-for="emp in employeeOptions" :key="emp" :value="emp">
+                  {{ emp }}
+                </option>
+              </select>
+            </div>
 
-          <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
-                From
+                Payout Method
               </label>
-              <input
-                id="admin-date-from"
-                type="date"
-                v-model="dateFrom"
+              <select
+                id="admin-method-filter"
+                v-model="activeMethod"
                 class="w-full text-xs rounded-lg border border-slate-200 bg-white p-2 text-slate-700"
-              />
+              >
+                <option v-for="m in methodOptions" :key="m" :value="m">
+                  {{ m === "All" ? "All Methods" : m }}
+                </option>
+              </select>
             </div>
-            <div>
-              <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
-                To
-              </label>
-              <input
-                id="admin-date-to"
-                type="date"
-                v-model="dateTo"
-                class="w-full text-xs rounded-lg border border-slate-200 bg-white p-2 text-slate-700"
-              />
+
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
+                  From
+                </label>
+                <input
+                  id="admin-date-from"
+                  type="date"
+                  v-model="dateFrom"
+                  class="w-full text-xs rounded-lg border border-slate-200 bg-white p-2 text-slate-700"
+                />
+              </div>
+              <div>
+                <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 block">
+                  To
+                </label>
+                <input
+                  id="admin-date-to"
+                  type="date"
+                  v-model="dateTo"
+                  class="w-full text-xs rounded-lg border border-slate-200 bg-white p-2 text-slate-700"
+                />
+              </div>
             </div>
-          </div>
+          </template>
         </div>
       </template>
     </BaseUtilityToolbar>
 
     <!-- Main Payouts Table -->
     <PayoutsTable
-      :is-loading="store.isLoading"
+      :is-loading="isLoading"
       :rows="paginatedTableRows"
       :total-rows="sortedTableRows.length"
       :columns="payoutColumns"

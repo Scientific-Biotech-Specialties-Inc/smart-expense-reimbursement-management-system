@@ -173,7 +173,7 @@ describe("LiquidationReviewModal Header Chipsets", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("Audit Trail (1)");
+    expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Elena Cruz");
   });
 
@@ -207,7 +207,147 @@ describe("LiquidationReviewModal Header Chipsets", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("Audit Trail (1)");
+    expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Elena Cruz");
+  });
+
+  it("renders receipt cards without hover drop-shadow classes", () => {
+    const wrapper = mount(LiquidationReviewModal, {
+      props: {
+        isOpen: true,
+        reviewingCase: {
+          id: "LIQ-100",
+          cashAdvanceAmount: 1200,
+          dueDate: "2026-10-30",
+          requestorName: "Elena Cruz",
+        },
+        reviewStatus: "pending",
+        reviewOutstandingBalance: 200,
+        reviewReceipts: [
+          {
+            id: 1,
+            merchantName: "Test Merchant",
+            location: "Makati",
+            amount: 1000,
+            category: "Meals",
+            decision: "pending",
+          },
+        ],
+        getFileUrl: () => "",
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          ReceiptImagePreview: true,
+          BaseReceiptImage: true,
+        },
+      },
+    });
+
+    const card = wrapper.find("article");
+    expect(card.exists()).toBe(true);
+    expect(card.classes()).not.toContain("hover:shadow-md");
+    expect(card.classes()).not.toContain("hover:shadow-xl");
+  });
+
+  it("renders Preview Report button and opens SbsiReportPreviewModal when report attachment or template data exists", async () => {
+    const templateData = {
+      type: "liquidation",
+      purpose: "Field Travel",
+      allocatedAmount: 2000,
+      utilizedAmount: 1800,
+    };
+
+    const wrapper = mount(LiquidationReviewModal, {
+      props: {
+        isOpen: true,
+        reviewingCase: {
+          id: "LIQ-202",
+          cashAdvanceAmount: 2000,
+          dueDate: "2026-10-30",
+          requestorName: "Elena Cruz",
+          reportFilePath: "liquidations/report-202.pdf",
+          reportTemplateData: templateData,
+        },
+        reviewStatus: "under-review",
+        reviewOutstandingBalance: 200,
+        reviewReceipts: [],
+        getFileUrl: (p) => `https://cdn.example.com/${p}`,
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          ReceiptImagePreview: true,
+          BaseReceiptImage: true,
+          SbsiReportPreviewModal: true,
+        },
+      },
+    });
+
+    const previewBtn = wrapper.find('[data-testid="preview-liquidation-report-btn"]');
+    expect(previewBtn.exists()).toBe(true);
+    expect(previewBtn.text()).toContain("Preview Report");
+    expect(wrapper.find('[data-testid="download-liquidation-report-link"]').exists()).toBe(true);
+
+    await previewBtn.trigger("click");
+    const modal = wrapper.findComponent({ name: "SbsiReportPreviewModal" });
+    expect(modal.exists()).toBe(true);
+    expect(modal.props("isOpen")).toBe(true);
+    expect(modal.props("fallbackType")).toBe("liquidation");
+    expect(modal.props("templateData")).toEqual(templateData);
+    expect(modal.props("fileUrl")).toBe("https://cdn.example.com/liquidations/report-202.pdf");
+  });
+
+  it("displays penalty breakdown and computes roadmapOverpayment against penalty-inclusive balance", () => {
+    const wrapper = mount(LiquidationReviewModal, {
+      props: {
+        isOpen: true,
+        reviewingCase: {
+          id: "LIQ-007",
+          cashAdvanceAmount: 10000,
+          outstandingBalance: 10250,
+          submittedReceiptTotal: 12500,
+          dueDate: "2026-11-08",
+          dateOfAdvances: "2026-11-01",
+          requestorName: "General Employee",
+          penalties: [
+            { days_overdue: 1, penalty_amount: 50 },
+            { days_overdue: 2, penalty_amount: 50 },
+            { days_overdue: 3, penalty_amount: 50 },
+            { days_overdue: 4, penalty_amount: 50 },
+            { days_overdue: 5, penalty_amount: 50 },
+          ],
+          cash_advance: {
+            id: 19,
+            amount: 10000,
+            outstanding_balance: 10250,
+            status: "overdue",
+            expected_liquidation_date: "2026-11-08",
+          },
+        },
+        reviewStatus: "Overpayment",
+        reviewOutstandingBalance: 0,
+        acceptedReviewTotal: 12500,
+        reviewReceipts: [],
+        getFileUrl: () => "",
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          ReceiptImagePreview: true,
+          BaseReceiptImage: true,
+          SbsiReportPreviewModal: true,
+        },
+      },
+    });
+
+    const text = wrapper.text();
+    expect(text).toContain("Total Balance (incl. Penalty)");
+    expect(text).toContain("10,250.00");
+    expect(text).toContain("Overdue Penalty");
+    expect(text).toContain("250.00");
+    // 12,500 expenses - 10,250 balance = 2,250 overpayment (not 2,500)
+    const stepper = wrapper.findComponent({ name: "UnifiedRoadmapStepper" });
+    expect(stepper.props("overpaymentAmount")).toBe(2250);
   });
 });

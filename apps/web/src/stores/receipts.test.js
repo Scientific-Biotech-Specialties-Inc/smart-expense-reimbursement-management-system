@@ -109,7 +109,6 @@ describe("useReceiptStore", () => {
     expect(receipt.thumbnail).toBe(
       "https://storage.example.com/receipts/receipt-sample.pdf",
     );
-    expect(store.existingHashes.has("array-hash-abc123")).toBe(true);
   });
 
   it("maps legacy scalar file fields from fetchAll", async () => {
@@ -278,7 +277,7 @@ describe("useReceiptStore", () => {
     ).rejects.toThrow("Validation failed");
   });
 
-  it("appends status to the FormData when present in updateReceipt payload", async () => {
+  it("sends JSON payload (including status and is_draft) in updateReceipt PATCH", async () => {
     apiFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -302,14 +301,18 @@ describe("useReceiptStore", () => {
     await store.updateReceipt(7, {
       vendor_name: "Updated Vendor",
       status: "processed",
+      is_draft: false,
     });
 
     expect(apiFetch).toHaveBeenCalledTimes(1);
     const [, opts] = apiFetch.mock.calls[0];
     expect(opts.method).toBe("PATCH");
-    expect(opts.body).toBeInstanceOf(FormData);
-    expect(opts.body.get("status")).toBe("processed");
-    expect(opts.body.get("vendor_name")).toBe("Updated Vendor");
+    expect(typeof opts.body).toBe("string");
+    expect(JSON.parse(opts.body)).toEqual({
+      vendor_name: "Updated Vendor",
+      status: "processed",
+      is_draft: false,
+    });
   });
 
   it("orders visibleReceipts newest-uploaded-first (created_at desc)", async () => {
@@ -644,5 +647,133 @@ describe("useReceiptStore", () => {
 
     const orderedAmounts = store.visibleReceipts.map((r) => r.amount);
     expect(orderedAmounts).toEqual([3000, 4000]);
+  });
+
+  describe("softDelete", () => {
+    it("successfully soft-deletes a receipt by string id or dbId", async () => {
+      apiFetch.mockResolvedValue({
+        ok: true,
+        json: async () => ({ message: "Receipt deleted successfully." }),
+      });
+
+      const store = useReceiptStore();
+      store.receipts = [
+        {
+          id: "RCPT-2026-005",
+          dbId: 5,
+          isDeleted: false,
+        },
+      ];
+
+      await store.softDelete("RCPT-2026-005");
+
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/serms/reimbursements/receipts/5",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+      expect(store.receipts[0].isDeleted).toBe(true);
+    });
+
+    it("throws an Error with 422 message when deleting receipt attached to reimbursement", async () => {
+      const errorMessage = "Cannot delete a receipt that is attached to a reimbursement.";
+      apiFetch.mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: async () => ({ message: errorMessage }),
+      });
+
+      const store = useReceiptStore();
+      store.receipts = [
+        {
+          id: "RCPT-2026-005",
+          dbId: 5,
+          isDeleted: false,
+        },
+      ];
+
+      await expect(store.softDelete("RCPT-2026-005")).rejects.toThrow(errorMessage);
+      expect(store.receipts[0].isDeleted).toBe(false);
+    });
+  });
+
+  it("preserves flagged and failed backend statuses even when ocr_flagged is true or score is below 0.75", async () => {
+    const flaggedReceipt = {
+      ...arrayFieldsReceipt,
+      id: 32,
+      vendor_name: "Ma & Pa’s Bake Shop",
+      transaction_date: "2018-10-09",
+      total_amount: "20.00",
+      invoice_number: "234234",
+      status: "flagged",
+      ocr_flagged: true,
+      ocr_confidence_score: "0.50",
+    };
+    const failedReceipt = {
+      ...arrayFieldsReceipt,
+      id: 33,
+      status: "failed",
+      ocr_flagged: true,
+      ocr_confidence_score: "0.00",
+    };
+
+    apiFetch.mockResolvedValue(okJson([flaggedReceipt, failedReceipt], 2));
+
+    const store = useReceiptStore();
+    await store.fetchAll();
+
+    expect(store.receipts[0].status).toBe("flagged");
+    expect(store.receipts[0].complianceStatus).toBe("flagged");
+    expect(store.receipts[1].status).toBe("failed");
+    expect(store.receipts[1].complianceStatus).toBe("failed");
+  });
+
+  it("maps subtotal, eventType, and multi-segment images in mapReceipt", async () => {
+    const multiSegmentReceipt = {
+      ...arrayFieldsReceipt,
+      id: 44,
+      subtotal: "1116.07",
+      event_type: "Client Meeting",
+      file_url: [
+        "https://storage.example.com/receipts/seg-1.jpg",
+        "https://storage.example.com/receipts/seg-2.jpg",
+      ],
+      file_path: ["receipts/seg-1.jpg", "receipts/seg-2.jpg"],
+    };
+    const singleReceiptWithoutOptionalFields = {
+      ...scalarFieldsReceipt,
+      id: 45,
+      subtotal: null,
+      event_type: null,
+    };
+
+    apiFetch.mockResolvedValue(
+      okJson([multiSegmentReceipt, singleReceiptWithoutOptionalFields], 2),
+    );
+
+    const store = useReceiptStore();
+    await store.fetchAll();
+
+    const mappedMulti = store.receipts[0];
+    expect(mappedMulti.subtotal).toBe(1116.07);
+    expect(mappedMulti.eventType).toBe("Client Meeting");
+    expect(mappedMulti.isMultiReceipt).toBe(true);
+    expect(mappedMulti.images).toEqual([
+      {
+        id: "seg-44-0",
+        url: "https://storage.example.com/receipts/seg-1.jpg",
+        name: "Segment 1",
+      },
+      {
+        id: "seg-44-1",
+        url: "https://storage.example.com/receipts/seg-2.jpg",
+        name: "Segment 2",
+      },
+    ]);
+
+    const mappedSingle = store.receipts[1];
+    expect(mappedSingle.subtotal).toBeNull();
+    expect(mappedSingle.eventType).toBe("");
+    expect(mappedSingle.isMultiReceipt).toBe(false);
+    expect(mappedSingle.images).toBeNull();
   });
 });

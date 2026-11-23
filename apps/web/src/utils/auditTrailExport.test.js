@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   generateCsv,
   generateXlsx,
-  generateExcelXml,
   generateJson,
   generatePdf,
   exportAuditTrail,
@@ -57,20 +56,6 @@ describe("auditTrailExport", () => {
       // PK zip magic bytes: 0x50, 0x4B, 0x03, 0x04
       expect(u8[0]).toBe(0x50);
       expect(u8[1]).toBe(0x4B);
-    });
-  });
-
-  describe("generateExcelXml", () => {
-    it("generates Excel XML spreadsheet structure with worksheets and cells", () => {
-      const xmlWithTitle = generateExcelXml(sampleTrail, { title: "Test Reimbursement" });
-      expect(xmlWithTitle).toContain('<?xml version="1.0"');
-      expect(xmlWithTitle).toContain('xmlns="urn:schemas-microsoft-com:office:spreadsheet"');
-      expect(xmlWithTitle).toContain('<Worksheet ss:Name="Test Reimbursement">');
-      expect(xmlWithTitle).toContain("Juan Dela Cruz");
-      expect(xmlWithTitle).toContain("192.168.1.100");
-
-      const xmlDefault = generateExcelXml(sampleTrail);
-      expect(xmlDefault).toContain('<Worksheet ss:Name="Audit Log">');
     });
   });
 

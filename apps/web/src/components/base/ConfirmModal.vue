@@ -2,7 +2,7 @@
 import { ref, watch } from "vue";
 import BaseModal from "./BaseModal.vue";
 import BaseButton from "./BaseButton.vue";
-import { AlertTriangle, CheckCircle, Info } from "lucide-vue-next";
+import { AlertTriangle, CheckCircle } from "lucide-vue-next";
 
 const props = defineProps({
   isOpen: {
@@ -76,8 +76,8 @@ function handleConfirm() {
         </div>
       </div>
 
-      <!-- Action Footer with BaseButton -->
-      <div class="flex justify-center gap-3 mt-8">
+      <!-- Right-Aligned Action Footer with BaseButton -->
+      <div class="flex items-center justify-end gap-3 mt-8">
         <BaseButton
           variant="secondary"
           class="px-5 min-h-10"

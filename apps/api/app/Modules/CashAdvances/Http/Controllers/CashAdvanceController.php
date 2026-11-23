@@ -13,7 +13,8 @@ use App\Modules\CashAdvances\Http\Requests\ApproveCashAdvanceRequest;
 use App\Modules\CashAdvances\Http\Requests\RejectCashAdvanceRequest;
 use App\Modules\CashAdvances\Http\Requests\DisburseCashAdvanceRequest;
 use App\Modules\CashAdvances\Http\Requests\AcknowledgeCashAdvanceRequest;
-use Carbon\Carbon;
+use App\Modules\Shared\Services\CashAdvanceEnrichmentService;
+use App\Modules\Shared\Services\PenaltySyncService;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
 use App\Modules\AuditLogs\Services\AuditLogService;
@@ -21,10 +22,17 @@ use App\Modules\AuditLogs\Services\AuditLogService;
 class CashAdvanceController extends Controller
 {
     protected CashAdvanceService $service;
+    protected CashAdvanceEnrichmentService $enrichmentService;
+    protected PenaltySyncService $penaltySync;
 
-    public function __construct(CashAdvanceService $service)
-    {
+    public function __construct(
+        CashAdvanceService $service,
+        CashAdvanceEnrichmentService $enrichmentService,
+        PenaltySyncService $penaltySync
+    ) {
         $this->service = $service;
+        $this->enrichmentService = $enrichmentService;
+        $this->penaltySync = $penaltySync;
     }
 
     private const ADVANCE_WITH = [
@@ -44,107 +52,7 @@ class CashAdvanceController extends Controller
      */
     private function enrichAdvance(CashAdvance $advance): CashAdvance
     {
-        // Ensure penalties_total via SQL withSum fallback to collection sum (no extra query if already loaded)
-        $penaltiesTotal = $advance->getAttribute('penalties_total');
-        if ($penaltiesTotal === null) {
-            $penaltiesTotal = $advance->relationLoaded('penalties')
-                ? $advance->penalties->sum(fn ($p) => (float) ($p->penalty_amount ?? 0))
-                : (float) \App\Modules\Liquidations\Models\PenaltyRecord::where('cash_advance_id', $advance->id)->sum('penalty_amount');
-        }
-        $advance->setAttribute('penalties_total', (float) $penaltiesTotal);
-        // snake alias for frontend that checks penalties_sum
-        $advance->setAttribute('penalties_sum', (float) $penaltiesTotal);
-
-        // days_overdue: flat logic mirrors liquidation.js calculateAging but server authoritative
-        $due = $advance->expected_liquidation_date;
-        $daysOverdue = 0;
-        if ($due) {
-            $today = Carbon::now()->startOfDay();
-            $dueDate = Carbon::parse($due)->startOfDay();
-            $isTerminal = in_array($advance->status, ['liquidated', 'settled', 'rejected']);
-            $isAuditing = in_array($advance->status, ['pending', 'under-review', 'approved']);
-            if ($today->gt($dueDate) && !$isTerminal && !$isAuditing) {
-                $daysOverdue = $today->diffInDays($dueDate);
-            } elseif ($advance->relationLoaded('penalties') && $advance->penalties->isNotEmpty()) {
-                // If penalties exist, derive overdue days from count or max days_overdue
-                $maxDays = $advance->penalties->max('days_overdue');
-                if ($maxDays) {
-                    $daysOverdue = max($daysOverdue, (int) $maxDays);
-                }
-            }
-        } elseif ($advance->relationLoaded('penalties') && $advance->penalties->isNotEmpty()) {
-            $daysOverdue = (int) ($advance->penalties->max('days_overdue') ?? $advance->penalties->count());
-        }
-        $advance->setAttribute('days_overdue', (int) $daysOverdue);
-
-        // linked_liquidation / latest_liquidation / liquidation aliases (single latest)
-        $liquidations = $advance->relationLoaded('liquidations') ? $advance->liquidations : collect();
-        $latest = $liquidations->sortByDesc('created_at')->sortByDesc('id')->first();
-        $advance->setAttribute('linked_liquidation', $latest);
-        $advance->setAttribute('latest_liquidation', $latest);
-        $advance->setAttribute('liquidation', $latest); // singular alias expected by cashAdvance.js normalize
-        // also expose liquidations collection as-is for direct access
-
-        // Unified Roadmap overpayment: when latest liquidation expense exceeds outstanding at time
-        $overpayment = 0;
-        if ($latest) {
-            $expense = (float) ($latest->total_expense_amount ?? 0);
-            $snapshotBalance = (float) ($latest->outstanding_balance ?? $advance->outstanding_balance ?? $advance->amount ?? 0);
-            // If expense > snapshot, the excess is overpayment forwarded to reimbursement
-            if ($expense > $snapshotBalance) {
-                $overpayment = $expense - $snapshotBalance;
-            }
-        }
-        $advance->setAttribute('overpayment_amount', (float) $overpayment);
-        $advance->setAttribute('overpaymentAmount', (float) $overpayment);
-
-        // Normalized status_history array for UnifiedRoadmapStepper (with dates + actor)
-        $history = collect();
-        if ($advance->relationLoaded('statusHistory')) {
-            $history = $advance->statusHistory->sortBy('changed_at')->sortBy('id')->map(function ($h) {
-                $actor = $h->relationLoaded('changedBy') && $h->changedBy ? $h->changedBy : ($h->relationLoaded('user') ? $h->user : null);
-                // Fallback to direct load if relation not eager but we have with()
-                return [
-                    'id' => $h->id,
-                    'cash_advance_id' => $h->cash_advance_id,
-                    'from_status' => $h->from_status,
-                    'to_status' => $h->to_status,
-                    'status' => $h->to_status,
-                    'changed_by' => $actor ? ['id' => $actor->id, 'name' => $actor->name, 'email' => $actor->email] : null,
-                    'changed_by_id' => $h->changed_by,
-                    'actor' => $actor?->name,
-                    'user' => $actor ? ['id' => $actor->id, 'name' => $actor->name, 'email' => $actor->email] : null,
-                    'changed_at' => $h->changed_at ?? $h->created_at,
-                    'created_at' => $h->created_at,
-                    'updated_at' => $h->updated_at,
-                ];
-            })->values();
-        }
-        $advance->setAttribute('status_history', $history);
-        // Also merge approvalActions into history for frontends that check approval_actions
-        $approvalHistory = collect();
-        if ($advance->relationLoaded('approvalActions')) {
-            $approvalHistory = $advance->approvalActions->map(function ($a) {
-                $approver = $a->relationLoaded('approver') ? $a->approver : null;
-                return [
-                    'id' => $a->id,
-                    'action' => $a->action,
-                    'comment' => $a->comment,
-                    'approver' => $approver ? ['id' => $approver->id, 'name' => $approver->name, 'email' => $approver->email] : null,
-                    'created_at' => $a->created_at,
-                    'actioned_at' => $a->actioned_at ?? $a->created_at,
-                ];
-            });
-        }
-        $advance->setAttribute('approval_actions', $approvalHistory);
-        $advance->setAttribute('approvalActions', $approvalHistory);
-
-        // Ensure aging-ready fields are always present (casts preserve null but we ensure key exists)
-        $advance->setAttribute('outstanding_balance', $advance->outstanding_balance);
-        $advance->setAttribute('expected_liquidation_date', $advance->expected_liquidation_date);
-        $advance->setAttribute('expected_disbursement_date', $advance->expected_disbursement_date);
-        // Alias for cashAdvance.js fallback
-        $advance->setAttribute('balance', $advance->outstanding_balance !== null ? (float) $advance->outstanding_balance : (float) ($advance->amount ?? 0));
+        $this->enrichmentService->enrich($advance, true);
 
         if ($advance->getAttribute('audit_trail') === null) {
             $canManage = request()?->user()?->can('serms.cash_advances.manage') ?? false;
@@ -162,18 +70,21 @@ class CashAdvanceController extends Controller
         Gate::authorize('viewAny', CashAdvance::class);
 
         $user = $request->user();
+        $canManage = $user->can('serms.cash_advances.manage');
+
+        $this->penaltySync->syncPendingOverdueAdvances($canManage ? null : (int) $user->id);
 
         $query = CashAdvance::with(self::ADVANCE_WITH)
             ->withSum('penalties as penalties_total', 'penalty_amount')
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
-        if (!$user->can('serms.cash_advances.manage')) {
+        if (!$canManage) {
             $query->where('user_id', $user->id);
         }
 
         $advances = $query->get();
-        AuditLogService::enrichCashAdvances($advances, $user->can('serms.cash_advances.manage'));
+        AuditLogService::enrichCashAdvances($advances, $canManage);
         $enriched = $advances->map(fn (CashAdvance $a) => $this->enrichAdvance($a));
 
         return response()->json($enriched);
@@ -207,11 +118,15 @@ class CashAdvanceController extends Controller
      */
     public function show(Request $request, $id)
     {
+        $advance = CashAdvance::findOrFail($id);
+
+        Gate::authorize('view', $advance);
+
+        $this->penaltySync->syncAdvance($advance);
+
         $advance = CashAdvance::with(self::ADVANCE_WITH)
             ->withSum('penalties as penalties_total', 'penalty_amount')
             ->findOrFail($id);
-
-        Gate::authorize('view', $advance);
 
         $this->enrichAdvance($advance);
 
@@ -321,7 +236,7 @@ class CashAdvanceController extends Controller
 
         Gate::authorize('disburse', $advance);
 
-        if ($advance->status !== 'approved') {
+        if ($advance->status !== 'approved' || $advance->disbursement()->exists()) {
             return response()->json(['message' => 'Conflict. Cash advance is not in an approved state.'], 409);
         }
 

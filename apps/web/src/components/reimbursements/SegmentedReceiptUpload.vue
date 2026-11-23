@@ -8,7 +8,6 @@ import {
   ArrowDown,
   X,
   CheckCircle2,
-  FileImage,
   Info,
 } from "lucide-vue-next";
 
@@ -17,7 +16,7 @@ import BaseButton from "@/components/base/BaseButton.vue";
 const props = defineProps({
   maxSegments: {
     type: Number,
-    default: 4,
+    default: 6,
   },
 });
 

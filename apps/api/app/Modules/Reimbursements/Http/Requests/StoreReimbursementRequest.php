@@ -2,13 +2,21 @@
 
 namespace App\Modules\Reimbursements\Http\Requests;
 
+use App\Modules\Shared\Traits\HandlesReportTemplateData;
 use Illuminate\Foundation\Http\FormRequest;
 
 class StoreReimbursementRequest extends FormRequest
 {
+    use HandlesReportTemplateData;
+
     /**
      * Determine if the user is authorized to make this request.
      */
+    protected function prepareForValidation(): void
+    {
+        $this->decodeReportTemplateData($this);
+    }
+
     public function authorize(): bool
     {
         return true;
@@ -20,9 +28,14 @@ class StoreReimbursementRequest extends FormRequest
     public function rules(): array
     {
         return [
+            ...self::reportTemplateDataRules(),
             'description' => 'required|string|max:255',
             'user_comment' => 'nullable|string|max:1000',
             'expense_category_id' => 'required|integer|exists:expense_categories,id',
+            'contract_id' => 'nullable|integer|min:1',
+            'client_name' => 'nullable|string|max:255',
+            'ticket_id' => 'nullable|integer|min:1',
+            'ticket_number' => 'nullable|string|max:64',
             'event_type' => 'required|string|max:100',
             'amount' => 'required|numeric|min:0.01',
             'date' => 'required|date',
@@ -36,8 +49,10 @@ class StoreReimbursementRequest extends FormRequest
             'receipts.*.vendor_name' => 'nullable|string|max:255',
             'receipts.*.transaction_date' => 'nullable|date',
             'receipts.*.total_amount' => 'nullable|numeric|min:0',
+            'receipts.*.subtotal' => 'nullable|numeric|min:0',
             'receipts.*.vat_amount' => 'nullable|numeric|min:0',
             'receipts.*.vat_classification' => 'nullable|string|in:vat,non-vat',
+            'receipts.*.currency' => 'nullable|string|max:3',
             'receipts.*.tin' => 'nullable|string|max:255',
             'receipts.*.invoice_number' => 'nullable|string|max:255',
             'receipts.*.location' => 'nullable|string|max:255',

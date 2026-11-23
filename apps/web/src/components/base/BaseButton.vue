@@ -55,12 +55,14 @@ function updateProgress(timestamp) {
 }
 
 let clickEmittedByMouseDown = false
+let resetMouseDownTimer = null
 
 function handleClick(e) {
   if (props.disabled || props.loading) return
   if (!props.requireHold) {
     if (clickEmittedByMouseDown) {
       clickEmittedByMouseDown = false
+      if (resetMouseDownTimer) clearTimeout(resetMouseDownTimer)
       return
     }
     emit('click', e)
@@ -72,9 +74,10 @@ function startHold(e) {
   if (!props.requireHold) {
     clickEmittedByMouseDown = true
     emit('click', e)
-    setTimeout(() => {
+    if (resetMouseDownTimer) clearTimeout(resetMouseDownTimer)
+    resetMouseDownTimer = setTimeout(() => {
       clickEmittedByMouseDown = false
-    }, 100)
+    }, 1000)
     return
   }
   

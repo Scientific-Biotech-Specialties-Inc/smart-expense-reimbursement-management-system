@@ -30,4 +30,25 @@ describe('ConfirmModal Idempotency Shield', () => {
 
     expect(wrapper.emitted('confirm')).toHaveLength(1)
   })
+
+  it('renders action buttons aligned to the right side of the modal (justify-end)', () => {
+    const wrapper = mount(ConfirmModal, {
+      props: {
+        isOpen: true,
+        title: 'Confirm Action',
+        message: 'Are you sure?',
+      },
+      global: {
+        stubs: {
+          BaseModal: {
+            template: '<div><slot /></div>',
+          },
+        },
+      },
+    })
+
+    const footer = wrapper.find('.justify-end')
+    expect(footer.exists()).toBe(true)
+    expect(footer.classes()).toContain('justify-end')
+  })
 })

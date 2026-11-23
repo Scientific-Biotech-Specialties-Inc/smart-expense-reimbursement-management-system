@@ -1,11 +1,19 @@
 <script setup>
 import { ref, watch } from "vue";
+import { getActivePinia } from "pinia";
+import { useAuthStore } from "@/stores/auth";
 import { formatAmount, formatDate } from "@/utils/formatters";
+import {
+  getPayoutTypeLabel,
+  getPayoutTypeBadgeClass,
+} from "@/composables/payouts/usePayoutFilters";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
 import { X, PenTool, Clock, CheckCircle2 } from "lucide-vue-next";
+
+const auth = getActivePinia() ? useAuthStore() : null;
 
 const props = defineProps({
   record: {
@@ -29,8 +37,9 @@ const employeeSignature = ref("");
 watch(
   () => props.record,
   () => {
-    employeeSignature.value = "";
+    employeeSignature.value = (!props.isAdmin && auth?.user?.signature) ? auth.user.signature : "";
   },
+  { immediate: true },
 );
 
 function handleAcknowledge() {
@@ -63,9 +72,18 @@ function handleAcknowledge() {
         <div class="px-6 pt-7 pb-4 border-b border-slate-100 shrink-0">
           <div class="flex items-start justify-between gap-4 pr-6">
             <div>
-              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">
-                Payout Details &bull; {{ record.referenceNumber || `Ref #${record.id}` }}
-              </p>
+              <div class="flex flex-wrap items-center gap-2 mb-1">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide">
+                  Payout Details &bull; {{ record.referenceNumber || `Ref #${record.id}` }}
+                </p>
+                <span
+                  data-testid="payout-type-badge"
+                  class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+                  :class="getPayoutTypeBadgeClass(record)"
+                >
+                  {{ getPayoutTypeLabel(record) }}
+                </span>
+              </div>
               <h2 class="text-2xl font-bold text-slate-800">
                 {{ formatAmount(record.amount || 0, record.currency || "PHP") }}
               </h2>
@@ -204,14 +222,14 @@ function handleAcknowledge() {
             <!-- Case 2: Unacknowledged & Employee (can draw and submit signature) -->
             <div
               v-else-if="!isAdmin"
-              class="space-y-3"
+              class="space-y-3 flex flex-col items-center"
             >
               <BaseSignaturePad
                 v-model="employeeSignature"
                 label="Employee's Signature *"
                 placeholder="Draw your signature here to acknowledge receipt"
               />
-              <p class="text-[11px] text-slate-400">
+              <p class="text-[11px] text-slate-400 w-full max-w-lg">
                 By signing, you confirm that you have received {{ formatAmount(record.amount || 0, record.currency || "PHP") }} in full.
               </p>
             </div>
@@ -234,7 +252,7 @@ function handleAcknowledge() {
           <!-- Audit Trail Section -->
           <BaseAuditTrail
             :trail="record.audit_trail || []"
-            :entity-title="`Payout-#${record.id}`"
+            :entity-title="`${record.type === 'cash_advance' ? 'Cash-Advance' : 'Payout'}-#${record.id}`"
             class="mt-4"
           />
         </div>

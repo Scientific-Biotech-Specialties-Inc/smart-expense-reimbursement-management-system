@@ -26,6 +26,45 @@ trait ValidatesReceiptDuplicates
     }
 
     /**
+     * Validate file hash duplicates for single or multi-file uploads.
+     *
+     * Single-file uploads fail immediately when the hash exists. Multi-file
+     * uploads fail upfront only when all uploaded files match existing DB
+     * hashes; partial collisions defer to OcrCallbackService so duplicate
+     * rejection can be isolated per split receipt.
+     *
+     * @param string|array $fileHash
+     * @param int|null $excludeReceiptId
+     * @throws ValidationException
+     */
+    protected function validateUploadDuplicates(string|array $fileHash, ?int $excludeReceiptId = null): void
+    {
+        $hashes = array_values(array_filter(
+            is_array($fileHash) ? $fileHash : [$fileHash],
+            fn ($hash) => !empty($hash)
+        ));
+
+        if (empty($hashes)) {
+            return;
+        }
+
+        if (count($hashes) === 1) {
+            $this->validateDuplicateReceipt($hashes[0], $excludeReceiptId);
+            return;
+        }
+
+        foreach ($hashes as $hash) {
+            if (!$this->duplicateReceiptExists($hash, $excludeReceiptId)) {
+                return;
+            }
+        }
+
+        throw ValidationException::withMessages([
+            'file_hash' => ['Duplicate detected. A receipt with this file hash already exists.'],
+        ]);
+    }
+
+    /**
      * Non-throwing duplicate check. Returns true when a non-deleted receipt
      * already holds one of the given file hashes, optionally excluding a
      * specific receipt id (used when resubmitting the same receipt so a

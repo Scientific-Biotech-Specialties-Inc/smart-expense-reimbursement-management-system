@@ -1,10 +1,13 @@
 <script setup>
 import { ref, computed, watch } from "vue";
-import BaseModal from "@/components/base/BaseModal.vue";
+import { getActivePinia } from "pinia";
+import { useAuthStore } from "@/stores/auth";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import { formatAmount, formatDate } from "@/utils/formatters";
 import { Wallet, AlertTriangle, Eye, EyeOff, X } from "lucide-vue-next";
+
+const auth = getActivePinia() ? useAuthStore() : null;
 
 const props = defineProps({
   isOpen: {
@@ -22,6 +25,22 @@ const props = defineProps({
   isSubmitting: {
     type: Boolean,
     default: false,
+  },
+  title: {
+    type: String,
+    default: "Grant Reimbursement Payout",
+  },
+  confirmTitle: {
+    type: String,
+    default: "Confirm Payout Handover",
+  },
+  submitLabel: {
+    type: String,
+    default: "Submit Payout",
+  },
+  confirmLabel: {
+    type: String,
+    default: "Confirm & Grant",
   },
 });
 
@@ -42,10 +61,10 @@ watch(
     if (open) {
       isConfirmStep.value = false;
       showPassword.value = false;
-      grantedBy.value = props.defaultGrantedBy || "Finance / Admin";
+      grantedBy.value = props.defaultGrantedBy || auth?.user?.name || "Finance / Admin";
       payoutMethod.value = "Cash";
       payoutMethodOther.value = "";
-      granterSignature.value = "";
+      granterSignature.value = auth?.user?.signature || "";
       password.value = "";
     }
   },
@@ -63,6 +82,10 @@ const isFormValid = computed(() => {
 const isProceedDisabled = computed(() => {
   return !password.value?.trim() || props.isSubmitting;
 });
+
+function pickValidDate(...candidates) {
+  return candidates.find((val) => val && val !== "—" && val !== "--") || null;
+}
 
 function handleClose() {
   isConfirmStep.value = false;
@@ -106,7 +129,7 @@ function handleConfirm() {
             </div>
             <div>
               <h3 class="font-heading text-base font-bold text-slate-800">
-                {{ isConfirmStep ? "Confirm Payout Handover" : "Grant Reimbursement Payout" }}
+                {{ isConfirmStep ? confirmTitle : title }}
               </h3>
               <p class="text-[11px] text-slate-500 font-medium">
                 Ref #{{ record?.id }} &bull; {{ formatAmount(record?.amount || 0, record?.currency || 'PHP') }}
@@ -131,13 +154,13 @@ function handleConfirm() {
           <div>
             <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date of Request</p>
             <p class="text-xs font-semibold text-slate-700 mt-0.5">
-              {{ formatDate(record?.date || record?.created_at) }}
+              {{ formatDate(pickValidDate(record?.date, record?.requested, record?.created_at)) }}
             </p>
           </div>
           <div>
             <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Date of Approval</p>
             <p class="text-xs font-semibold text-slate-700 mt-0.5">
-              {{ formatDate(record?.approved_at || record?.updated_at) }}
+              {{ formatDate(pickValidDate(record?.approved_at, record?.approvedAt, record?.payout?.approved_at, record?.updated_at, record?.updatedAt)) }}
             </p>
           </div>
           <div>
@@ -155,7 +178,7 @@ function handleConfirm() {
           <div class="col-span-2 pt-2 border-t border-slate-200/60">
             <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Approved by</p>
             <p class="text-xs font-medium text-slate-700 mt-0.5">
-              {{ record?.approved_by || 'Approver' }}
+              {{ record?.approved_by || record?.approvedBy || record?.payout?.approved_by || 'Approver' }}
             </p>
           </div>
         </div>
@@ -205,8 +228,8 @@ function handleConfirm() {
           </div>
         </div>
 
-        <!-- Granter Signature Pad (G2-046) -->
-        <div class="pt-2 border-t border-slate-100">
+        <!-- Granter Signature Pad (G2-046 & G2-109) -->
+        <div class="pt-2 border-t border-slate-100 space-y-1.5 flex flex-col items-center">
           <BaseSignaturePad
             v-model="granterSignature"
             label="Granter's Signature *"
@@ -225,7 +248,7 @@ function handleConfirm() {
             :disabled="!isFormValid || isSubmitting"
             @click="handleNext"
           >
-            Submit Payout
+            {{ submitLabel }}
           </BaseButton>
         </div>
       </template>
@@ -278,7 +301,7 @@ function handleConfirm() {
             :disabled="isProceedDisabled"
             @click="handleConfirm"
           >
-            {{ isSubmitting ? "Processing..." : "Confirm & Grant" }}
+            {{ isSubmitting ? "Processing..." : confirmLabel }}
           </BaseButton>
         </div>
       </template>

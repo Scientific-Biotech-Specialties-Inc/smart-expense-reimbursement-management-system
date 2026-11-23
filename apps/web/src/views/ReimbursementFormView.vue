@@ -1,28 +1,42 @@
 <script setup>
-import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted, onUnmounted } from "vue";
-import { useRouter } from "vue-router";
+import { ref, computed, watch, nextTick, onBeforeUnmount, onMounted } from "vue";
+import * as vueRouter from "vue-router";
 import { usePolicyStore } from "@/stores/policy";
 import { useReceiptStore } from "@/stores/receipts";
 import { useReimbursementStore } from "@/stores/reimbursement";
+import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
-import { Save, Send } from "lucide-vue-next";
+import { createDefaultTemplateData, validateTemplateData } from "@/utils/sbsiReportTemplateUtils";
+import { Layers, Save, Send, Ticket, UploadCloud } from "lucide-vue-next";
 
 // Components
 import ReceiptsManagementHeader from "@/components/reimbursements/ReceiptsManagementHeader.vue";
-import BaseToggleSwitch from "@/components/base/BaseToggleSwitch.vue";
 import ScannedReceiptsList from "@/components/reimbursements/ScannedReceiptsList.vue";
 import MetaAndAttachments from "@/components/reimbursements/MetaAndAttachments.vue";
 import ReimbursementSummaryPanel from "@/components/reimbursements/ReimbursementSummaryPanel.vue";
 import ReimbursementFormHeader from "@/components/reimbursements/ReimbursementFormHeader.vue";
 import ReceiptQualityRejectionModal from "@/components/reimbursements/ReceiptQualityRejectionModal.vue";
 import SegmentedReceiptUpload from "@/components/reimbursements/SegmentedReceiptUpload.vue";
+import BaseButton from "@/components/base/BaseButton.vue";
 import ConfirmModal from "@/components/base/ConfirmModal.vue";
 
 // Composables
 import { useReceiptUploads } from "@/composables/reimbursements/useReceiptUploads";
-import { useOcrMode } from "@/composables/useOcrMode";
 import { useReimbursementSubmit } from "@/composables/reimbursements/useReimbursementSubmit";
 import { useUnsavedChanges } from "@/composables/useUnsavedChanges";
+import {
+  useCurrencyRates,
+  useReceiptCurrencyWatcher,
+  extractReceiptFxSnapshot,
+} from "@/composables/useCurrencyRates";
+import {
+  useRevisionGuard,
+  isManualReportTemplate,
+  isRevisionStatus,
+  serializeFileAttachment,
+  serializeReceiptList,
+  serializeTemplateData,
+} from "@/composables/useRevisionGuard";
 import { isOcrOfflineFailure } from "@/utils/ocrErrors";
 
 import {
@@ -33,6 +47,7 @@ import {
   getItems,
   formatDateForInput,
 } from "@/utils/receiptUtils";
+import { truncateDecimal } from "@/utils/formatters";
 import { getFileUrl } from "@/utils/fileUtils";
 
 const props = defineProps({
@@ -50,25 +65,43 @@ const emit = defineEmits(["submitted", "close"]);
 const policyStore = usePolicyStore();
 const receiptsStore = useReceiptStore();
 const reimbursementStore = useReimbursementStore();
+let auth = null;
+try {
+  auth = useAuthStore();
+} catch {
+  auth = null;
+}
 const { addToast } = useToast();
-const router = useRouter();
+const router = typeof vueRouter.useRouter === "function" ? vueRouter.useRouter() : null;
+let route = null;
+try {
+  route = typeof vueRouter.useRoute === "function" ? vueRouter.useRoute() : null;
+} catch {
+  route = null;
+}
 
 // State
 const reportFile = ref(null);
+const reportTemplateData = ref(
+  props.id ? null : createDefaultTemplateData("reimbursement", { user: auth?.user }),
+);
+const isManualMode = ref(false);
 const userComment = ref("");
+const contractId = ref(null);
+const clientName = ref("");
+const ticketId = ref(null);
+const ticketNumber = ref("");
 const fetching = ref(false);
 const existingStatus = ref("");
 const adminNotes = ref("");
 const revisionCount = ref(0);
-const isReviseMode = computed(() => existingStatus.value === "revise");
+const isReviseMode = computed(() => isRevisionStatus(existingStatus.value));
 const storedForwardedReceipts = ref([]);
 const forwardedSource = ref("My Expense");
 const FORWARDED_RECEIPTS_KEY = "serms_forwarded_reimbursement_receipts";
 const LEGACY_LIQUIDATION_RECEIPTS_KEY = "serms_forwarded_liquidation_receipts";
 const summaryCurrency = ref("PHP");
-
-// OCR mode toggle — Real pipeline (default OFF) vs offline Mock OCR (ON).
-const { isMockOcr, setMockMode } = useOcrMode();
+const { fetchRates, sumReceiptsPhpAmount } = useCurrencyRates();
 
 // Form uploads and file management
 const {
@@ -80,11 +113,10 @@ const {
   addReceiptFiles,
   removeReceipt,
   clearDraftReceipts,
+  abortSessionReceipts,
   qualityRejection,
   clearQualityRejection,
   showSegmentedUpload,
-  continueAnyway,
-  submitWithForce,
   submitSegments,
 } = useReceiptUploads();
 
@@ -112,6 +144,13 @@ function handleRetake() {
   }, 100);
 }
 
+function handleCloseQualityRejection() {
+  clearQualityRejection();
+  if (!isEditMode.value && receipts.value.length === 0 && !ticketId.value) {
+    router?.push("/reimbursements");
+  }
+}
+
 function triggerUpload(mode = 'single') {
   uploadMode.value = mode;
   if (receiptInput.value) receiptInput.value.value = "";
@@ -119,24 +158,28 @@ function triggerUpload(mode = 'single') {
 }
 
 function onReceiptInputCancel() {
+  uploadMode.value = "single";
   // User dismissed the native file chooser without picking a file (e.g. after
   // DuplicateReceiptModal "Upload New One"). Reset so the same file can be
   // re-picked next time. When no receipts remain in create mode, return to the
   // Reimbursements list instead of stranding the user on an empty
   // /reimbursements/new page.
   if (receiptInput.value) receiptInput.value.value = "";
-  if (!isEditMode.value && receipts.value.length === 0) {
-    router.push("/reimbursements");
+  if (!isEditMode.value && receipts.value.length === 0 && !ticketId.value) {
+    router?.push("/reimbursements");
   }
 }
 
 function onReceiptSelect(e) {
-  if (uploadMode.value === 'multi') {
+  if (uploadMode.value === "multi") {
     const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      submitSegments(files);
+    if (files.length >= 2) {
+      submitSegments(files.slice(0, 6));
+    } else if (files.length === 1) {
+      addReceiptFiles(files);
     }
-    if (e.target) e.target.value = '';
+    uploadMode.value = "single";
+    if (e.target) e.target.value = "";
   } else {
     handleReceiptSelect(e);
   }
@@ -147,31 +190,35 @@ const receipts = computed(() => [
   ...localReceipts.value,
 ]);
 
-// Auto-sync summary currency if any receipt has a detected/selected currency
-watch(
-  receipts,
-  (newReceipts) => {
-    const foundCurrency = (newReceipts || []).find((r) => r && r.currency)?.currency;
-    if (foundCurrency) {
-      summaryCurrency.value = foundCurrency;
-    }
-  },
-  { immediate: true, deep: true },
-);
+useReceiptCurrencyWatcher(receipts);
 
-// Financials
-const totalAmount = computed(() =>
-  receipts.value.reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
-);
+// Financials (reimbursement totals are always consolidated in PHP)
+const totalAmount = computed(() => sumReceiptsPhpAmount(receipts.value));
 const totalVat = computed(() =>
   receipts.value.reduce((sum, r) => sum + (Number(r.tax) || 0), 0),
 );
-const totalSubtotal = computed(() => totalAmount.value - totalVat.value);
+
+const effectiveManualMode = computed(
+  () =>
+    isManualMode.value ||
+    isManualReportTemplate(reportTemplateData.value) ||
+    (Boolean(reportFile.value) && !reportTemplateData.value),
+);
+
+const hasValidReport = computed(() => {
+  if (effectiveManualMode.value) {
+    return Boolean(reportFile.value);
+  }
+  if (reportTemplateData.value) {
+    return validateTemplateData(reportTemplateData.value).valid || Boolean(reportFile.value);
+  }
+  return Boolean(reportFile.value);
+});
 
 const canProceed = computed(
   () =>
     receipts.value.length >= 1 &&
-    (isEditMode.value || reportFile.value) &&
+    hasValidReport.value &&
     receipts.value.every(
       (r) =>
         !r.isUploading &&
@@ -184,8 +231,27 @@ const canProceed = computed(
     ),
 );
 
+const {
+  isRevisionUnchanged,
+  captureBaseline: captureRevisionBaseline,
+} = useRevisionGuard({
+  isRevise: isReviseMode,
+  getSnapshot: () => ({
+    receipts: serializeReceiptList(receipts.value),
+    reportFile: serializeFileAttachment(reportFile.value),
+    reportTemplateData: serializeTemplateData(reportTemplateData.value),
+    userComment: userComment.value,
+    isManualMode: effectiveManualMode.value,
+    contractId: contractId.value,
+    clientName: clientName.value,
+    ticketId: ticketId.value,
+    ticketNumber: ticketNumber.value,
+  }),
+});
+
 const isDirty = computed(() => {
-  return receipts.value.length > 0 || reportFile.value !== null || userComment.value !== "";
+  const hasTemplatePurpose = Boolean(reportTemplateData.value?.purpose?.trim());
+  return receipts.value.length > 0 || reportFile.value !== null || userComment.value !== "" || hasTemplatePurpose;
 });
 
 const isSubmitted = ref(false);
@@ -196,6 +262,13 @@ const {
   handleCancelLeave,
   dismissWithConfirm
 } = useUnsavedChanges(isDirty, isSubmitted);
+
+function onConfirmLeave() {
+  if (!isEditMode.value) {
+    abortSessionReceipts();
+  }
+  handleConfirmLeave();
+}
 
 const isEditMode = computed(() => !!props.id);
 const forwardedReceiptCount = computed(
@@ -213,10 +286,15 @@ const { submitting, submitReimbursement, updateReimbursement } = useReimbursemen
 const showSubmitConfirmModal = ref(false);
 
 function promptSubmit() {
+  if (!canProceed.value || submitting.value || isRevisionUnchanged.value) return;
   showSubmitConfirmModal.value = true;
 }
 
 function handleConfirmSubmit() {
+  if (!canProceed.value || submitting.value || isRevisionUnchanged.value) {
+    showSubmitConfirmModal.value = false;
+    return;
+  }
   showSubmitConfirmModal.value = false;
   handleSubmit();
 }
@@ -233,15 +311,25 @@ async function handleSubmit() {
       success = await updateReimbursement(props.id, {
         receipts: receipts.value,
         reportFile: reportFile.value,
+        reportTemplateData: reportTemplateData.value,
         totalAmount: totalAmount.value,
         userComment: userComment.value,
+        contractId: contractId.value,
+        clientName: clientName.value,
+        ticketId: ticketId.value,
+        ticketNumber: ticketNumber.value,
       });
     } else {
       success = await submitReimbursement({
         receipts: receipts.value,
         reportFile: reportFile.value,
+        reportTemplateData: reportTemplateData.value,
         totalAmount: totalAmount.value,
         userComment: userComment.value,
+        contractId: contractId.value,
+        clientName: clientName.value,
+        ticketId: ticketId.value,
+        ticketNumber: ticketNumber.value,
       });
     }
     if (!success) {
@@ -264,24 +352,86 @@ const handleOpenReceiptUpload = () => {
 onMounted(async () => {
   policyStore.fetchAll();
   receiptsStore.fetchCategories();
+  fetchRates();
   
   window.addEventListener('open-receipt-upload', handleOpenReceiptUpload);
 
   // Pick up files passed from the Reimbursements page via global
-  if (!props.id && !props.forwardedReceipts.length && window.__serms_pending_files) {
-    const pendingFiles = window.__serms_pending_files;
-    delete window.__serms_pending_files;
-    nextTick(() => {
-      addReceiptFiles(pendingFiles);
-    });
+  const pendingUpload = window.__serms_pending_upload;
+  const pendingFiles = window.__serms_pending_files;
+  delete window.__serms_pending_upload;
+  delete window.__serms_pending_files;
+
+  if (!props.id && !props.forwardedReceipts.length) {
+    if (pendingUpload?.mode === "multi" && pendingUpload.files?.length >= 2) {
+      nextTick(() => {
+        submitSegments(pendingUpload.files);
+      });
+    } else if (pendingUpload?.files?.length) {
+      nextTick(() => {
+        addReceiptFiles(pendingUpload.files);
+      });
+    } else if (pendingFiles?.length) {
+      nextTick(() => {
+        addReceiptFiles(pendingFiles);
+      });
+    }
+  }
+
+  if (!isEditMode.value) {
+    const rawTicketId = route?.query?.ticket_id;
+    const rawTicketNumber = route?.query?.ticket_number;
+    const resolvedTicketId = Array.isArray(rawTicketId) ? rawTicketId[0] : rawTicketId;
+    const resolvedTicketNumber = Array.isArray(rawTicketNumber)
+      ? rawTicketNumber[0]
+      : rawTicketNumber;
+    if (
+      resolvedTicketId !== undefined &&
+      resolvedTicketId !== null &&
+      String(resolvedTicketId).trim() !== ""
+    ) {
+      const parsedTicketId = Number(resolvedTicketId);
+      ticketId.value =
+        Number.isFinite(parsedTicketId) && parsedTicketId > 0
+          ? parsedTicketId
+          : String(resolvedTicketId).trim();
+    }
+    if (
+      resolvedTicketNumber !== undefined &&
+      resolvedTicketNumber !== null &&
+      String(resolvedTicketNumber).trim() !== ""
+    ) {
+      ticketNumber.value = String(resolvedTicketNumber).trim();
+    }
   }
 
   if (isEditMode.value) {
     fetching.value = true;
+    let hydrated = false;
     try {
       const data = await reimbursementStore.fetchOne(props.id);
-      reportFile.value = data.report_file_path;
+      if (
+        data.report_template_data &&
+        !isManualReportTemplate(data.report_template_data)
+      ) {
+        reportTemplateData.value = {
+          ...data.report_template_data,
+          mode: data.report_template_data.mode || "template",
+        };
+        reportFile.value = null;
+        isManualMode.value = false;
+      } else {
+        reportFile.value = data.report_file_path || null;
+        reportTemplateData.value = null;
+        isManualMode.value = Boolean(
+          data.report_file_path || isManualReportTemplate(data.report_template_data),
+        );
+      }
       userComment.value = data.user_comment || "";
+      contractId.value = data.contract_id ?? null;
+      clientName.value = data.client_name || "";
+      ticketId.value = data.ticket_id ?? null;
+      ticketNumber.value = data.ticket_number || "";
       existingStatus.value = data.status || "";
       adminNotes.value = data.admin_notes || data.rejection_comment || "";
       revisionCount.value = data.revision_count || 1;
@@ -302,16 +452,44 @@ onMounted(async () => {
             vatClassification,
           );
 
+          let resolvedSubtotal = "";
+          if (r.subtotal != null && r.subtotal !== "") {
+            resolvedSubtotal = Number(r.subtotal).toFixed(2);
+          } else if (amount > 0) {
+            resolvedSubtotal = amounts.subtotal.toFixed(2);
+          }
+
+          const resolvedTax =
+            r.vat_amount != null && r.vat_amount !== ""
+              ? Number(r.vat_amount).toFixed(2)
+              : (vatClassification === "non-vat" ? "0.00" : amounts.vat.toFixed(2));
+
+          const rawFiles = Array.isArray(r.file_url)
+            ? r.file_url
+            : Array.isArray(r.file_path)
+              ? r.file_path
+              : null;
+          const multiImages =
+            rawFiles && rawFiles.length > 1
+              ? rawFiles.map((f, i) => ({
+                  id: `seg-${r.id}-${i}`,
+                  url: getFileUrl(f),
+                  name: `Segment ${i + 1}`,
+                }))
+              : null;
+
           return {
             id: r.id,
             fileName: r.vendor_name || `Receipt-${r.id}`,
             fileType: r.file_type,
             merchantName: r.vendor_name,
             date: formatDateForInput(r.transaction_date),
-            amount: amounts.gross,
-            subtotal: amounts.subtotal.toFixed(2),
-            tax: amounts.vat.toFixed(2),
+            amount: amounts.gross > 0 ? Number(truncateDecimal(amounts.gross, 2)) : "",
+            subtotal: resolvedSubtotal,
+            tax: resolvedTax,
             vatClassification: amounts.vatClassification,
+            currency: r.currency || "",
+            ...extractReceiptFxSnapshot(r, r.currency || ""),
             tin: r.tin,
             invoiceNumber: r.invoice_number,
             location: r.location || "",
@@ -319,11 +497,14 @@ onMounted(async () => {
             categoryId: r.expense_category_id || data.expense_category_id || null,
             eventType: r.event_type || data.event_type || "",
             thumbnail: getFileUrl(r.file_url || r.file_path) || null,
+            images: multiImages,
+            isMultiReceipt: Boolean(multiImages),
             items,
             isUploading: false,
           };
         });
       }
+      hydrated = true;
     } catch (error) {
       addToast({
         message: "Failed to load reimbursement details.",
@@ -332,6 +513,11 @@ onMounted(async () => {
       router.push("/reimbursements");
     } finally {
       fetching.value = false;
+    }
+    if (hydrated) {
+      await nextTick();
+      await nextTick();
+      captureRevisionBaseline();
     }
   }
 
@@ -348,13 +534,20 @@ onMounted(async () => {
         : "Liquidation";
       localReceipts.value = parsed.map((r) => ({
         ...r,
+        ...extractReceiptFxSnapshot(r, r.currency || ""),
         ...(() => {
           const amounts = receiptFinancials(r, r.vatClassification);
+          let sub = "";
+          if (r.subtotal != null && r.subtotal !== "") {
+            sub = Number(r.subtotal).toFixed(2);
+          } else if (amounts.gross > 0) {
+            sub = amounts.subtotal.toFixed(2);
+          }
 
           return {
-            amount: amounts.gross,
-            subtotal: amounts.subtotal.toFixed(2),
-            tax: amounts.vat.toFixed(2),
+            amount: amounts.gross > 0 ? Number(truncateDecimal(amounts.gross, 2)) : "",
+            subtotal: sub,
+            tax: r.tax != null && r.tax !== "" ? Number(r.tax).toFixed(2) : (amounts.vatClassification === "non-vat" ? "0.00" : amounts.vat.toFixed(2)),
             vatClassification: amounts.vatClassification,
           };
         })(),
@@ -468,22 +661,44 @@ function dismiss() {
         </p>
       </div>
 
-      <!-- OCR mode toggle: Real pipeline vs fast mock (real file, instant data, skip OCR wait) -->
-      <div
-        v-if="!isForwardedMode && !isEditMode"
-        class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3"
+      <section
+        v-if="!isEditMode && receipts.length === 0 && ticketId"
+        class="card p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border border-indigo-200 bg-indigo-50/40"
       >
-        <BaseToggleSwitch
-          :model-value="isMockOcr"
-          @update:model-value="setMockMode"
-          on-label="Mock OCR"
-          off-label="Real OCR"
-          hint="Mock uploads file, fills instantly, skips OCR wait"
-        />
-        <p class="text-[11px] text-slate-400">
-          {{ isMockOcr ? "Fast — real file upload, instant mock data." : "Online — uses ocr-pipeline with polling." }}
-        </p>
-      </div>
+        <div class="flex items-start gap-3">
+          <div class="p-2.5 rounded-xl bg-indigo-100 text-indigo-700 shrink-0">
+            <Ticket class="w-5 h-5" aria-hidden="true" />
+          </div>
+          <div>
+            <p class="text-sm font-bold text-slate-800">
+              Linked to Support Ticket {{ ticketNumber || `#${ticketId}` }}
+            </p>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Attach at least one receipt (JPEG, PNG, or PDF, max 2MB) to continue creating this reimbursement request.
+            </p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <BaseButton
+            variant="primary"
+            size="sm"
+            type="button"
+            @click="triggerUpload('single')"
+          >
+            <UploadCloud class="w-4 h-4" aria-hidden="true" />
+            <span>Attach Single Receipt</span>
+          </BaseButton>
+          <BaseButton
+            variant="outline"
+            size="sm"
+            type="button"
+            @click="triggerUpload('multi')"
+          >
+            <Layers class="w-4 h-4" aria-hidden="true" />
+            <span>Attach Multi Receipt</span>
+          </BaseButton>
+        </div>
+      </section>
 
       <template v-if="receipts.length > 0 || isEditMode">
         <!--  CARD 1: Upload Receipt Management  -->
@@ -517,7 +732,16 @@ function dismiss() {
         <!--  CARD 3: Meta & Attachments  -->
         <MetaAndAttachments
           v-model:report-file="reportFile"
+          v-model:report-template-data="reportTemplateData"
           v-model:user-comment="userComment"
+          v-model:contract-id="contractId"
+          v-model:client-name="clientName"
+          v-model:ticket-id="ticketId"
+          v-model:ticket-number="ticketNumber"
+          :receipts="receipts"
+          :total-amount="totalAmount"
+          :record-id="props.id"
+          @update:is-manual-mode="isManualMode = $event"
         />
 
         <ReimbursementSummaryPanel
@@ -531,7 +755,7 @@ function dismiss() {
         <div class="flex justify-end gap-4 pb-4">
           <button
             class="btn btn-primary btn-cta min-h-[42px] w-full sm:w-fit disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="!canProceed || submitting"
+            :disabled="!canProceed || submitting || isRevisionUnchanged"
             @click="promptSubmit"
           >
             <span
@@ -565,7 +789,7 @@ function dismiss() {
       confirm-text="Leave Page"
       cancel-text="Stay"
       :danger="true"
-      @confirm="handleConfirmLeave"
+      @confirm="onConfirmLeave"
       @close="handleCancelLeave"
     />
 
@@ -580,10 +804,7 @@ function dismiss() {
         showSegmentedUpload = true;
         clearQualityRejection();
       "
-      @continue-anyway="
-        continueAnyway(qualityRejection?.file);
-      "
-      @close="clearQualityRejection"
+      @close="handleCloseQualityRejection"
     />
   </div>
 </template>

@@ -8,7 +8,16 @@ export function useReimbursementDecisions(store, addToast, viewingRecord) {
   const grantingId = ref(null);
   const rejectionComment = ref("");
   const confirmPassword = ref("");
+  const secondaryAuditConfirmed = ref(false);
+  const secondaryAuditNote = ref("");
   const isReviewSubmitting = ref(false);
+
+  function getTargetRecord(id) {
+    if (viewingRecord.value && String(viewingRecord.value.id) === String(id)) {
+      return viewingRecord.value;
+    }
+    return store.items.find((item) => String(item.id) === String(id)) || null;
+  }
 
   function isOwnSubmission() {
     const currentUserId = auth.user?.id;
@@ -38,15 +47,27 @@ export function useReimbursementDecisions(store, addToast, viewingRecord) {
 
     approvingId.value = id;
     confirmPassword.value = "";
+    secondaryAuditConfirmed.value = false;
+    secondaryAuditNote.value = "";
   }
 
   function cancelApprove() {
     approvingId.value = null;
     confirmPassword.value = "";
+    secondaryAuditConfirmed.value = false;
+    secondaryAuditNote.value = "";
   }
 
   async function confirmApprove() {
     if (!approvingId.value || isReviewSubmitting.value) return;
+    const targetRecord = getTargetRecord(approvingId.value);
+    if (targetRecord?.vendor_audit_required && !secondaryAuditConfirmed.value) {
+      addToast({
+        message: "Please confirm that the Secondary Accounting Audit is completed.",
+        type: "error",
+      });
+      return;
+    }
     if (!confirmPassword.value?.trim()) {
       addToast({
         message: "Password is required to approve this request.",
@@ -57,10 +78,10 @@ export function useReimbursementDecisions(store, addToast, viewingRecord) {
 
     isReviewSubmitting.value = true;
     try {
-      const updated = await store.approve(
-        approvingId.value,
-        confirmPassword.value,
-      );
+      const updated = await store.approve(approvingId.value, confirmPassword.value, {
+        secondaryAuditConfirmed: secondaryAuditConfirmed.value,
+        secondaryAuditNote: secondaryAuditNote.value,
+      });
       if (viewingRecord.value?.id === approvingId.value) {
         viewingRecord.value = updated;
       }
@@ -91,10 +112,6 @@ export function useReimbursementDecisions(store, addToast, viewingRecord) {
     rejectingId.value = id;
     rejectionComment.value = "";
     confirmPassword.value = "";
-  }
-
-  function openReviseModal(id) {
-    return openRejectModal(id, "revise");
   }
 
   function cancelReject() {
@@ -207,12 +224,13 @@ export function useReimbursementDecisions(store, addToast, viewingRecord) {
     revisionAction,
     rejectionComment,
     confirmPassword,
+    secondaryAuditConfirmed,
+    secondaryAuditNote,
     isReviewSubmitting,
     openApproveModal,
     cancelApprove,
     confirmApprove,
     openRejectModal,
-    openReviseModal,
     cancelReject,
     confirmReject,
     openGrantModal,

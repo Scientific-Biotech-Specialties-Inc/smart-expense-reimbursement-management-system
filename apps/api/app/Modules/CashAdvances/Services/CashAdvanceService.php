@@ -25,10 +25,13 @@ class CashAdvanceService
             $advance = CashAdvance::create([
                 'user_id' => $user->id,
                 'purpose' => $data['purpose'],
+                'contract_id' => $data['contract_id'] ?? null,
+                'client_name' => $data['client_name'] ?? null,
                 'amount' => $data['amount'],
                 'expected_disbursement_date' => $data['expected_disbursement_date'],
                 'expected_liquidation_date' => $data['expected_liquidation_date'],
                 'status' => 'pending',
+                'report_template_data' => $data['report_template_data'] ?? null,
             ]);
 
             CashAdvanceStatusHistory::create([
@@ -244,11 +247,6 @@ class CashAdvanceService
         });
     }
 
-    public function reviseAdvance(CashAdvance $advance, User $user, string $comment, string $password, Request $requestContext)
-    {
-        return $this->rejectAdvance($advance, $user, $comment, 'revise', $password, $requestContext);
-    }
-
     public function disburseAdvance(CashAdvance $advance, User $user, array $data, string $password, Request $requestContext)
     {
         return DB::transaction(function () use ($advance, $user, $data, $password, $requestContext) {
@@ -258,6 +256,13 @@ class CashAdvanceService
                 ]);
             }
 
+            $payoutMethod = $data['payout_method'] ?? $data['channel'] ?? 'Cash';
+            $payoutMethodOther = $data['payout_method_other'] ?? null;
+            $channel = $data['channel'] ?? ($payoutMethod === 'Other' && $payoutMethodOther ? $payoutMethodOther : $payoutMethod);
+            $reference = !empty($data['reference']) ? $data['reference'] : ('CA-' . $advance->id . '-' . now()->format('YmdHis'));
+            $grantedBy = !empty($data['granted_by']) ? $data['granted_by'] : $user->name;
+            $granterSignature = $data['granter_signature'] ?? null;
+
             $advance->update([
                 'status'              => 'disbursed',
                 'outstanding_balance' => $advance->amount, // Debt begins at full amount
@@ -266,9 +271,13 @@ class CashAdvanceService
             CashAdvanceDisbursement::create([
                 'cash_advance_id' => $advance->id,
                 'disbursed_by_id' => $user->id,
+                'granted_by' => $grantedBy,
                 'disbursement_date' => now()->toDateString(),
-                'channel' => $data['channel'],
-                'reference_number' => $data['reference'],
+                'channel' => $channel,
+                'payout_method' => $payoutMethod,
+                'payout_method_other' => $payoutMethodOther,
+                'reference_number' => $reference,
+                'granter_signature' => $granterSignature,
             ]);
 
             CashAdvanceStatusHistory::create([
@@ -278,12 +287,16 @@ class CashAdvanceService
                 'changed_by' => $user->id,
             ]);
 
+            $displayChannel = ($payoutMethod === 'Other' && $payoutMethodOther)
+                ? "{$payoutMethod} ({$payoutMethodOther})"
+                : $channel;
+
             NotificationService::notifyUser(
                 userId: $advance->user_id,
                 type: 'cash_advance_disbursed',
                 module: 'Cash Advance',
                 title: 'Cash Advance Disbursed',
-                message: "Your cash advance of " . NotificationService::formatPeso($advance->amount) . " was disbursed via {$data['channel']} (Ref: {$data['reference']}).",
+                message: "Your cash advance of " . NotificationService::formatPeso($advance->amount) . " was disbursed via {$displayChannel} (Ref: {$reference}).",
                 recordLink: "/cash-advances?view={$advance->id}",
                 recordType: 'cash_advance',
                 recordId: $advance->id
@@ -296,7 +309,14 @@ class CashAdvanceService
                 entityType: 'cash_advance',
                 entityId: $advance->id,
                 beforeState: ['status' => 'approved'],
-                afterState: ['status' => 'disbursed', 'channel' => $data['channel'], 'reference' => $data['reference']]
+                afterState: [
+                    'status' => 'disbursed',
+                    'channel' => $channel,
+                    'reference' => $reference,
+                    'payout_method' => $payoutMethod,
+                    'payout_method_other' => $payoutMethodOther,
+                    'granted_by' => $grantedBy,
+                ]
             );
 
             return $advance;
@@ -364,6 +384,18 @@ class CashAdvanceService
                 'expected_disbursement_date' => $data['expected_disbursement_date'] ?? null,
                 'expected_liquidation_date' => $data['expected_liquidation_date'] ?? null,
             ], fn($v) => $v !== null);
+
+            if (array_key_exists('contract_id', $data)) {
+                $updatePayload['contract_id'] = $data['contract_id'];
+            }
+
+            if (array_key_exists('client_name', $data)) {
+                $updatePayload['client_name'] = $data['client_name'];
+            }
+
+            if (array_key_exists('report_template_data', $data)) {
+                $updatePayload['report_template_data'] = $data['report_template_data'];
+            }
 
             if ($advance->status === 'rejected') {
                 throw new \Illuminate\Auth\Access\AuthorizationException('Rejected cash advances (exceeded revision limit) cannot be edited.');

@@ -6,6 +6,7 @@ use App\Modules\Shared\Models\IdempotencyKey;
 use Closure;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Symfony\Component\HttpFoundation\Response;
 
 class EnsureIdempotency
@@ -43,7 +44,11 @@ class EnsureIdempotency
 
         // 3. Acquire atomic pending lock or check existing record
         $existing = IdempotencyKey::where('idempotency_key', $key)
-            ->when($userId, fn ($q) => $q->where('user_id', $userId))
+            ->when(
+                $userId !== null,
+                fn ($q) => $q->where('user_id', $userId),
+                fn ($q) => $q->whereNull('user_id')
+            )
             ->first();
 
         if ($existing) {
@@ -112,11 +117,41 @@ class EnsureIdempotency
     }
 
     /**
-     * Compute deterministic hash for request path and body.
+     * Compute deterministic hash for request path and body (including uploaded files).
      */
     protected function computeRequestHash(string $method, string $path, array $payload): string
     {
         ksort($payload);
-        return hash('sha256', $method . '|' . $path . '|' . json_encode($payload));
+        $normalized = $this->normalizePayloadForHash($payload);
+
+        return hash('sha256', $method . '|' . $path . '|' . json_encode($normalized, JSON_INVALID_UTF8_SUBSTITUTE));
+    }
+
+    /**
+     * Normalize UploadedFile instances into deterministic metadata so multipart POSTs hash reliably.
+     */
+    private function normalizePayloadForHash(mixed $value): mixed
+    {
+        if ($value instanceof UploadedFile) {
+            $realPath = $value->getRealPath();
+
+            return [
+                '__uploaded_file__' => true,
+                'name'              => $value->getClientOriginalName(),
+                'size'              => $value->getSize(),
+                'mime'              => $value->getClientMimeType(),
+                'sha256'            => ($realPath && is_file($realPath)) ? hash_file('sha256', $realPath) : null,
+            ];
+        }
+
+        if (is_array($value)) {
+            $result = [];
+            foreach ($value as $k => $v) {
+                $result[$k] = $this->normalizePayloadForHash($v);
+            }
+            return $result;
+        }
+
+        return $value;
     }
 }

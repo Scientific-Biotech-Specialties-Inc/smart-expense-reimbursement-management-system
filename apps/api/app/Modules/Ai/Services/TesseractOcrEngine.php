@@ -3,8 +3,6 @@
 namespace App\Modules\Ai\Services;
 
 use App\Modules\Ai\Contracts\OcrEngineInterface;
-use thiagoalessio\TesseractOCR\TesseractOCR;
-use Illuminate\Support\Facades\Log;
 
 class TesseractOcrEngine implements OcrEngineInterface
 {

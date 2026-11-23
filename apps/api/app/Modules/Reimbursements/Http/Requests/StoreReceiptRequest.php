@@ -36,10 +36,14 @@ class StoreReceiptRequest extends FormRequest
             'files' => 'nullable|array',
             'files.*' => 'nullable|file|mimes:jpeg,png,pdf|max:2048',
             'expense_category_id' => 'nullable|exists:expense_categories,id',
+            'event_type' => 'nullable|string|max:100',
             'vendor_name' => 'nullable|string|max:255',
             'transaction_date' => 'nullable|date',
             'total_amount' => 'nullable|numeric|min:0',
+            'subtotal' => 'nullable|numeric|min:0',
             'vat_amount' => 'nullable|numeric|min:0',
+            'discount_amount' => 'nullable|numeric|min:0',
+            'discount_type' => 'nullable|string|in:none,senior,pwd,student,promo,employee,other',
             'tin' => 'nullable|string|max:255',
             'invoice_number' => 'nullable|string|max:255',
             'location' => 'nullable|string|max:255',
@@ -49,8 +53,7 @@ class StoreReceiptRequest extends FormRequest
             'items.*.name' => 'required_with:items|string|max:255',
             'items.*.quantity' => 'required_with:items|integer|min:1',
             'items.*.price' => 'required_with:items|numeric|gt:0',
-            'is_mock' => 'nullable|boolean',
-            'mock' => 'nullable|boolean',
+            'is_draft' => 'nullable|boolean',
         ];
     }
 }

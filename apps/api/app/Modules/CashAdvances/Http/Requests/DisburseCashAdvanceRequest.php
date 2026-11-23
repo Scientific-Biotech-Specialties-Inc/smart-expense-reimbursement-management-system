@@ -22,8 +22,12 @@ class DisburseCashAdvanceRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'channel' => 'required|string|max:100',
-            'reference' => 'required|string|max:100',
+            'channel' => 'required_without:payout_method|nullable|string|max:100',
+            'reference' => 'nullable|string|max:100',
+            'granted_by' => 'nullable|string|max:255',
+            'payout_method' => 'required_without:channel|nullable|string|in:Cash,E-wallet,Card,Visa,Other',
+            'payout_method_other' => 'required_if:payout_method,Other|nullable|string|max:255',
+            'granter_signature' => 'required_with:payout_method|nullable|string',
             'password' => 'required|string',
         ];
     }

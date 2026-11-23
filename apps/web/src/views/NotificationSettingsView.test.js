@@ -4,7 +4,6 @@ import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import NotificationSettingsView from "./NotificationSettingsView.vue";
 import { useAuthStore } from "@/stores/auth";
-import { useNotificationStore } from "@/stores/notification";
 
 const mockPush = vi.fn();
 vi.mock("vue-router", () => ({

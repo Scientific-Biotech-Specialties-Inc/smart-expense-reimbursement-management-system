@@ -1,11 +1,9 @@
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { useReimbursementStore } from "@/stores/reimbursement";
 import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
-import BaseButton from "@/components/base/BaseButton.vue";
-import BaseToggleSwitch from "@/components/base/BaseToggleSwitch.vue";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import BaseUtilityToolbar from "@/components/base/BaseUtilityToolbar.vue";
 import ReimbursementDetailsModal from "@/components/reimbursements/ReimbursementDetailsModal.vue";
@@ -14,6 +12,8 @@ import DecisionConfirmationModal from "@/components/base/DecisionConfirmationMod
 import GrantPayoutModal from "@/components/reimbursements/GrantPayoutModal.vue";
 import DeleteConfirmModal from "@/components/base/DeleteConfirmModal.vue";
 import ReimbursementsTable from "@/components/reimbursements/ReimbursementsTable.vue";
+import CmsRecurringExpensesPanel from "@/components/reimbursements/CmsRecurringExpensesPanel.vue";
+import TsTicketsPanel from "@/components/reimbursements/TsTicketsPanel.vue";
 import { formatPeso } from "@/utils/formatters";
 import {
   useReimbursementFilters,
@@ -21,7 +21,6 @@ import {
 } from "@/composables/reimbursements/useReimbursementFilters";
 import { useReimbursementDetails } from "@/composables/reimbursements/useReimbursementDetails";
 import { useReimbursementDecisions } from "@/composables/reimbursements/useReimbursementDecisions";
-import { useOcrMode } from "@/composables/useOcrMode";
 import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
 import {
   Plus,
@@ -30,13 +29,16 @@ import {
   Clock,
   Wallet,
   Send,
+  ChevronDown,
+  UploadCloud,
+  Layers,
 } from "lucide-vue-next";
 
 const store = useReimbursementStore();
 const auth = useAuthStore();
 const router = useRouter();
 const { addToast } = useToast();
-const { isMockOcr, setMockMode } = useOcrMode();
+const activeTab = ref("all");
 
 const statusFilters = computed(() =>
   auth.isAdmin
@@ -46,21 +48,21 @@ const statusFilters = computed(() =>
 
 const employeeReimbursementColumns = [
   { key: "reportDescription", label: "Report Description" },
-  { key: "category", label: "Category" },
-  { key: "amount", label: "Amount", align: "right" },
-  { key: "dateSubmitted", label: "Date Submitted" },
-  { key: "displayStatus", label: "Status", align: "center" },
-  { key: "action", sortKey: "id", label: "Action", align: "center" },
+  { key: "category", label: "Category", widthClass: "w-[140px]", paddingClass: "px-3" },
+  { key: "amount", label: "Amount", align: "right", widthClass: "w-[136px]" },
+  { key: "dateSubmitted", label: "Date Submitted", widthClass: "w-[168px]" },
+  { key: "displayStatus", label: "Status", align: "center", widthClass: "w-[148px]" },
+  { key: "action", sortKey: "id", label: "Action", align: "center", widthClass: "w-[116px]" },
 ];
 
 const adminReimbursementColumns = [
   { key: "reportDescription", label: "Report Description" },
-  { key: "category", label: "Category" },
-  { key: "amount", label: "Amount", align: "right" },
-  { key: "dateSubmitted", label: "Date Submitted" },
-  { key: "submittedBy", label: "Submitted By" },
-  { key: "displayStatus", label: "Status", align: "center" },
-  { key: "action", sortKey: "id", label: "Action", align: "center" },
+  { key: "category", label: "Category", widthClass: "w-[140px]", paddingClass: "px-3" },
+  { key: "amount", label: "Amount", align: "right", widthClass: "w-[136px]" },
+  { key: "dateSubmitted", label: "Date Submitted", widthClass: "w-[168px]" },
+  { key: "submittedBy", label: "Submitted By", widthClass: "w-[160px]" },
+  { key: "displayStatus", label: "Status", align: "center", widthClass: "w-[148px]" },
+  { key: "action", sortKey: "id", label: "Action", align: "center", widthClass: "w-[116px]" },
 ];
 
 const reimbursementColumns = computed(() =>
@@ -71,11 +73,13 @@ const {
   searchQuery,
   activeStatus,
   activeCategory,
+  activeVendorFilter,
   sortKey,
   sortDirection,
   pageSize,
   currentPage,
   categoryFilters,
+  vendorFilters,
   paginatedTableRows,
   sortedTableRows,
   toggleSort,
@@ -157,6 +161,8 @@ const {
   revisionAction,
   rejectionComment,
   confirmPassword,
+  secondaryAuditConfirmed,
+  secondaryAuditNote,
   isReviewSubmitting,
   openApproveModal,
   cancelApprove,
@@ -169,19 +175,50 @@ const {
   confirmGrant,
 } = useReimbursementDecisions(store, addToast, viewingRecord);
 
+const approvingRecord = computed(() => {
+  if (!approvingId.value) return null;
+  if (viewingRecord.value && String(viewingRecord.value.id) === String(approvingId.value)) {
+    return viewingRecord.value;
+  }
+  return store.items.find((item) => String(item.id) === String(approvingId.value)) || null;
+});
+
 const isDeleteModalOpen = ref(false);
 const deletingRequestId = ref(null);
 const newRequestFileInput = ref(null);
+const isDropdownOpen = ref(false);
+const newRequestUploadMode = ref("single");
 
-function handleNewRequest() {
-  newRequestFileInput.value?.click();
+function triggerNewRequestUpload(mode) {
+  newRequestUploadMode.value = mode;
+  isDropdownOpen.value = false;
+  if (newRequestFileInput.value) {
+    newRequestFileInput.value.multiple = (mode === "multi");
+    newRequestFileInput.value.value = "";
+    newRequestFileInput.value.click();
+  }
 }
 
 function handleNewRequestFiles(e) {
   const files = e.target.files;
   if (files && files.length > 0) {
-    // Store File objects in a module-level holder accessible by the form view
-    window.__serms_pending_files = Array.from(files);
+    const fileArray = Array.from(files);
+    if (newRequestUploadMode.value === "single") {
+      const selected = [fileArray[0]];
+      window.__serms_pending_upload = { mode: "single", files: selected };
+      window.__serms_pending_files = selected;
+    } else {
+      if (fileArray.length >= 2) {
+        const segments = fileArray.slice(0, 6);
+        window.__serms_pending_upload = { mode: "multi", files: segments };
+        window.__serms_pending_files = segments;
+      } else {
+        // Graceful fallback to single receipt if only 1 file was chosen
+        const selected = [fileArray[0]];
+        window.__serms_pending_upload = { mode: "single", files: selected };
+        window.__serms_pending_files = selected;
+      }
+    }
     router.push('/reimbursements/new');
   }
   if (e.target) e.target.value = "";
@@ -222,9 +259,22 @@ const { checkDeepLink } = useNotificationDeepLink({
   onOpenRecord: (record) => openDetails(record),
 });
 
+const dropdownRef = ref(null);
+
+function handleWindowClick(event) {
+  if (dropdownRef.value && !dropdownRef.value.contains(event.target)) {
+    isDropdownOpen.value = false;
+  }
+}
+
 onMounted(async () => {
+  window.addEventListener("click", handleWindowClick);
   await store.fetchAll();
   checkDeepLink();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("click", handleWindowClick);
 });
 </script>
 
@@ -236,7 +286,7 @@ onMounted(async () => {
       type="file"
       class="hidden"
       accept=".jpg,.jpeg,.png,.pdf"
-      multiple
+      :multiple="newRequestUploadMode === 'multi'"
       @change="handleNewRequestFiles"
     />
 
@@ -254,20 +304,51 @@ onMounted(async () => {
           Manage and track all submitted expense claims.
         </p>
       </div>
+
       <div
-        v-if="!auth.isAdmin"
-        class="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5"
+        role="tablist"
+        aria-label="Reimbursements sections"
+        class="inline-flex flex-wrap rounded-lg border border-slate-200 bg-white p-1 self-start md:self-auto"
       >
-        <BaseToggleSwitch
-          :model-value="isMockOcr"
-          @update:model-value="setMockMode"
-          on-label="Mock OCR"
-          off-label="Real OCR"
-          hint="Mock uploads file, fills instantly, skips OCR wait"
-        />
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'all'"
+          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          :class="activeTab === 'all' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
+          @click="activeTab = 'all'"
+        >
+          Reimbursement Requests
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'tickets'"
+          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          :class="activeTab === 'tickets' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
+          @click="activeTab = 'tickets'"
+        >
+          Tickets (TS)
+        </button>
+        <button
+          v-if="auth.isAdmin"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'recurring'"
+          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          :class="activeTab === 'recurring' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
+          @click="activeTab = 'recurring'"
+        >
+          Recurring Expenses (CMS)
+        </button>
       </div>
     </div>
 
+    <TsTicketsPanel v-if="activeTab === 'tickets'" />
+
+    <CmsRecurringExpensesPanel v-else-if="auth.isAdmin && activeTab === 'recurring'" />
+
+    <template v-else>
     <!-- ── KPI Cards ── -->
     <BaseKpiGrid
       :kpis="reimbursementKpis"
@@ -282,15 +363,71 @@ onMounted(async () => {
       :statuses="statusFilters"
       :categories="categoryFilters"
     >
+      <template #extra-filters>
+        <div class="space-y-1.5 rounded-lg bg-slate-50/70 p-2">
+          <p class="input-label !mb-1">Vendor Review</p>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="vf in vendorFilters"
+              :key="`vendor-filter-${vf}`"
+              type="button"
+              class="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+              :class="activeVendorFilter === vf ? 'bg-primary text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-accent-50 hover:text-accent'"
+              @click="activeVendorFilter = vf"
+            >
+              {{ vf }}
+            </button>
+          </div>
+        </div>
+      </template>
       <template #actions>
-        <BaseButton
-          id="new-reimbursement-btn"
-          variant="primary"
-          class="min-h-[42px] px-5 w-full sm:w-fit font-bold whitespace-nowrap"
-          @click="handleNewRequest"
-        >
-          <Plus class="w-4 h-4" /> New Request
-        </BaseButton>
+        <div ref="dropdownRef" class="relative inline-block text-left w-full sm:w-auto" @click.stop>
+          <button
+            id="new-reimbursement-btn"
+            type="button"
+            class="btn btn-primary min-h-[42px] px-5 w-full sm:w-fit font-bold whitespace-nowrap inline-flex items-center justify-center gap-2"
+            @click.stop="isDropdownOpen = !isDropdownOpen"
+          >
+            <Plus class="w-4 h-4" />
+            <span>New Request</span>
+            <ChevronDown class="w-3.5 h-3.5 ml-1 -mr-1" aria-hidden="true" />
+          </button>
+
+          <transition
+            enter-active-class="transition duration-100 ease-out"
+            enter-from-class="transform scale-95 opacity-0"
+            enter-to-class="transform scale-100 opacity-100"
+            leave-active-class="transition duration-75 ease-in"
+            leave-from-class="transform scale-100 opacity-100"
+            leave-to-class="transform scale-95 opacity-0"
+          >
+            <div
+              v-if="isDropdownOpen"
+              class="absolute z-30 w-48 mt-2 origin-top-right right-0 bg-white divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none"
+            >
+              <div class="px-1 py-1">
+                <button
+                  type="button"
+                  id="new-request-single-btn"
+                  class="group flex w-full items-center rounded-md px-3 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white transition-colors"
+                  @click="triggerNewRequestUpload('single')"
+                >
+                  <UploadCloud class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
+                  Single Receipt
+                </button>
+                <button
+                  type="button"
+                  id="new-request-multi-btn"
+                  class="group flex w-full items-center rounded-md px-3 py-2 text-xs font-bold text-gray-900 hover:bg-accent hover:text-white transition-colors"
+                  @click="triggerNewRequestUpload('multi')"
+                >
+                  <Layers class="mr-2 h-4 w-4 text-accent group-hover:text-white" aria-hidden="true" />
+                  Multi Receipt
+                </button>
+              </div>
+            </div>
+          </transition>
+        </div>
       </template>
     </BaseUtilityToolbar>
 
@@ -310,11 +447,11 @@ onMounted(async () => {
       @edit-request="handleEdit"
       @delete-request="handleDelete"
     />
+    </template>
 
     <!-- ── Record Detail Panel (Modal) ── -->
     <ReimbursementDetailsModal
       :viewing-record="viewingRecord"
-      :receipt-details-open="receiptDetailsOpen"
       :modal-loading="modalLoading"
       @close="closeDetails"
       @view-receipt-details="viewReceiptDetails"
@@ -336,7 +473,6 @@ onMounted(async () => {
       "
       :is-submitting="isReceiptReviewSubmitting"
       @close="receiptDetailsOpen = false"
-      @close-all="closeDetails"
       @request-decision="
         (action) => requestReceiptDecision(selectedReceipt, action)
       "
@@ -349,8 +485,13 @@ onMounted(async () => {
       :is-open="!!approvingId || !!rejectingId"
       :mode="approvingId ? 'approve' : (revisionAction || 'revise')"
       :is-submitting="isReviewSubmitting"
+      :fast-track-eligible="Boolean(approvingRecord?.fast_track_eligible)"
+      :requires-secondary-audit="Boolean(approvingRecord?.vendor_audit_required)"
+      :unverified-vendors="approvingRecord?.unverified_vendors || []"
       v-model:password="confirmPassword"
       v-model:comment="rejectionComment"
+      v-model:secondary-audit-confirmed="secondaryAuditConfirmed"
+      v-model:secondary-audit-note="secondaryAuditNote"
       @close="approvingId ? cancelApprove() : cancelReject()"
       @confirm="approvingId ? confirmApprove() : confirmReject()"
     />

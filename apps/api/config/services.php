@@ -4,39 +4,6 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Third Party Services
-    |--------------------------------------------------------------------------
-    |
-    | This file is for storing the credentials for third party services such
-    | as Mailgun, Postmark, AWS and more. This file provides the de facto
-    | location for this type of information, allowing packages to have
-    | a conventional file to locate the various service credentials.
-    |
-    */
-
-    'postmark' => [
-        'key' => env('POSTMARK_API_KEY'),
-    ],
-
-    'resend' => [
-        'key' => env('RESEND_API_KEY'),
-    ],
-
-    'ses' => [
-        'key' => env('AWS_ACCESS_KEY_ID'),
-        'secret' => env('AWS_SECRET_ACCESS_KEY'),
-        'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
-    ],
-
-    'slack' => [
-        'notifications' => [
-            'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
-            'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
-        ],
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
     | Capstone Auth Module
     |--------------------------------------------------------------------------
     |
@@ -99,6 +66,57 @@ return [
         // (or another connection) only when a worker (`php artisan queue:work`)
         // is actually running to process the queue.
         'ocr_queue_connection' => env('AI_SERVICE_OCR_QUEUE_CONNECTION', 'sync'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | CMS (Contract & Vendor Management System) Integration
+    |--------------------------------------------------------------------------
+    |
+    | Outbound base URLs and shared internal secret for bi-directional
+    | integration with CMS over Docker (shared-capstone-network) or tunnels.
+    |
+    */
+
+    'cms' => [
+        'contract_url'    => env('CMS_CONTRACT_URL', 'http://contract-management:8000/api'),
+        'vendor_url'      => env('CMS_VENDOR_URL', 'http://vendor-management:8000/api'),
+        'internal_secret' => env('INTERNAL_SERVICE_SECRET'),
+        'timeout'         => (int) env('CMS_SERVICE_TIMEOUT', 5),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Ticketing System (TS) Integration
+    |--------------------------------------------------------------------------
+    |
+    | Outbound base URL, optional status webhook URL, shared internal secret,
+    | and request timeout for SERMS <-> Ticketing System integration.
+    |
+    */
+
+    'ts' => [
+        'api_url'                  => env('TS_API_URL'),
+        'reimbursement_status_url' => env('TS_REIMBURSEMENT_STATUS_URL'),
+        'internal_secret'          => env('TS_INTERNAL_SECRET') ?: env('INTERNAL_SERVICE_SECRET'),
+        'timeout'                  => (int) env('TS_SERVICE_TIMEOUT', 10),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Exchange Rate API (Multi-Currency FX to PHP)
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for fetching live FX rates (default: ExchangeRate-API
+    | Open Access endpoint with PHP as base) and cache staleness TTL.
+    |
+    */
+
+    'exchange_rate' => [
+        'url'       => env('EXCHANGE_RATE_API_URL', 'https://open.er-api.com/v6/latest/PHP'),
+        'api_key'   => env('EXCHANGE_RATE_API_KEY'),
+        'timeout'   => (int) env('EXCHANGE_RATE_API_TIMEOUT', 8),
+        'ttl_hours' => (int) env('EXCHANGE_RATE_TTL_HOURS', 24),
     ],
 
 ];

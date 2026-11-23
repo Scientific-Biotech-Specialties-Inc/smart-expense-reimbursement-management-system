@@ -1,6 +1,10 @@
 <script setup>
 import { computed } from "vue";
 import { formatAmount, formatDate } from "@/utils/formatters";
+import {
+  getPayoutTypeLabel,
+  getPayoutTypeBadgeClass,
+} from "@/composables/payouts/usePayoutFilters";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import ActionDropdownMenu from "@/components/base/ActionDropdownMenu.vue";
@@ -30,6 +34,11 @@ const emit = defineEmits([
 ]);
 
 const columnCount = computed(() => props.columns.length);
+const hasTypeColumn = computed(() =>
+  props.columns.some(
+    (col) => col.key === "typeLabel" || col.key === "type",
+  ),
+);
 const hasEmployeeColumn = computed(() =>
   props.columns.some(
     (col) => col.key === "employeeName" || col.key === "employee",
@@ -70,7 +79,7 @@ function getActions(row) {
           Granted Payouts
         </h2>
         <p class="mt-0.5 text-xs text-slate-400">
-          {{ isAdmin ? "All released reimbursement payout records across employees" : "Your released reimbursement payout records" }}
+          {{ isAdmin ? "All released reimbursement and cash advance payout records across employees" : "Your released reimbursement and cash advance payout records" }}
         </p>
       </div>
       <span class="kpi-label text-slate-400">
@@ -148,7 +157,7 @@ function getActions(row) {
           <template v-else>
             <tr
               v-for="row in rows"
-              :key="row.id"
+              :key="row.uid || `${row.type || 'reimbursement'}-${row.id}`"
               class="transition-colors duration-200 ease-out group whitespace-nowrap hover:bg-slate-50/70"
             >
               <td class="px-5 py-5 text-sm font-semibold text-slate-800">
@@ -158,6 +167,14 @@ function getActions(row) {
                   class="block truncate text-xs font-normal text-slate-400 mt-0.5"
                 >
                   {{ row.description }}
+                </span>
+              </td>
+              <td v-if="hasTypeColumn" class="px-5 py-5">
+                <span
+                  class="inline-flex whitespace-nowrap rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide"
+                  :class="getPayoutTypeBadgeClass(row)"
+                >
+                  {{ getPayoutTypeLabel(row) }}
                 </span>
               </td>
               <td

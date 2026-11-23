@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ref } from "vue";
 import { useReceiptUploads } from "./useReceiptUploads";
 
 const { addToastMock } = vi.hoisted(() => {
@@ -13,10 +12,6 @@ vi.mock("@/stores/auth", () => ({
 
 vi.mock("@/composables/useToast", () => ({
   useToast: () => ({ addToast: addToastMock }),
-}));
-
-vi.mock("@/composables/useOcrMode", () => ({
-  useOcrMode: () => ({ isMockOcr: ref(false) }),
 }));
 
 describe("useReceiptUploads — OCR missing fields notification", () => {
