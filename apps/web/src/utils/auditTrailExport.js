@@ -1,5 +1,120 @@
-import * as XLSX from "xlsx";
 import { formatDateTime } from "./formatters";
+
+/**
+ * Escapes XML special characters for OpenXML spreadsheet strings.
+ */
+function escapeXml(val) {
+  if (val === null || val === undefined) return "";
+  return String(val)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+/**
+ * Builds an uncompressed ZIP archive (PKZIP Store method 0) from file entries.
+ * Each entry: { name: string, data: Uint8Array }
+ */
+function buildStoredZip(entries) {
+  const encoder = new TextEncoder();
+  const crcTable = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    crcTable[n] = c >>> 0;
+  }
+
+  function crc32(bytes) {
+    let crc = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) {
+      crc = crcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+    }
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const nameBytes = encoder.encode(entry.name);
+    const dataBytes = entry.data;
+    const crc = crc32(dataBytes);
+    const size = dataBytes.length;
+
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(localHeader.buffer);
+    lv.setUint32(0, 0x04034b50, true); // Local file header signature
+    lv.setUint16(4, 20, true); // Version needed (2.0)
+    lv.setUint16(6, 0x0800, true); // UTF-8 flag
+    lv.setUint16(8, 0, true); // Compression method: 0 (Stored)
+    lv.setUint16(10, 0, true);
+    lv.setUint16(12, 0x0021, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, size, true);
+    lv.setUint32(22, size, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true);
+    localHeader.set(nameBytes, 30);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(centralHeader.buffer);
+    cv.setUint32(0, 0x02014b50, true); // Central directory signature
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, 0, true);
+    cv.setUint16(14, 0x0021, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, size, true);
+    cv.setUint32(24, size, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    centralHeader.set(nameBytes, 46);
+
+    localParts.push(localHeader, dataBytes);
+    centralParts.push(centralHeader);
+    offset += localHeader.length + dataBytes.length;
+  }
+
+  let centralSize = 0;
+  for (const part of centralParts) centralSize += part.length;
+
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true); // End of central directory signature
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+
+  const totalSize = offset + centralSize + eocd.length;
+  const out = new Uint8Array(totalSize);
+  let pos = 0;
+  for (const part of localParts) {
+    out.set(part, pos);
+    pos += part.length;
+  }
+  for (const part of centralParts) {
+    out.set(part, pos);
+    pos += part.length;
+  }
+  out.set(eocd, pos);
+  return out;
+}
 
 /**
  * Escapes text for RFC 4180 CSV compliance.
@@ -66,43 +181,88 @@ export function generateCsv(trail = [], options = {}) {
 }
 
 /**
- * Generate native binary XLSX (OpenXML) format using SheetJS.
+ * Generate native binary XLSX (OpenXML) format without external vulnerable dependencies.
  */
 export function generateXlsx(trail = [], options = {}) {
-  const rows = trail.map((entry) => ({
-    Time: entry.created_at ? formatDateTime(entry.created_at) : "—",
-    User: entry.actor_name || "System",
-    Role: entry.actor_role || "",
-    "IP Address": entry.ip_address || "",
-    Domain: entry.domain_label || entry.domain || "",
-    Action: entry.label || entry.action_type || "",
-    Comment: entry.comment || "",
-    Changes: formatChanges(entry.changes),
-  }));
-
-  const worksheet = XLSX.utils.json_to_sheet(rows, {
-    header: ["Time", "User", "Role", "IP Address", "Domain", "Action", "Comment", "Changes"],
-  });
-
-  // Set friendly column widths
-  worksheet["!cols"] = [
-    { wch: 22 }, // Time
-    { wch: 20 }, // User
-    { wch: 14 }, // Role
-    { wch: 16 }, // IP Address
-    { wch: 16 }, // Domain
-    { wch: 18 }, // Action
-    { wch: 35 }, // Comment
-    { wch: 35 }, // Changes
+  const headers = ["Time", "User", "Role", "IP Address", "Domain", "Action", "Comment", "Changes"];
+  const colLetters = ["A", "B", "C", "D", "E", "F", "G", "H"];
+  const rows = [
+    headers,
+    ...trail.map((entry) => [
+      entry.created_at ? formatDateTime(entry.created_at) : "—",
+      entry.actor_name || "System",
+      entry.actor_role || "",
+      entry.ip_address || "",
+      entry.domain_label || entry.domain || "",
+      entry.label || entry.action_type || "",
+      entry.comment || "",
+      formatChanges(entry.changes),
+    ]),
   ];
 
-  const workbook = XLSX.utils.book_new();
   const rawTitle = options.title || "Audit Log";
-  const sheetTitle = String(rawTitle).replace(/[:\\\/?*\[\]]/g, "-").slice(0, 31);
-  XLSX.utils.book_append_sheet(workbook, worksheet, sheetTitle);
+  const sheetTitle = escapeXml(String(rawTitle).replace(/[:\\\/?*\[\]]/g, "-").slice(0, 31) || "Audit Log");
 
-  const arrayBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-  return new Uint8Array(arrayBuffer);
+  const sheetRowsXml = rows
+    .map((cells, rIdx) => {
+      const rowNum = rIdx + 1;
+      const cellsXml = cells
+        .map(
+          (val, cIdx) =>
+            `<c r="${colLetters[cIdx]}${rowNum}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(val)}</t></is></c>`
+        )
+        .join("");
+      return `<row r="${rowNum}">${cellsXml}</row>`;
+    })
+    .join("");
+
+  const encoder = new TextEncoder();
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`;
+
+  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+
+  const workbookXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="${sheetTitle}" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`;
+
+  const workbookRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`;
+
+  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cols>
+    <col min="1" max="1" width="22" customWidth="1"/>
+    <col min="2" max="2" width="20" customWidth="1"/>
+    <col min="3" max="3" width="14" customWidth="1"/>
+    <col min="4" max="4" width="16" customWidth="1"/>
+    <col min="5" max="5" width="16" customWidth="1"/>
+    <col min="6" max="6" width="18" customWidth="1"/>
+    <col min="7" max="8" width="35" customWidth="1"/>
+  </cols>
+  <sheetData>${sheetRowsXml}</sheetData>
+</worksheet>`;
+
+  return buildStoredZip([
+    { name: "[Content_Types].xml", data: encoder.encode(contentTypesXml) },
+    { name: "_rels/.rels", data: encoder.encode(relsXml) },
+    { name: "xl/workbook.xml", data: encoder.encode(workbookXml) },
+    { name: "xl/_rels/workbook.xml.rels", data: encoder.encode(workbookRelsXml) },
+    { name: "xl/worksheets/sheet1.xml", data: encoder.encode(sheetXml) },
+  ]);
 }
 
 /**
