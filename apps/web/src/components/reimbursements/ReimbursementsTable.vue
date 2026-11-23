@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
-import { formatPeso, formatAmount, formatDate } from "@/utils/formatters";
+import { formatAmount, formatDate } from "@/utils/formatters";
+import { normalizeStatus } from "@/composables/reimbursements/useReimbursementFilters";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import {
@@ -9,6 +10,7 @@ import {
   ChevronsUpDown,
   Eye,
   Pencil,
+  Ticket,
   Trash2,
 } from "lucide-vue-next";
 import ActionDropdownMenu from "@/components/base/ActionDropdownMenu.vue";
@@ -43,27 +45,9 @@ function handleToggleSort(column) {
   emit("toggle-sort", column);
 }
 
-function handleViewDetails(row) {
-  emit("view-details", row);
-}
-
-function normalizeStatus(status) {
-  const normalized = String(status || "").toLowerCase();
-  const statusMap = {
-    submitted: "pending",
-    review: "pending",
-    draft: "pending",
-    reject: "rejected",
-    rejected: "rejected",
-    paid: "granted",
-  };
-  return statusMap[normalized] || normalized;
-}
-
 function getActions(row) {
   const status = normalizeStatus(row.displayStatus);
   const isRevise = status === "revise";
-  const isRejected = status === "rejected";
   return [
     {
       label: "Edit",
@@ -87,7 +71,9 @@ function getActions(row) {
   ];
 }
 
-const tableMinWidth = computed(() => "min-w-full");
+const tableMinWidth = computed(() =>
+  props.isAdmin ? "min-w-[1120px]" : "min-w-[960px]",
+);
 </script>
 
 <template>
@@ -122,8 +108,10 @@ const tableMinWidth = computed(() => "min-w-full");
             <th
               v-for="column in columns"
               :key="column.key"
-              class="px-5 py-4 text-[11px] font-bold uppercase tracking-[0.08em]"
+              class="py-4 text-[11px] font-bold uppercase tracking-[0.08em]"
               :class="[
+                column.paddingClass || 'px-5',
+                column.widthClass,
                 column.align === 'right'
                   ? 'text-right'
                   : column.align === 'center'
@@ -136,10 +124,10 @@ const tableMinWidth = computed(() => "min-w-full");
                 class="inline-flex items-center gap-1.5 transition-colors hover:text-accent"
                 :class="
                   column.align === 'right'
-                    ? 'justify-end'
+                    ? 'justify-end text-right'
                     : column.align === 'center'
-                      ? 'justify-center'
-                      : 'justify-start'
+                      ? 'justify-center text-center'
+                      : 'justify-start text-left'
                 "
                 type="button"
                 @click="handleToggleSort(column)"
@@ -207,8 +195,52 @@ const tableMinWidth = computed(() => "min-w-full");
               :key="row.id"
               class="transition-colors duration-200 ease-out group whitespace-nowrap"
             >
-              <td class="max-w-[240px] px-5 py-5 text-sm text-slate-600">
-                <span class="block truncate font-medium text-slate-800">{{ row.reportDescription }}</span>
+              <td class="px-5 py-5 text-sm text-slate-600">
+                <span
+                  class="block truncate font-medium text-slate-800"
+                  :title="row.reportDescription"
+                >{{ row.reportDescription }}</span>
+                <div
+                  v-if="row.reference_no || row.source_system === 'ts' || row.ticket_id || row.ticket_number"
+                  class="mt-1 flex flex-wrap items-center gap-1.5"
+                >
+                  <span
+                    v-if="row.reference_no"
+                    class="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-slate-600"
+                  >
+                    {{ row.reference_no }}
+                  </span>
+                  <span
+                    v-if="row.source_system === 'ts' || row.ticket_id"
+                    class="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700"
+                  >
+                    <Ticket class="w-2.5 h-2.5" aria-hidden="true" />
+                    <span>From TS</span>
+                  </span>
+                  <span
+                    v-if="row.ticket_id || row.ticket_number"
+                    class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700"
+                  >
+                    Ticket {{ row.ticket_number || `#${row.ticket_id}` }}
+                  </span>
+                </div>
+                <div
+                  v-if="row.displayStatus === 'pending' && (row.fastTrackEligible || row.vendorAuditRequired)"
+                  class="mt-1 flex flex-wrap items-center gap-1"
+                >
+                  <span
+                    v-if="row.fastTrackEligible"
+                    class="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700"
+                  >
+                    Fast-Track Eligible
+                  </span>
+                  <span
+                    v-else-if="row.vendorAuditRequired"
+                    class="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800"
+                  >
+                    Secondary Audit Required
+                  </span>
+                </div>
                 <span
                   v-if="row.user_comment"
                   class="block truncate text-xs text-slate-400 mt-0.5"
@@ -218,9 +250,10 @@ const tableMinWidth = computed(() => "min-w-full");
                 </span>
               </td>
 
-              <td class="px-5 py-5">
+              <td class="px-3 py-5">
                 <span
-                  class="inline-flex rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-500"
+                  class="inline-flex max-w-full truncate rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-500"
+                  :title="row.category"
                 >
                   {{ row.category }}
                 </span>

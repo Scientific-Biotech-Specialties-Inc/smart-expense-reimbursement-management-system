@@ -4,7 +4,6 @@ import { mount } from "@vue/test-utils";
 import { ref } from "vue";
 import LiquidationsView from "@/views/LiquidationsView.vue";
 import LiquidationTable from "@/components/liquidations/LiquidationTable.vue";
-import LiquidationAdvancesList from "@/components/liquidations/LiquidationAdvancesList.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import ActionDropdownMenu from "@/components/base/ActionDropdownMenu.vue";
@@ -60,13 +59,6 @@ vi.mock("@/stores/auth", () => ({
 
 vi.mock("@/composables/useToast", () => ({
   useToast: () => ({ addToast: addToastMock }),
-}));
-
-vi.mock("@/composables/useOcrMode", () => ({
-  useOcrMode: () => ({
-    isMockOcr: ref(false),
-    setMockMode: vi.fn(),
-  }),
 }));
 
 vi.mock("@/composables/useUnsavedChanges", () => ({
@@ -167,7 +159,7 @@ describe("LiquidationsView — Employee table plumbing", () => {
             template: "<div class='settlement-form-stub' />",
           },
           // Deliberately NOT stubbed: LiquidationTable, BasePagination,
-          // LiquidationAdvancesList, BaseButton, StatusBadge, ConfirmModal.
+          // BaseButton, StatusBadge, ConfirmModal.
         },
       },
     });
@@ -272,7 +264,6 @@ describe("LiquidationsView — Employee table plumbing", () => {
       "Action",
     ]);
 
-    expect(wrapper.findComponent(LiquidationAdvancesList).exists()).toBe(false);
     expect(wrapper.find("div.grid.grid-cols-1.gap-6").exists()).toBe(false);
   });
 

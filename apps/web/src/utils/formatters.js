@@ -203,3 +203,20 @@ export function truncateText(text, maxLength = 18) {
   return str.slice(0, maxLength).trimEnd() + "...";
 }
 
+/**
+ * Truncate a number or numeric string to at most the specified decimal digits without rounding.
+ *
+ * @param {string|number|null|undefined} value - The numeric value or string to truncate.
+ * @param {number} [digits=2] - The maximum number of decimal places to retain.
+ * @returns {string} Truncated string representation of the number.
+ */
+export function truncateDecimal(value, digits = 2) {
+  if (value === null || value === undefined || value === "") return "";
+  const str = String(value);
+  const dotIndex = str.indexOf(".");
+  if (dotIndex !== -1) {
+    return digits > 0 ? str.slice(0, dotIndex + 1 + digits) : str.slice(0, dotIndex);
+  }
+  return str;
+}
+

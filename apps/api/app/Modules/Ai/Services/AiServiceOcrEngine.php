@@ -61,11 +61,13 @@ class AiServiceOcrEngine implements AsyncOcrEngineInterface
                     'response'   => $data,
                 ]);
                 try {
+                    $rejectionCode = !empty($data['rejection_code']) ? $data['rejection_code'] : 'unreadable';
+                    $rejectionReason = $data['rejection_reason'] ?? $data['message'] ?? \App\Modules\Reimbursements\Models\Receipt::DEFAULT_UNREADABLE_REASON;
                     app(\App\Modules\Reimbursements\Services\OcrCallbackService::class)->handle($receiptId, [
                         'status'           => 'rejected',
-                        'rejection_code'   => $data['rejection_code'] ?? 'blurry',
-                        'rejection_reason' => $data['rejection_reason'] ?? $data['message'] ?? 'Image quality is too low for accurate OCR data extraction.',
-                        'error'            => $data['message'] ?? 'Image quality is too low for accurate OCR data extraction.',
+                        'rejection_code'   => $rejectionCode,
+                        'rejection_reason' => $rejectionReason,
+                        'error'            => $data['message'] ?? $rejectionReason,
                     ]);
                 } catch (\Throwable $e) {
                     Log::error('AiServiceOcrEngine: failed to apply 422 rejection to receipt: ' . $e->getMessage());

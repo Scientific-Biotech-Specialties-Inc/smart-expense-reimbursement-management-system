@@ -76,7 +76,9 @@ class ReimbursementController extends Controller
                 (int)$id,
                 $request->validated('password'),
                 $request->ip(),
-                $request
+                $request,
+                (bool) $request->validated('secondary_audit_confirmed', false),
+                $request->validated('secondary_audit_note')
             );
 
             return response()->json([

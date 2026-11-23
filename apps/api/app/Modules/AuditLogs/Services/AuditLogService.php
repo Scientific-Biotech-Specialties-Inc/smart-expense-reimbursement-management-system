@@ -8,7 +8,6 @@ use App\Modules\Liquidations\Models\Liquidation;
 use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\Users\Models\User;
 use Carbon\Carbon;
-use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 
 class AuditLogService
@@ -40,6 +39,17 @@ class AuditLogService
         'LIQUIDATION_REJECTED' => ['label' => 'Rejected', 'tone' => 'danger', 'domain' => 'liquidation', 'domain_label' => 'Liquidation'],
 
         'OVERDUE_PENALTY' => ['label' => 'Daily Penalty Applied', 'tone' => 'danger', 'domain' => 'cash_advance', 'domain_label' => 'Cash Advance'],
+
+        'USER_LOGIN' => ['label' => 'Signed In', 'tone' => 'info', 'domain' => 'profile', 'domain_label' => 'Account Security'],
+        'PROFILE_UPDATED' => ['label' => 'Profile Details Updated', 'tone' => 'neutral', 'domain' => 'profile', 'domain_label' => 'Profile'],
+        'PROFILE_PHOTO_UPDATED' => ['label' => 'Profile Photo Updated', 'tone' => 'info', 'domain' => 'profile', 'domain_label' => 'Profile'],
+        'PROFILE_PHOTO_REMOVED' => ['label' => 'Profile Photo Removed', 'tone' => 'warning', 'domain' => 'profile', 'domain_label' => 'Profile'],
+        'PASSWORD_CHANGED' => ['label' => 'Password Changed', 'tone' => 'success', 'domain' => 'profile', 'domain_label' => 'Account Security'],
+        'SIGNATURE_UPDATED' => ['label' => 'Digital Signature Saved', 'tone' => 'info', 'domain' => 'profile', 'domain_label' => 'Profile'],
+        'SIGNATURE_REMOVED' => ['label' => 'Digital Signature Removed', 'tone' => 'warning', 'domain' => 'profile', 'domain_label' => 'Profile'],
+        'CMS_VENDOR_SUGGESTED' => ['label' => 'Vendor Suggested to CMS', 'tone' => 'info', 'domain' => 'cms', 'domain_label' => 'CMS Integration'],
+        'CMS_CONTRACT_REQUEST_FORWARDED' => ['label' => 'Contract Request Forwarded to CMS', 'tone' => 'info', 'domain' => 'cms', 'domain_label' => 'CMS Integration'],
+        'TS_REIMBURSEMENT_RECEIVED' => ['label' => 'Received from Ticketing System', 'tone' => 'info', 'domain' => 'ts', 'domain_label' => 'Ticketing Integration'],
     ];
 
     private const DIFF_FIELDS = [
@@ -56,7 +66,23 @@ class AuditLogService
         'admin_notes' => 'Admin Notes',
         'admin_note' => 'Admin Note',
         'payout_method' => 'Payout Method',
+        'payout_method_other' => 'Specified Payout Method',
+        'granted_by' => 'Granted By',
+        'reference' => 'Reference Number',
         'status' => 'Status',
+        'name' => 'Full Name',
+        'first_name' => 'First Name',
+        'middle_name' => 'Middle Name',
+        'last_name' => 'Last Name',
+        'contact_number' => 'Contact Number',
+        'contract_id' => 'CMS Contract ID',
+        'client_name' => 'Client Name',
+        'ticket_id' => 'TS Ticket ID',
+        'ticket_number' => 'TS Ticket Number',
+        'vendor_status_tag' => 'Vendor Verification Tag',
+        'secondary_audit_confirmed_at' => 'Secondary Audit Confirmed At',
+        'secondary_audit_by' => 'Secondary Audit By',
+        'secondary_audit_note' => 'Secondary Audit Note',
     ];
 
     /**
@@ -168,15 +194,18 @@ class AuditLogService
         if (!empty($after['shortfall_explanation'])) {
             return 'Shortfall explanation: ' . $after['shortfall_explanation'];
         }
-        if (!empty($after['channel']) && !empty($after['reference'])) {
-            return 'Channel: ' . $after['channel'] . ' (Ref: ' . $after['reference'] . ')';
-        }
         if (!empty($after['payout_method'])) {
             $msg = 'Method: ' . $after['payout_method'];
             if (!empty($after['payout_method_other'])) {
                 $msg .= ' (' . $after['payout_method_other'] . ')';
             }
+            if (!empty($after['reference'])) {
+                $msg .= ' (Ref: ' . $after['reference'] . ')';
+            }
             return $msg;
+        }
+        if (!empty($after['channel']) && !empty($after['reference'])) {
+            return 'Channel: ' . $after['channel'] . ' (Ref: ' . $after['reference'] . ')';
         }
 
         return null;
@@ -290,7 +319,7 @@ class AuditLogService
         }
 
         // Hybrid Fallback: synthesize baseline submission if missing
-        if (!in_array('CLAIM_SUBMITTED', $loggedActionTypes, true)) {
+        if (!in_array('CLAIM_SUBMITTED', $loggedActionTypes, true) && !in_array('TS_REIMBURSEMENT_RECEIVED', $loggedActionTypes, true)) {
             $submitterName = $rm->user ? $rm->user->name : ($rm->submitted_by_name ?? 'Employee');
             $createdAt = $rm->date ?? $rm->created_at;
             $entries[] = [
@@ -524,13 +553,16 @@ class AuditLogService
         // Hybrid Fallback: disbursement
         $disb = $adv->getAttribute('disbursement') ?? ($adv->relationLoaded('disbursement') ? $adv->disbursement : null);
         if ($disb) {
-            $key = 'ca-CASH_ADVANCE_DISBURSED';
-            if (!in_array($key, $loggedKeys, true)) {
+            if (empty(array_filter($loggedKeys, fn ($k) => str_starts_with($k, 'ca-CASH_ADVANCE_DISBURSED')))) {
                 $disbId = is_array($disb) ? ($disb['id'] ?? uniqid()) : ($disb->id ?? uniqid());
-                $channel = is_array($disb) ? ($disb['channel'] ?? 'N/A') : ($disb->channel ?? 'N/A');
+                $method = is_array($disb) ? ($disb['payout_method'] ?? $disb['channel'] ?? 'N/A') : ($disb->payout_method ?? $disb->channel ?? 'N/A');
+                $methodOther = is_array($disb) ? ($disb['payout_method_other'] ?? null) : ($disb->payout_method_other ?? null);
+                $methodLabel = ($method === 'Other' && !empty($methodOther)) ? "{$method} ({$methodOther})" : $method;
                 $ref = is_array($disb) ? ($disb['reference_number'] ?? 'N/A') : ($disb->reference_number ?? 'N/A');
                 $disbAt = is_array($disb) ? ($disb['disbursement_date'] ?? $disb['created_at'] ?? null) : ($disb->disbursement_date ?? $disb->created_at ?? null);
-                $disbursedBy = is_array($disb) ? ($disb['disbursed_by']['name'] ?? $disb['disbursedBy']['name'] ?? null) : ($disb->relationLoaded('disbursedBy') && $disb->disbursedBy ? $disb->disbursedBy->name : null);
+                $disbursedBy = is_array($disb)
+                    ? ($disb['granted_by'] ?? $disb['disbursed_by']['name'] ?? $disb['disbursedBy']['name'] ?? null)
+                    : ($disb->granted_by ?: ($disb->relationLoaded('disbursedBy') && $disb->disbursedBy ? $disb->disbursedBy->name : null));
                 $entries[] = [
                     'id' => 'synth-ca-disb-' . $disbId,
                     'domain' => 'cash_advance',
@@ -541,18 +573,17 @@ class AuditLogService
                     'actor_name' => $disbursedBy ?: 'Finance Officer',
                     'actor_role' => 'Finance',
                     'ip_address' => null,
-                    'comment' => "Channel: {$channel} (Ref: {$ref})",
+                    'comment' => "Method: {$methodLabel} (Ref: {$ref})",
                     'changes' => [],
                     'created_at' => $disbAt ? Carbon::parse($disbAt)->toIso8601String() : null,
                 ];
-                $loggedKeys[] = $key;
+                $loggedKeys[] = 'ca-CASH_ADVANCE_DISBURSED';
             }
         }
 
         // Hybrid Fallback: acknowledgment
         if ($adv->acknowledged_at) {
-            $key = 'ca-CASH_ADVANCE_ACKNOWLEDGED';
-            if (!in_array($key, $loggedKeys, true)) {
+            if (empty(array_filter($loggedKeys, fn ($k) => str_starts_with($k, 'ca-CASH_ADVANCE_ACKNOWLEDGED')))) {
                 $entries[] = [
                     'id' => 'synth-ca-ack-' . $adv->id,
                     'domain' => 'cash_advance',
@@ -567,7 +598,7 @@ class AuditLogService
                     'changes' => [],
                     'created_at' => Carbon::parse($adv->acknowledged_at)->toIso8601String(),
                 ];
-                $loggedKeys[] = $key;
+                $loggedKeys[] = 'ca-CASH_ADVANCE_ACKNOWLEDGED';
             }
         }
 

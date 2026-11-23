@@ -13,7 +13,6 @@ import {
 } from "@/utils/reimbursementForwarding";
 import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
 
-import StatusBadge from "@/components/base/StatusBadge.vue";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import BaseUtilityToolbar from "@/components/base/BaseUtilityToolbar.vue";
@@ -30,7 +29,6 @@ import {
   Receipt,
   Wallet,
   CheckSquare,
-  ShieldCheck,
   ChevronDown,
   Layers,
 } from "lucide-vue-next";
@@ -134,6 +132,7 @@ const totalExpenses = computed(() =>
 // ── Delete Modal ──────────────────────────────────────────────────
 const deleteModalOpen = ref(false);
 const selectedReceiptId = ref(null);
+const isDeleting = ref(false);
 
 function promptDelete(id) {
   selectedReceiptId.value = id;
@@ -151,25 +150,41 @@ async function confirmDelete(password) {
       type: "error",
     });
     deleteModalOpen.value = false;
+    selectedReceiptId.value = null;
     return;
   }
 
-  const isValid = await auth.verifyPassword(password);
+  isDeleting.value = true;
+  try {
+    const isValid = await auth.verifyPassword(password);
 
-  if (isValid) {
-    await receiptsStore.softDelete(selectedReceiptId.value);
-    const s = new Set(selectedIds.value);
-    s.delete(selectedReceiptId.value);
-    selectedIds.value = s;
-    const nextPage =
-      receiptsStore.visibleReceipts.length === 1 && currentPage.value > 1
-        ? currentPage.value - 1
-        : currentPage.value;
-    await fetchReceipts(nextPage);
-    addToast({ message: "Receipt removed.", type: "success" });
-    deleteModalOpen.value = false;
-  } else {
-    addToast({ message: "Invalid password.", type: "error" });
+    if (isValid) {
+      try {
+        await receiptsStore.softDelete(selectedReceiptId.value);
+        const s = new Set(selectedIds.value);
+        s.delete(selectedReceiptId.value);
+        selectedIds.value = s;
+        const nextPage =
+          receiptsStore.visibleReceipts.length === 1 && currentPage.value > 1
+            ? currentPage.value - 1
+            : currentPage.value;
+        await fetchReceipts(nextPage);
+        addToast({ message: "Receipt removed.", type: "success" });
+        deleteModalOpen.value = false;
+        selectedReceiptId.value = null;
+      } catch (error) {
+        addToast({
+          message: error.message || "Failed to delete receipt.",
+          type: "error",
+        });
+        deleteModalOpen.value = false;
+        selectedReceiptId.value = null;
+      }
+    } else {
+      addToast({ message: "Invalid password.", type: "error" });
+    }
+  } finally {
+    isDeleting.value = false;
   }
 }
 
@@ -507,11 +522,12 @@ const kpis = computed(() => [
               {{ automaticRejectedReceipts.length }} receipt{{
                 automaticRejectedReceipts.length === 1 ? "" : "s"
               }}
-              need correction
+              automatically rejected
             </p>
             <p class="mt-1 text-sm text-slate-600">
-              System validation automatically rejected these receipts. Edit and
-              resubmit them for admin re-review.
+              System validation automatically rejected these receipts. Rejected
+              receipts cannot be edited — please delete them and upload clearer
+              copies.
             </p>
           </div>
         </div>
@@ -604,7 +620,11 @@ const kpis = computed(() => [
     />
 
     <!-- ── Delete Confirmation Modal ── -->
-    <DeleteConfirmModal v-model="deleteModalOpen" @confirm="confirmDelete" />
+    <DeleteConfirmModal
+      v-model="deleteModalOpen"
+      :loading="isDeleting"
+      @confirm="confirmDelete"
+    />
 
     <!-- ── View Receipt Modal ── -->
     <ReceiptViewModal

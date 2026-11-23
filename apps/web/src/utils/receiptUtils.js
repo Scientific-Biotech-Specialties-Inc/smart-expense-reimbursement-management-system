@@ -1,3 +1,34 @@
+import { truncateDecimal } from "./formatters";
+import { extractReceiptFxSnapshot } from "../composables/useCurrencyRates";
+
+export const DISCOUNT_TYPE_OPTIONS = [
+  { value: "none", label: "None" },
+  { value: "senior", label: "Senior Citizen" },
+  { value: "pwd", label: "PWD" },
+  { value: "student", label: "Student" },
+  { value: "promo", label: "Promo / Voucher" },
+  { value: "employee", label: "Employee" },
+  { value: "other", label: "Other" },
+];
+
+const VALID_DISCOUNT_TYPES = new Set(DISCOUNT_TYPE_OPTIONS.map((o) => o.value));
+
+export function normalizeDiscountType(value, discountAmount = 0) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (VALID_DISCOUNT_TYPES.has(normalized) && normalized !== "none") {
+    return normalized;
+  }
+  if (Number(discountAmount) > 0) {
+    return "other";
+  }
+  return "none";
+}
+
+export function formatDiscountTypeLabel(value) {
+  const found = DISCOUNT_TYPE_OPTIONS.find((opt) => opt.value === String(value || "").toLowerCase());
+  return found && found.value !== "none" ? found.label : "";
+}
+
 export function vatOf(amount) {
   return amount > 0 ? (amount * 0.12) / 1.12 : 0;
 }
@@ -24,6 +55,13 @@ export function itemsGrossAmount(items = []) {
   return items.reduce((sum, item) => sum + itemGrossAmount(item), 0);
 }
 
+export function receiptDiscountAmount(receipt) {
+  const val = Number(
+    receipt?.discountAmount ?? receipt?.discount_amount ?? receipt?.discount ?? 0,
+  );
+  return val > 0 ? val : 0;
+}
+
 export function receiptGrossAmount(receipt) {
   const explicitAmount = Number(receipt?.amount ?? receipt?.total_amount ?? 0);
   if (explicitAmount > 0) {
@@ -31,7 +69,7 @@ export function receiptGrossAmount(receipt) {
   }
 
   if (receipt?.items?.length) {
-    return itemsGrossAmount(receipt.items);
+    return Math.max(0, itemsGrossAmount(receipt.items) - receiptDiscountAmount(receipt));
   }
 
   return 0;
@@ -45,12 +83,19 @@ export function receiptFinancials(receipt, vatClassification) {
   );
   const gross = receiptGrossAmount(receipt);
   const vat = vatFor(gross, classification);
+  const discountAmount = receiptDiscountAmount(receipt);
+  const discountType = normalizeDiscountType(
+    receipt?.discountType ?? receipt?.discount_type,
+    discountAmount,
+  );
 
   return {
     gross,
     vat,
     subtotal: Math.max(gross - vat, 0),
     vatClassification: classification,
+    discountAmount,
+    discountType,
   };
 }
 
@@ -63,6 +108,30 @@ export function tinFor(receipt) {
     .replace(/\D/g, "")
     .padEnd(9, "0");
   return `${seed.slice(0, 3)}-${seed.slice(3, 6)}-${seed.slice(6, 9)}-000`;
+}
+
+/**
+ * Formats a BIR TIN string into `XXX-XXX-XXX` or `XXX-XXX-XXX-XXX` segments.
+ *
+ * @param {string|number|null|undefined} value
+ * @param {object} [options]
+ * @param {boolean} [options.padLastBlock=false] Pad a 9-digit TIN with `-000`
+ * @returns {string}
+ */
+export function formatTinValue(value, { padLastBlock = false } = {}) {
+  let digits = String(value || "")
+    .replace(/\D/g, "")
+    .slice(0, 12);
+  if (padLastBlock && digits.length === 9) {
+    digits = `${digits}000`;
+  }
+
+  const parts = [];
+  if (digits.length > 0) parts.push(digits.slice(0, 3));
+  if (digits.length > 3) parts.push(digits.slice(3, 6));
+  if (digits.length > 6) parts.push(digits.slice(6, 9));
+  if (digits.length > 9) parts.push(digits.slice(9, 12));
+  return parts.join("-");
 }
 
 const MOCK_ITEMS = {
@@ -84,17 +153,6 @@ const MOCK_ITEMS = {
 
 export function getItems(cat) {
   return MOCK_ITEMS[cat] || MOCK_ITEMS.Uncategorized;
-}
-
-function buildDefaultItems(categoryLabel, amount) {
-  const itemNames = getItems(categoryLabel || "Expense");
-  const splitPrice = itemNames.length > 0 ? Number(amount || 0) / itemNames.length : 0;
-
-  return itemNames.map((name) => ({
-    name,
-    qty: 1,
-    price: Number(splitPrice.toFixed(2)),
-  }));
 }
 
 export function formatDateForInput(dateStr) {
@@ -135,6 +193,12 @@ export function buildPrefilledReceiptDraft({
     receiptData.vat_classification,
   );
   const amount = Number(receiptData.total_amount) || 0;
+  const rawDiscount = Number(receiptData.discount_amount ?? receiptData.discountAmount ?? 0) || 0;
+  const discountType = normalizeDiscountType(
+    receiptData.discount_type ?? receiptData.discountType,
+    rawDiscount,
+  );
+  const discountAmountStr = rawDiscount > 0 ? rawDiscount.toFixed(2) : "0.00";
   const categoryName = receiptData.category?.name || "";
   const items =
     Array.isArray(receiptData.items) && receiptData.items.length > 0
@@ -144,7 +208,10 @@ export function buildPrefilledReceiptDraft({
           price: Number(item.price) || 0,
         }))
       : [];
-  const amounts = receiptFinancials({ amount, items }, vatClassification);
+  const amounts = receiptFinancials(
+    { amount, items, discount_amount: rawDiscount, discount_type: discountType },
+    vatClassification,
+  );
 
   let resolvedSubtotal = "";
   if (receiptData.subtotal != null && receiptData.subtotal !== "") {
@@ -162,14 +229,17 @@ export function buildPrefilledReceiptDraft({
     fileName,
     fileType,
     thumbnail,
-    amount: amount > 0 ? amounts.gross : "",
+    amount: amount > 0 ? Number(truncateDecimal(amounts.gross, 2)) : "",
     subtotal: resolvedSubtotal,
     tax:
       receiptData.vat_amount != null && receiptData.vat_amount !== ""
         ? Number(receiptData.vat_amount).toFixed(2)
         : (vatClassification === "non-vat" ? "0.00" : ""),
+    discountAmount: discountAmountStr,
+    discountType,
     vatClassification: amounts.vatClassification,
     currency: receiptData.currency || "",
+    ...extractReceiptFxSnapshot(receiptData, receiptData.currency || ""),
     date: formatDateForInput(receiptData.transaction_date || receiptData.date),
     category: categoryName,
     categoryId: receiptData.expense_category_id || null,
@@ -181,6 +251,7 @@ export function buildPrefilledReceiptDraft({
 
 export function buildReceiptUploadFormPrefill(options = {}) {
   const receipt = buildPrefilledReceiptDraft(options);
+  const discAmt = Number(receipt.discountAmount) || 0;
 
   return {
     invoice_number: receipt.invoiceNumber,
@@ -190,6 +261,8 @@ export function buildReceiptUploadFormPrefill(options = {}) {
     expense_category_id: receipt.categoryId || "",
     total_amount: receipt.amount > 0 ? Number(receipt.amount.toFixed(2)) : "",
     vat_amount: receipt.tax,
+    discount_amount: discAmt >= 0 ? discAmt.toFixed(2) : "0.00",
+    discount_type: receipt.discountType || "none",
     vat_classification: receipt.vatClassification,
     currency: receipt.currency,
     items: (receipt.items || []).map((item) => ({
@@ -208,18 +281,21 @@ export function firstFilePathField(value) {
  * Statuses for which a receipt may NOT be edited by its owner on the
  * "My Expense" page. This is the single source of truth for edit gating.
  * Any status not in this list is editable (e.g. processing, processed,
- * flagged, rejected, failed, automatic-rejected).
+ * flagged, failed).
  */
 export const EDIT_FORBIDDEN_STATUSES = [
   "approved",
   "pending",
   "pending-admin-re-review",
   "final-rejected",
+  "rejected",
+  "automatic-rejected",
 ];
 
-// Delete reuses the edit list but also allows "final-rejected" receipts.
+// Delete reuses the edit list but allows deleting rejected receipt statuses.
 export const DELETE_FORBIDDEN_STATUSES = EDIT_FORBIDDEN_STATUSES.filter(
-  (status) => status !== "final-rejected",
+  (status) =>
+    !["final-rejected", "rejected", "automatic-rejected"].includes(status),
 );
 
 /**
@@ -246,9 +322,10 @@ export function canEditReceipt(receipt) {
 /**
  * Returns true when a receipt's delete option should be available.
  *
- * Delete availability mirrors edit, except "final-rejected" receipts ARE
- * deletable (unlike edit). It reuses EDIT_FORBIDDEN_STATUSES via
- * DELETE_FORBIDDEN_STATUSES so the two gates stay aligned by construction.
+ * Delete availability mirrors edit, except "final-rejected", "rejected",
+ * and "automatic-rejected" receipts ARE deletable (unlike edit). It reuses
+ * EDIT_FORBIDDEN_STATUSES via DELETE_FORBIDDEN_STATUSES so the two gates
+ * stay aligned by construction.
  *
  * @param {object|null|undefined} receipt
  * @returns {boolean}
@@ -273,8 +350,7 @@ export const REQUIRED_RECEIPT_FIELDS = [
   { key: "subtotal", label: "Subtotal" },
 ];
 
-export function isReceiptFieldMissing(receipt, fieldKey) {
-  if (!receipt || (!receipt.hasOcrReturned && !receipt.validated)) return false;
+function isMissingFieldValue(receipt, fieldKey) {
   switch (fieldKey) {
     case "invoiceNumber":
       return !receipt.invoiceNumber || !String(receipt.invoiceNumber).trim();
@@ -309,44 +385,122 @@ export function isReceiptFieldMissing(receipt, fieldKey) {
   }
 }
 
+export function isReceiptFieldMissing(receipt, fieldKey) {
+  if (!receipt || (!receipt.hasOcrReturned && !receipt.validated)) return false;
+  return isMissingFieldValue(receipt, fieldKey);
+}
+
 export function getMissingReceiptFields(receipt) {
   if (!receipt) return [];
-  const missing = [];
+  return REQUIRED_RECEIPT_FIELDS.filter(({ key }) =>
+    isMissingFieldValue(receipt, key),
+  );
+}
 
-  if (!receipt.invoiceNumber || !String(receipt.invoiceNumber).trim()) {
-    missing.push({ key: "invoiceNumber", label: "Invoice Number" });
-  }
-  if (!receipt.date || !String(receipt.date).trim()) {
-    missing.push({ key: "date", label: "Date" });
-  }
-  if (!receipt.tin || !String(receipt.tin).trim()) {
-    missing.push({ key: "tin", label: "TIN Number" });
-  }
-  if (!receipt.merchantName || !String(receipt.merchantName).trim()) {
-    missing.push({ key: "merchantName", label: "Merchant Name" });
-  }
-  if (!receipt.location || !String(receipt.location).trim()) {
-    missing.push({ key: "location", label: "Location" });
-  }
-  if (!receipt.categoryId) {
-    missing.push({ key: "categoryId", label: "Category" });
-  }
-  if (
-    receipt.amount === "" ||
-    receipt.amount === null ||
-    receipt.amount === undefined ||
-    Number(receipt.amount) <= 0
-  ) {
-    missing.push({ key: "amount", label: "Total Amount" });
-  }
-  if (
-    receipt.subtotal === "" ||
-    receipt.subtotal === null ||
-    receipt.subtotal === undefined ||
-    Number(receipt.subtotal) <= 0
-  ) {
-    missing.push({ key: "subtotal", label: "Subtotal" });
-  }
+/**
+ * Marks a receipt as having received OCR output and returns a warning message
+ * listing any missing required fields, or null when all required fields exist.
+ *
+ * @param {object|null|undefined} receipt
+ * @returns {string|null}
+ */
+export function markOcrReturnedAndGetMissingWarning(receipt) {
+  if (!receipt) return null;
+  receipt.hasOcrReturned = true;
+  const missing = getMissingReceiptFields(receipt);
+  if (missing.length === 0) return null;
+  return `Missing required field(s): ${missing.map((f) => f.label).join(", ")}`;
+}
 
-  return missing;
+/**
+ * Returns true when an OCR polling payload contains one or more auto-split sibling receipts.
+ *
+ * @param {object|null|undefined} data
+ * @returns {boolean}
+ */
+export function hasSplitReceipts(data) {
+  return Array.isArray(data?.split_receipts) && data.split_receipts.length > 0;
+}
+
+/**
+ * Formats the user-facing info toast message when a multi-receipt upload is auto-split.
+ *
+ * @param {number} count
+ * @returns {string}
+ */
+export function formatSplitReceiptsToastMessage(count) {
+  return `Detected ${count} separate receipts — split into individual receipt cards.`;
+}
+
+/**
+ * Resolves 0-based uploaded file indices for each payload in a split OCR batch,
+ * preferring explicit `segment_indices` and falling back to sequential slices.
+ *
+ * @param {Array<object>} payloads
+ * @param {number} [totalFiles=0]
+ * @returns {number[][]}
+ */
+export function resolveSplitSegmentIndices(payloads = [], totalFiles = 0) {
+  let seqCursor = 0;
+  return payloads.map((payload) => {
+    const explicit = Array.isArray(payload?.segment_indices)
+      ? payload.segment_indices.filter(
+          (idx) =>
+            Number.isInteger(idx) &&
+            idx >= 0 &&
+            (totalFiles <= 0 || idx < totalFiles),
+        )
+      : [];
+    if (explicit.length > 0) {
+      seqCursor = Math.max(seqCursor, Math.max(...explicit) + 1);
+      return explicit;
+    }
+
+    const count =
+      Array.isArray(payload?.file_path) && payload.file_path.length > 0
+        ? payload.file_path.length
+        : Array.isArray(payload?.file_url) && payload.file_url.length > 0
+          ? payload.file_url.length
+          : 1;
+
+    const indices = [];
+    for (let k = 0; k < count; k++) {
+      if (totalFiles <= 0 || seqCursor < totalFiles) {
+        indices.push(seqCursor);
+      }
+      seqCursor += 1;
+    }
+    return indices;
+  });
+}
+
+/**
+ * Determines whether an OCR or API response payload represents a duplicate receipt.
+ *
+ * @param {object|null|undefined} data
+ * @returns {boolean}
+ */
+export function isDuplicateOcrResponse(data) {
+  if (!data) return false;
+  if (
+    data.rejection_code === "duplicate" ||
+    data.rejectionCode === "duplicate" ||
+    data.is_duplicate === true ||
+    data.isDuplicate === true
+  ) {
+    return true;
+  }
+  const reason = String(
+    data.rejection_reason ||
+      data.rejectionReason ||
+      data.message ||
+      data.error ||
+      "",
+  ).toLowerCase();
+  if (reason.includes("duplicate")) return true;
+  if (data.errors) {
+    const errStr = JSON.stringify(data.errors).toLowerCase();
+    if (errStr.includes("duplicate")) return true;
+  }
+  return false;
 }

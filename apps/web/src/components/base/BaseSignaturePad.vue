@@ -1,7 +1,7 @@
 <script setup>
-import { ref, onMounted } from "vue";
-import BaseButton from "@/components/base/BaseButton.vue";
-import { PenTool, RotateCcw } from "lucide-vue-next";
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { useAuthStore } from "@/stores/auth";
+import { PenTool, RotateCcw, Sparkles, CheckCircle2 } from "lucide-vue-next";
 
 const props = defineProps({
   modelValue: {
@@ -22,7 +22,27 @@ const props = defineProps({
   },
   heightClass: {
     type: String,
-    default: "h-36",
+    default: "h-32",
+  },
+  maxWidthClass: {
+    type: String,
+    default: "max-w-lg",
+  },
+  center: {
+    type: Boolean,
+    default: true,
+  },
+  allowProfileSignature: {
+    type: Boolean,
+    default: true,
+  },
+  savedSignature: {
+    type: String,
+    default: null,
+  },
+  showHelperNote: {
+    type: Boolean,
+    default: true,
   },
 });
 
@@ -31,16 +51,47 @@ const emit = defineEmits(["update:modelValue"]);
 const signatureCanvas = ref(null);
 const isSigning = ref(false);
 const hasSignature = ref(Boolean(props.modelValue));
+const hasUserInteracted = ref(false);
+const lastEmittedDataUrl = ref(null);
+const strokeHasInk = ref(false);
+const clearedSavedOnDown = ref(false);
+let resizeObserver = null;
+
+const availableSavedSignature = computed(() => {
+  if (!props.allowProfileSignature) return "";
+  if (typeof props.savedSignature === "string") return props.savedSignature;
+  try {
+    const auth = useAuthStore();
+    return auth?.user?.signature || "";
+  } catch {
+    return "";
+  }
+});
+
+const canUseSavedSignature = computed(() => {
+  if (props.disabled || !props.allowProfileSignature) return false;
+  const saved = availableSavedSignature.value;
+  if (!saved) return false;
+  return props.modelValue !== saved;
+});
+
+const isUsingSavedSignature = computed(() => {
+  const saved = availableSavedSignature.value;
+  return Boolean(saved && props.modelValue && props.modelValue === saved);
+});
 
 function prepareCanvas() {
   const canvas = signatureCanvas.value;
   if (!canvas) return null;
 
-  if (!canvas.__prepared) {
-    const rect = canvas.getBoundingClientRect();
-    const scale = window.devicePixelRatio || 1;
-    canvas.width = (rect.width || 400) * scale;
-    canvas.height = (rect.height || 144) * scale;
+  const rect = canvas.getBoundingClientRect();
+  const scale = window.devicePixelRatio || 1;
+  const targetW = Math.round((rect.width || 400) * scale);
+  const targetH = Math.round((rect.height || 128) * scale);
+
+  if (canvas.width !== targetW || canvas.height !== targetH || !canvas.__prepared) {
+    canvas.width = targetW;
+    canvas.height = targetH;
     const ctx = canvas.getContext("2d");
     if (ctx) {
       ctx.scale(scale, scale);
@@ -55,6 +106,86 @@ function prepareCanvas() {
   return canvas.getContext("2d");
 }
 
+function renderDataUrlOnCanvas(dataUrl) {
+  const canvas = signatureCanvas.value;
+  if (!canvas) return;
+  const ctx = prepareCanvas();
+  if (!ctx) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const width = rect.width || 400;
+  const height = rect.height || 128;
+
+  if (!dataUrl) {
+    return;
+  }
+
+  hasSignature.value = true;
+  if (typeof Image !== "undefined") {
+    const img = new Image();
+    const draw = () => {
+      // Clear before drawing to avoid stacking/artifacts
+      ctx.clearRect(0, 0, width, height);
+
+      const naturalW = img.naturalWidth || img.width || width;
+      const naturalH = img.naturalHeight || img.height || height;
+
+      // Keep signature proportional without horizontal/vertical stretching (object-fit: contain)
+      // Provide compact inner padding so small pads (e.g. h-24) retain readable strokes without touching the border
+      const padding = Math.min(6, Math.floor(Math.min(width, height) * 0.08));
+      const availW = Math.max(width - padding * 2, 50);
+      const availH = Math.max(height - padding * 2, 50);
+
+      const scale = Math.min(availW / naturalW, availH / naturalH, 1);
+      const drawWidth = naturalW * scale;
+      const drawHeight = naturalH * scale;
+
+      // Center horizontally and vertically within the canvas box
+      const offsetX = (width - drawWidth) / 2;
+      const offsetY = (height - drawHeight) / 2;
+
+      ctx.drawImage?.(img, offsetX, offsetY, drawWidth, drawHeight);
+    };
+
+    img.onload = draw;
+    img.src = dataUrl;
+    if (img.complete) {
+      try {
+        draw();
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+watch(
+  () => props.modelValue,
+  (newVal, oldVal) => {
+    if (newVal !== oldVal) {
+      if (newVal) {
+        hasSignature.value = true;
+        if (newVal === lastEmittedDataUrl.value) {
+          return;
+        }
+        lastEmittedDataUrl.value = null;
+        nextTick(() => renderDataUrlOnCanvas(newVal));
+      } else {
+        lastEmittedDataUrl.value = null;
+        hasSignature.value = false;
+        const canvas = signatureCanvas.value;
+        if (canvas) {
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            const rect = canvas.getBoundingClientRect();
+            ctx.clearRect(0, 0, rect.width || 400, rect.height || 128);
+          }
+        }
+      }
+    }
+  }
+);
+
 function getPoint(e) {
   const rect = signatureCanvas.value.getBoundingClientRect();
   return {
@@ -67,6 +198,15 @@ function startStroke(e) {
   if (props.disabled) return;
   const ctx = prepareCanvas();
   if (!ctx) return;
+
+  hasUserInteracted.value = true;
+  strokeHasInk.value = false;
+  clearedSavedOnDown.value = Boolean(isUsingSavedSignature.value);
+  if (clearedSavedOnDown.value) {
+    // Clear pre-filled profile image before starting a clean free-draw stroke.
+    const rect = signatureCanvas.value.getBoundingClientRect();
+    ctx.clearRect(0, 0, rect.width || 400, rect.height || 128);
+  }
 
   isSigning.value = true;
   hasSignature.value = true;
@@ -82,6 +222,7 @@ function drawStroke(e) {
   const ctx = prepareCanvas();
   if (!ctx) return;
 
+  strokeHasInk.value = true;
   const p = getPoint(e);
   ctx.lineTo(p.x, p.y);
   ctx.stroke();
@@ -90,47 +231,146 @@ function drawStroke(e) {
 function endStroke() {
   if (!isSigning.value) return;
   isSigning.value = false;
+
+  if (!strokeHasInk.value) {
+    if (clearedSavedOnDown.value && props.modelValue) {
+      renderDataUrlOnCanvas(props.modelValue);
+    }
+    clearedSavedOnDown.value = false;
+    hasSignature.value = Boolean(props.modelValue);
+    return;
+  }
+
+  clearedSavedOnDown.value = false;
   if (signatureCanvas.value) {
     const dataUrl = signatureCanvas.value.toDataURL("image/png");
+    lastEmittedDataUrl.value = dataUrl;
     emit("update:modelValue", dataUrl);
   }
 }
 
 function clearSignature() {
   if (props.disabled) return;
+  hasUserInteracted.value = true;
+  lastEmittedDataUrl.value = null;
+  clearedSavedOnDown.value = false;
+  strokeHasInk.value = false;
   const canvas = signatureCanvas.value;
   if (canvas) {
     const ctx = canvas.getContext("2d");
     if (ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const rect = canvas.getBoundingClientRect();
+      ctx.clearRect(0, 0, rect.width || 400, rect.height || 128);
     }
   }
   hasSignature.value = false;
   emit("update:modelValue", "");
 }
 
+function useSavedSignature() {
+  if (props.disabled) return;
+  const saved = availableSavedSignature.value;
+  if (!saved) return;
+  lastEmittedDataUrl.value = saved;
+  hasSignature.value = true;
+  emit("update:modelValue", saved);
+  nextTick(() => {
+    renderDataUrlOnCanvas(saved);
+  });
+}
+
+function handleCanvasResize() {
+  const canvas = signatureCanvas.value;
+  if (!canvas || isSigning.value) return;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
+  const targetW = Math.round(rect.width * dpr);
+  const targetH = Math.round(rect.height * dpr);
+  if (canvas.width !== targetW || canvas.height !== targetH) {
+    prepareCanvas();
+    if (props.modelValue) {
+      renderDataUrlOnCanvas(props.modelValue);
+    }
+  }
+}
+
+watch(availableSavedSignature, (newSaved) => {
+  if (!props.modelValue && !hasUserInteracted.value && props.allowProfileSignature && newSaved) {
+    lastEmittedDataUrl.value = newSaved;
+    emit("update:modelValue", newSaved);
+    nextTick(() => renderDataUrlOnCanvas(newSaved));
+  }
+});
+
 onMounted(() => {
   prepareCanvas();
+  if (props.modelValue) {
+    renderDataUrlOnCanvas(props.modelValue);
+  } else if (props.allowProfileSignature && availableSavedSignature.value) {
+    lastEmittedDataUrl.value = availableSavedSignature.value;
+    emit("update:modelValue", availableSavedSignature.value);
+    renderDataUrlOnCanvas(availableSavedSignature.value);
+  }
+
+  if (typeof ResizeObserver !== "undefined" && signatureCanvas.value) {
+    resizeObserver = new ResizeObserver(() => {
+      handleCanvasResize();
+    });
+    resizeObserver.observe(signatureCanvas.value);
+  }
+});
+
+onBeforeUnmount(() => {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
 });
 </script>
 
 <template>
-  <div class="flex flex-col gap-1.5 w-full">
-    <div v-if="label" class="flex items-center justify-between">
-      <label class="text-[11px] font-bold uppercase tracking-wider text-slate-500 font-sans flex items-center gap-1.5">
+  <div class="flex flex-col gap-1.5 w-full" :class="[maxWidthClass, center ? 'mx-auto' : '']">
+    <div v-if="label || canUseSavedSignature || hasSignature" class="flex items-center justify-between">
+      <label v-if="label" class="text-[11px] font-bold uppercase tracking-wider text-slate-500 font-sans flex items-center gap-1.5">
         <PenTool class="w-3.5 h-3.5" />
         <span>{{ label }}</span>
       </label>
-      <button
-        v-if="hasSignature && !disabled"
-        type="button"
-        data-testid="clear-signature-btn"
-        class="text-xs text-slate-400 hover:text-danger flex items-center gap-1 transition-colors font-sans"
-        @click="clearSignature"
-      >
-        <RotateCcw class="w-3 h-3" />
-        <span>Clear</span>
-      </button>
+      <div v-else />
+
+      <div class="flex items-center gap-2">
+        <button
+          v-if="canUseSavedSignature"
+          type="button"
+          data-testid="use-saved-signature-btn"
+          class="text-xs text-primary hover:text-primary-dark font-medium flex items-center gap-1 transition-colors font-sans"
+          @click="useSavedSignature"
+        >
+          <Sparkles class="w-3 h-3 text-primary" />
+          <span>Use Saved Signature</span>
+        </button>
+
+        <button
+          v-if="hasSignature && !disabled"
+          type="button"
+          data-testid="clear-signature-btn"
+          class="text-xs text-slate-400 hover:text-danger flex items-center gap-1 transition-colors font-sans"
+          @click="clearSignature"
+        >
+          <RotateCcw class="w-3 h-3" />
+          <span>Clear</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Pre-filled notification badge -->
+    <div
+      v-if="isUsingSavedSignature && showHelperNote"
+      data-testid="saved-signature-indicator"
+      class="flex items-center gap-1.5 text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md font-sans"
+    >
+      <CheckCircle2 class="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+      <span>Pre-filled from your profile signature. You can use this or click Clear to redraw.</span>
     </div>
 
     <div

@@ -4,8 +4,6 @@ import { useRouter } from "vue-router";
 import { useReimbursementStore } from "@/stores/reimbursement";
 import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/useToast";
-import BaseButton from "@/components/base/BaseButton.vue";
-import BaseToggleSwitch from "@/components/base/BaseToggleSwitch.vue";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import BaseUtilityToolbar from "@/components/base/BaseUtilityToolbar.vue";
 import ReimbursementDetailsModal from "@/components/reimbursements/ReimbursementDetailsModal.vue";
@@ -14,6 +12,8 @@ import DecisionConfirmationModal from "@/components/base/DecisionConfirmationMod
 import GrantPayoutModal from "@/components/reimbursements/GrantPayoutModal.vue";
 import DeleteConfirmModal from "@/components/base/DeleteConfirmModal.vue";
 import ReimbursementsTable from "@/components/reimbursements/ReimbursementsTable.vue";
+import CmsRecurringExpensesPanel from "@/components/reimbursements/CmsRecurringExpensesPanel.vue";
+import TsTicketsPanel from "@/components/reimbursements/TsTicketsPanel.vue";
 import { formatPeso } from "@/utils/formatters";
 import {
   useReimbursementFilters,
@@ -21,7 +21,6 @@ import {
 } from "@/composables/reimbursements/useReimbursementFilters";
 import { useReimbursementDetails } from "@/composables/reimbursements/useReimbursementDetails";
 import { useReimbursementDecisions } from "@/composables/reimbursements/useReimbursementDecisions";
-import { useOcrMode } from "@/composables/useOcrMode";
 import { useNotificationDeepLink } from "@/composables/useNotificationDeepLink";
 import {
   Plus,
@@ -39,7 +38,7 @@ const store = useReimbursementStore();
 const auth = useAuthStore();
 const router = useRouter();
 const { addToast } = useToast();
-const { isMockOcr, setMockMode } = useOcrMode();
+const activeTab = ref("all");
 
 const statusFilters = computed(() =>
   auth.isAdmin
@@ -49,21 +48,21 @@ const statusFilters = computed(() =>
 
 const employeeReimbursementColumns = [
   { key: "reportDescription", label: "Report Description" },
-  { key: "category", label: "Category" },
-  { key: "amount", label: "Amount", align: "right" },
-  { key: "dateSubmitted", label: "Date Submitted" },
-  { key: "displayStatus", label: "Status", align: "center" },
-  { key: "action", sortKey: "id", label: "Action", align: "center" },
+  { key: "category", label: "Category", widthClass: "w-[140px]", paddingClass: "px-3" },
+  { key: "amount", label: "Amount", align: "right", widthClass: "w-[136px]" },
+  { key: "dateSubmitted", label: "Date Submitted", widthClass: "w-[168px]" },
+  { key: "displayStatus", label: "Status", align: "center", widthClass: "w-[148px]" },
+  { key: "action", sortKey: "id", label: "Action", align: "center", widthClass: "w-[116px]" },
 ];
 
 const adminReimbursementColumns = [
   { key: "reportDescription", label: "Report Description" },
-  { key: "category", label: "Category" },
-  { key: "amount", label: "Amount", align: "right" },
-  { key: "dateSubmitted", label: "Date Submitted" },
-  { key: "submittedBy", label: "Submitted By" },
-  { key: "displayStatus", label: "Status", align: "center" },
-  { key: "action", sortKey: "id", label: "Action", align: "center" },
+  { key: "category", label: "Category", widthClass: "w-[140px]", paddingClass: "px-3" },
+  { key: "amount", label: "Amount", align: "right", widthClass: "w-[136px]" },
+  { key: "dateSubmitted", label: "Date Submitted", widthClass: "w-[168px]" },
+  { key: "submittedBy", label: "Submitted By", widthClass: "w-[160px]" },
+  { key: "displayStatus", label: "Status", align: "center", widthClass: "w-[148px]" },
+  { key: "action", sortKey: "id", label: "Action", align: "center", widthClass: "w-[116px]" },
 ];
 
 const reimbursementColumns = computed(() =>
@@ -74,11 +73,13 @@ const {
   searchQuery,
   activeStatus,
   activeCategory,
+  activeVendorFilter,
   sortKey,
   sortDirection,
   pageSize,
   currentPage,
   categoryFilters,
+  vendorFilters,
   paginatedTableRows,
   sortedTableRows,
   toggleSort,
@@ -160,6 +161,8 @@ const {
   revisionAction,
   rejectionComment,
   confirmPassword,
+  secondaryAuditConfirmed,
+  secondaryAuditNote,
   isReviewSubmitting,
   openApproveModal,
   cancelApprove,
@@ -171,6 +174,14 @@ const {
   cancelGrant,
   confirmGrant,
 } = useReimbursementDecisions(store, addToast, viewingRecord);
+
+const approvingRecord = computed(() => {
+  if (!approvingId.value) return null;
+  if (viewingRecord.value && String(viewingRecord.value.id) === String(approvingId.value)) {
+    return viewingRecord.value;
+  }
+  return store.items.find((item) => String(item.id) === String(approvingId.value)) || null;
+});
 
 const isDeleteModalOpen = ref(false);
 const deletingRequestId = ref(null);
@@ -186,10 +197,6 @@ function triggerNewRequestUpload(mode) {
     newRequestFileInput.value.value = "";
     newRequestFileInput.value.click();
   }
-}
-
-function handleNewRequest() {
-  triggerNewRequestUpload("single");
 }
 
 function handleNewRequestFiles(e) {
@@ -297,20 +304,51 @@ onBeforeUnmount(() => {
           Manage and track all submitted expense claims.
         </p>
       </div>
+
       <div
-        v-if="!auth.isAdmin"
-        class="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5"
+        role="tablist"
+        aria-label="Reimbursements sections"
+        class="inline-flex flex-wrap rounded-lg border border-slate-200 bg-white p-1 self-start md:self-auto"
       >
-        <BaseToggleSwitch
-          :model-value="isMockOcr"
-          @update:model-value="setMockMode"
-          on-label="Mock OCR"
-          off-label="Real OCR"
-          hint="Mock uploads file, fills instantly, skips OCR wait"
-        />
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'all'"
+          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          :class="activeTab === 'all' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
+          @click="activeTab = 'all'"
+        >
+          Reimbursement Requests
+        </button>
+        <button
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'tickets'"
+          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          :class="activeTab === 'tickets' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
+          @click="activeTab = 'tickets'"
+        >
+          Tickets (TS)
+        </button>
+        <button
+          v-if="auth.isAdmin"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === 'recurring'"
+          class="px-3 py-1.5 text-xs font-semibold rounded-md transition-colors"
+          :class="activeTab === 'recurring' ? 'bg-primary text-white' : 'text-slate-600 hover:bg-slate-50'"
+          @click="activeTab = 'recurring'"
+        >
+          Recurring Expenses (CMS)
+        </button>
       </div>
     </div>
 
+    <TsTicketsPanel v-if="activeTab === 'tickets'" />
+
+    <CmsRecurringExpensesPanel v-else-if="auth.isAdmin && activeTab === 'recurring'" />
+
+    <template v-else>
     <!-- ── KPI Cards ── -->
     <BaseKpiGrid
       :kpis="reimbursementKpis"
@@ -325,6 +363,23 @@ onBeforeUnmount(() => {
       :statuses="statusFilters"
       :categories="categoryFilters"
     >
+      <template #extra-filters>
+        <div class="space-y-1.5 rounded-lg bg-slate-50/70 p-2">
+          <p class="input-label !mb-1">Vendor Review</p>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              v-for="vf in vendorFilters"
+              :key="`vendor-filter-${vf}`"
+              type="button"
+              class="rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors"
+              :class="activeVendorFilter === vf ? 'bg-primary text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-accent-50 hover:text-accent'"
+              @click="activeVendorFilter = vf"
+            >
+              {{ vf }}
+            </button>
+          </div>
+        </div>
+      </template>
       <template #actions>
         <div ref="dropdownRef" class="relative inline-block text-left w-full sm:w-auto" @click.stop>
           <button
@@ -392,11 +447,11 @@ onBeforeUnmount(() => {
       @edit-request="handleEdit"
       @delete-request="handleDelete"
     />
+    </template>
 
     <!-- ── Record Detail Panel (Modal) ── -->
     <ReimbursementDetailsModal
       :viewing-record="viewingRecord"
-      :receipt-details-open="receiptDetailsOpen"
       :modal-loading="modalLoading"
       @close="closeDetails"
       @view-receipt-details="viewReceiptDetails"
@@ -418,7 +473,6 @@ onBeforeUnmount(() => {
       "
       :is-submitting="isReceiptReviewSubmitting"
       @close="receiptDetailsOpen = false"
-      @close-all="closeDetails"
       @request-decision="
         (action) => requestReceiptDecision(selectedReceipt, action)
       "
@@ -431,8 +485,13 @@ onBeforeUnmount(() => {
       :is-open="!!approvingId || !!rejectingId"
       :mode="approvingId ? 'approve' : (revisionAction || 'revise')"
       :is-submitting="isReviewSubmitting"
+      :fast-track-eligible="Boolean(approvingRecord?.fast_track_eligible)"
+      :requires-secondary-audit="Boolean(approvingRecord?.vendor_audit_required)"
+      :unverified-vendors="approvingRecord?.unverified_vendors || []"
       v-model:password="confirmPassword"
       v-model:comment="rejectionComment"
+      v-model:secondary-audit-confirmed="secondaryAuditConfirmed"
+      v-model:secondary-audit-note="secondaryAuditNote"
       @close="approvingId ? cancelApprove() : cancelReject()"
       @confirm="approvingId ? confirmApprove() : confirmReject()"
     />

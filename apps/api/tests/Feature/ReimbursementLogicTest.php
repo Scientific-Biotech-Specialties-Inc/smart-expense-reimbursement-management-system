@@ -7,13 +7,10 @@ use App\Modules\Users\Models\User;
 use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Reimbursements\Models\ReceiptItem;
-use App\Modules\AuditLogs\Models\AuditLog;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use App\Modules\Shared\Services\PasswordVerificationService;
 use Carbon\Carbon;
-use Mockery;
 
 class ReimbursementLogicTest extends TestCase
 {
@@ -91,23 +88,69 @@ class ReimbursementLogicTest extends TestCase
 
     public function test_receipt_upload_allows_missing_category(): void
     {
+        \Illuminate\Support\Facades\Queue::fake();
+
         $response = $this
             ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
             ->actingAs($this->employee)
             ->post('/api/reimbursements/receipts', [
                 'file' => UploadedFile::fake()->create('receipt.pdf', 100, 'application/pdf'),
-                'is_mock' => '1',
             ]);
 
         $response->assertStatus(201);
         $response->assertJsonPath('data.expense_category_id', null);
-        $response->assertJsonPath('data.status', 'processed');
+        $response->assertJsonPath('data.status', 'processing');
 
         $this->assertDatabaseHas('receipts', [
             'uploaded_by' => $this->employee->id,
             'expense_category_id' => null,
-            'status' => 'processed',
+            'status' => 'processing',
         ]);
+    }
+
+    public function test_draft_receipt_is_committed_and_listed_when_updated_with_is_draft_false(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+
+        $uploadRes = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->post('/api/reimbursements/receipts', [
+                'file' => UploadedFile::fake()->create('draft-receipt.png', 100, 'image/png'),
+                'is_draft' => '1',
+            ]);
+
+        $uploadRes->assertStatus(201);
+        $receiptId = $uploadRes->json('data.id');
+
+        // Draft receipt stays hidden from My Expenses listing
+        $listBefore = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->getJson('/api/reimbursements/receipts');
+
+        $listBefore->assertOk();
+        $this->assertFalse(collect($listBefore->json('data'))->contains('id', $receiptId));
+
+        // Saving the receipt with is_draft=false commits it into My Expenses
+        $saveRes = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->patchJson("/api/reimbursements/receipts/{$receiptId}", [
+                'vendor_name' => 'Ma & Pa Bake Shop',
+                'is_draft' => false,
+            ]);
+
+        $saveRes->assertOk()
+            ->assertJsonPath('data.is_draft', false);
+
+        $listAfter = $this
+            ->withoutMiddleware(\App\Modules\Shared\Http\Middleware\AuthenticateWithExternalService::class)
+            ->actingAs($this->employee)
+            ->getJson('/api/reimbursements/receipts');
+
+        $listAfter->assertOk();
+        $this->assertTrue(collect($listAfter->json('data'))->contains('id', $receiptId));
     }
 
     public function test_categories_endpoint_seeds_defaults_when_empty(): void
@@ -911,6 +954,55 @@ class ReimbursementLogicTest extends TestCase
             'id' => $receipt->id,
             'event_type' => 'Conference / Seminar',
         ]);
+    }
+
+    public function test_store_reimbursement_blocks_rejected_receipts(): void
+    {
+        $category = \App\Modules\Reimbursements\Models\ExpenseCategory::firstOrCreate(['name' => 'Meals']);
+
+        $token = $this->generateMockToken([
+            'email' => $this->employee->email,
+            'role' => $this->employee->role,
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+        ]);
+
+        foreach (['rejected', 'automatic-rejected'] as $status) {
+            $receipt = Receipt::create([
+                'uploaded_by' => $this->employee->id,
+                'file_path' => "receipts/rcpt_rej_{$status}.png",
+                'file_hash' => hash('sha256', "reimb_rejected_{$status}"),
+                'file_type' => 'png',
+                'file_size_bytes' => 1024,
+                'vendor_name' => 'Bad Receipt Vendor',
+                'total_amount' => 100.00,
+                'status' => $status,
+                'ocr_flagged' => true,
+                'rejection_code' => 'unreadable',
+                'rejection_reason' => 'Unreadable receipt.',
+            ]);
+
+            $response = $this->withHeaders([
+                'Authorization' => 'Bearer ' . $token,
+                'Accept' => 'application/json',
+            ])->post('/api/reimbursements', [
+                'description' => 'Should Reject Claim',
+                'expense_category_id' => $category->id,
+                'event_type' => 'Client Meeting',
+                'amount' => 100.00,
+                'date' => '2026-10-01',
+                'receipt_ids' => [$receipt->id],
+                'report_file' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf'),
+            ]);
+
+            $response->assertStatus(422);
+            $response->assertJsonValidationErrors(['receipt_ids']);
+
+            $this->assertDatabaseHas('receipts', [
+                'id' => $receipt->id,
+                'status' => $status,
+            ]);
+        }
     }
 }
 

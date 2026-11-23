@@ -8,7 +8,6 @@ use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\Liquidations\Models\Liquidation;
 use App\Modules\Notifications\Models\EmailLog;
 use App\Modules\Notifications\Models\Notification;
-use App\Modules\Notifications\Mail\NotificationMail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Mail;
@@ -69,16 +68,28 @@ class LiquidationDeadlineNotificationTest extends TestCase
             'acknowledged_at' => now()->subDays(6),
         ]);
 
-        // 3. Overdue (3 days past due)
+        // 3. Overdue (7-day grace period + 3 penalty days = 10 days past due)
         $overdueAdvance = CashAdvance::create([
             'user_id' => $this->employee->id,
             'purpose' => 'Overdue Field Work',
             'amount' => 8000.00,
             'outstanding_balance' => 8000.00,
-            'expected_disbursement_date' => now()->subDays(10)->toDateString(),
-            'expected_liquidation_date' => now()->subDays(3)->toDateString(),
+            'expected_disbursement_date' => now()->subDays(17)->toDateString(),
+            'expected_liquidation_date' => now()->subDays(10)->toDateString(),
             'status' => 'signed',
-            'acknowledged_at' => now()->subDays(9),
+            'acknowledged_at' => now()->subDays(16),
+        ]);
+
+        // 3b. Within 7-day grace period (4 days past due -> NOT overdue / no penalty yet)
+        $graceAdvance = CashAdvance::create([
+            'user_id' => $this->employee->id,
+            'purpose' => 'Grace Period Field Work',
+            'amount' => 4500.00,
+            'outstanding_balance' => 4500.00,
+            'expected_disbursement_date' => now()->subDays(11)->toDateString(),
+            'expected_liquidation_date' => now()->subDays(4)->toDateString(),
+            'status' => 'signed',
+            'acknowledged_at' => now()->subDays(10),
         ]);
 
         // 4. Already liquidated/settled (should NEVER be flagged)
@@ -162,6 +173,13 @@ class LiquidationDeadlineNotificationTest extends TestCase
             'type' => 'admin_liquidation_overdue',
             'record_id' => $overdueAdvance->id,
             'status' => 'sent',
+        ]);
+
+        // Grace-period advance is not flagged overdue yet
+        $this->assertDatabaseMissing('notifications', [
+            'record_type' => 'cash_advance',
+            'record_id' => $graceAdvance->id,
+            'type' => 'liquidation_overdue',
         ]);
 
         // Settled advance is never flagged

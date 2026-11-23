@@ -1,11 +1,15 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { apiFetch } from '../utils/apiFetch'
+import {
+  DAILY_PENALTY_PHP,
+  computePenaltyDaysPastGrace,
+  sumPenaltyRecords,
+} from '../utils/liquidationPenalties'
 
 export const useLiquidationStore = defineStore('liquidation', () => {
   const settlements = ref([])
   const isLoading = ref(false)
-  const DAILY_PENALTY_PHP = 50
 
   function upsertSettlement(item) {
     const existingIndex = settlements.value.findIndex((s) => s.id == item.id)
@@ -42,7 +46,7 @@ export const useLiquidationStore = defineStore('liquidation', () => {
 
   /**
    * Calculates the aging and penalty for a cash advance.
-   * Logic: flat 50 PHP penalty per day after due date.
+   * Logic: 7-day grace period after expected_liquidation_date, then flat 50 PHP penalty per day.
    */
   function calculateAging(advance) {
     const today = new Date()
@@ -54,25 +58,29 @@ export const useLiquidationStore = defineStore('liquidation', () => {
       dueDate.setHours(0, 0, 0, 0)
     }
 
-    // 1. Calculate sum of penalties from backend
-    let penalty = 0
-    if (advance.penalties && advance.penalties.length > 0) {
-      penalty = advance.penalties.reduce((sum, p) => sum + Number(p.penalty_amount), 0)
+    // 1. Calculate sum of persisted penalties from backend
+    let penalty = sumPenaltyRecords(advance.penalties)
+    if (penalty === 0 && advance.penalties_total !== undefined && advance.penalties_total !== null) {
+      const explicitTotal = Number(advance.penalties_total)
+      if (Number.isFinite(explicitTotal) && explicitTotal > 0) {
+        penalty = explicitTotal
+      }
     }
 
-    // 2. Overdue calculation
-    const isAuditing = advance.status === 'pending' || advance.status === 'under-review' || advance.status === 'approved'
-    const isOverdue = (advance.status === 'overdue' || (dueDate && today > dueDate)) && 
-                      !['liquidated', 'settled'].includes(advance.status) && 
-                      !isAuditing
+    // 2. Overdue calculation (7-day grace period; pauses while pending/under-review/approved)
+    const normalizedStatus = String(advance.status || '').toLowerCase().trim()
+    const isAuditing = ['pending', 'under-review', 'approved'].includes(normalizedStatus)
+    const isTerminal = ['liquidated', 'settled', 'rejected'].includes(normalizedStatus)
+    const daysOverdue = computePenaltyDaysPastGrace(dueDate, today)
+    const isOverdue = !isTerminal && (
+      normalizedStatus === 'overdue' ||
+      penalty > 0 ||
+      (daysOverdue > 0 && !isAuditing)
+    )
 
-    // 3. Fallback dynamic penalty if backend did not return any penalties but it is overdue
-    if (isOverdue && penalty === 0 && dueDate && today > dueDate) {
-      const diffTime = today - dueDate
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
-      if (diffDays > 0) {
-        penalty = diffDays * DAILY_PENALTY_PHP
-      }
+    // 3. Fallback dynamic penalty only when overdue past grace period and not auditing
+    if (isOverdue && penalty === 0 && !isAuditing && daysOverdue > 0) {
+      penalty = daysOverdue * DAILY_PENALTY_PHP
     }
 
     // 4. Calculate days since issue
@@ -89,6 +97,7 @@ export const useLiquidationStore = defineStore('liquidation', () => {
 
     return {
       daysSinceIssue,
+      daysOverdue,
       isOverdue,
       penalty,
       graceRemaining
@@ -109,6 +118,9 @@ export const useLiquidationStore = defineStore('liquidation', () => {
       
       if (payload.reportAttachment) {
         formData.append('report_attachment', payload.reportAttachment);
+      }
+      if (payload.reportTemplateData) {
+        formData.append('report_template_data', JSON.stringify(payload.reportTemplateData));
       }
 
       const formattedReceipts = payload.receipts.map(r => ({
@@ -186,6 +198,9 @@ export const useLiquidationStore = defineStore('liquidation', () => {
       
       if (payload.reportAttachment) {
         formData.append('report_attachment', payload.reportAttachment);
+      }
+      if (payload.reportTemplateData) {
+        formData.append('report_template_data', JSON.stringify(payload.reportTemplateData));
       }
 
       const formattedReceipts = payload.receipts.map(r => ({

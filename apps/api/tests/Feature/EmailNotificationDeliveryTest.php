@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use Tests\TestCase;
 use App\Modules\Users\Models\User;
 use App\Modules\Notifications\Models\EmailLog;
-use App\Modules\Notifications\Models\Notification;
 use App\Modules\Notifications\Models\NotificationSetting;
 use App\Modules\Notifications\Mail\NotificationMail;
 use App\Modules\Notifications\Jobs\SendNotificationEmailJob;

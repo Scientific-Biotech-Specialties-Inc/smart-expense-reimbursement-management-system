@@ -8,7 +8,6 @@ import {
   ArrowDown,
   X,
   CheckCircle2,
-  FileImage,
   Info,
 } from "lucide-vue-next";
 

@@ -4,7 +4,6 @@ import { useRouter } from "vue-router";
 import { useNotificationStore } from "@/stores/notification";
 import BaseButton from "@/components/base/BaseButton.vue";
 import {
-  Bell,
   CheckCheck,
   AlertTriangle,
   CheckCircle,

@@ -7,7 +7,6 @@ use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Reimbursements\Models\ExpenseCategory;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Validation\ValidationException;
 use App\Modules\Shared\Traits\ValidatesReceiptDuplicates;
 
 class ExpenseService
@@ -89,6 +88,8 @@ class ExpenseService
                 'transaction_date' => $data['transaction_date'] ?? null,
                 'total_amount' => $data['total_amount'] ?? null,
                 'vat_amount' => $data['vat_amount'] ?? null,
+                'discount_amount' => $data['discount_amount'] ?? 0,
+                'discount_type' => $data['discount_type'] ?? 'none',
                 'tin' => $data['tin'] ?? null,
                 'invoice_number' => $data['invoice_number'] ?? null,
                 'vat_classification' => $data['vat_classification'] ?? null,
@@ -129,6 +130,12 @@ class ExpenseService
 
             if ($receipt->uploaded_by !== $user->id && !$canManage) {
                 throw new \Illuminate\Auth\Access\AuthorizationException('Forbidden.');
+            }
+
+            if (!$canManage && $receipt->isRejectedStatus()) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'status' => ['Rejected receipts cannot be edited or overridden. Please delete this receipt and upload a clearer copy.'],
+                ]);
             }
 
             $expenseCategoryId = $data['expense_category_id'] ?? null;

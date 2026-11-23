@@ -1,14 +1,19 @@
 <script setup>
-import { computed } from "vue";
-import { X, XCircle, ShieldCheck, Eye, FileText, Download } from "lucide-vue-next";
+import { computed, ref } from "vue";
+import { X, ShieldCheck, Eye, FileText, Download } from "lucide-vue-next";
 import { formatPeso, formatDate } from "@/utils/formatters";
+import {
+  computePenaltyDaysPastGrace,
+  sumPenaltyRecords,
+} from "@/utils/liquidationPenalties";
+import { downloadSbsiReportPdf } from "@/utils/sbsiPdfGenerator";
 import BaseButton from "@/components/base/BaseButton.vue";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
-import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import ReceiptImagePreview from "@/components/base/ReceiptImagePreview.vue";
 import UnifiedRoadmapStepper from "@/components/base/UnifiedRoadmapStepper.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
+import SbsiReportPreviewModal from "@/components/base/SbsiReportPreviewModal.vue";
 import { useLiquidationStore } from "@/stores/liquidation";
 import { useReportExport } from "@/composables/useReportExport";
 
@@ -55,6 +60,37 @@ const emit = defineEmits(["close", "view-receipt", "reject", "approve", "navigat
 
 const liqStore = useLiquidationStore();
 const { isExporting, exportReport } = useReportExport();
+
+const isReportPreviewOpen = ref(false);
+const resolvedTemplateData = computed(
+  () =>
+    props.reviewingCase?.reportTemplateData ||
+    props.reviewingCase?.report_template_data ||
+    null,
+);
+const resolvedReportUrl = computed(() => {
+  if (!props.reviewingCase) return null;
+  if (props.reviewingCase.reportUrl) return props.reviewingCase.reportUrl;
+  if (props.reviewingCase.reportFilePath) {
+    return props.getFileUrl(props.reviewingCase.reportFilePath) || props.reviewingCase.reportFilePath;
+  }
+  return null;
+});
+const hasReportAttachment = computed(() =>
+  Boolean(
+    props.reviewingCase?.reportFilePath ||
+    props.reviewingCase?.reportUrl ||
+    resolvedTemplateData.value,
+  ),
+);
+
+function handleFallbackPdfDownload() {
+  if (!resolvedTemplateData.value) return;
+  downloadSbsiReportPdf(
+    resolvedTemplateData.value,
+    props.reviewingCase?.id ? `SBSI-liquidation-${props.reviewingCase.id}.pdf` : null,
+  );
+}
 
 /* Bridge unified roadmap props from reviewingCase */
 const roadmapCashAdvance = computed(() => {
@@ -118,22 +154,40 @@ const roadmapAging = computed(() => {
   }
 });
 
+const reviewPenaltyTotal = computed(() => {
+  const fromRecords = sumPenaltyRecords(roadmapPenalties.value);
+  if (fromRecords > 0) return fromRecords;
+  const explicit = Number(
+    props.reviewingCase?.penaltiesTotal ??
+      roadmapCashAdvance.value?.penalties_total ??
+      0,
+  );
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  return Number(roadmapAging.value?.penalty || 0);
+});
+
+const reviewTotalAdvanceBalance = computed(() =>
+  Number(
+    props.reviewingCase?.outstandingBalance ??
+      roadmapCashAdvance.value?.outstanding_balance ??
+      roadmapCashAdvance.value?.balance ??
+      (Number(props.reviewingCase?.cashAdvanceAmount || 0) +
+        reviewPenaltyTotal.value),
+  ),
+);
+
 const roadmapOverpayment = computed(() => {
   const total = Number(roadmapLiquidation.value?.total_expense_amount ?? 0);
-  const bal = Number(roadmapCashAdvance.value?.amount ?? roadmapCashAdvance.value?.balance ?? props.reviewingCase?.cashAdvanceAmount ?? 0);
+  const bal = reviewTotalAdvanceBalance.value;
   return Math.max(0, total - bal);
 });
 
 const isCaseOverdue = computed(() => {
   if (String(props.reviewStatus).toLowerCase().trim() === "overdue") return true;
   if (roadmapAging.value?.isOverdue) return true;
+  if (roadmapPenalties.value.length > 0) return true;
   const due = props.reviewingCase?.dueDate || props.reviewingCase?.expected_liquidation_date || roadmapCashAdvance.value?.expected_liquidation_date;
-  if (!due) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const d = new Date(due);
-  d.setHours(0, 0, 0, 0);
-  return d < today;
+  return computePenaltyDaysPastGrace(due) > 0;
 });
 
 function handleRoadmapNavigate(payload) {
@@ -218,6 +272,16 @@ function handleRoadmapNavigate(payload) {
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Advance Date</p>
               <p class="text-sm text-slate-700">{{ formatDateOnly(reviewingCase.dateOfAdvances) }}</p>
             </div>
+            <template v-if="reviewPenaltyTotal > 0">
+              <div>
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Overdue Penalty</p>
+                <p class="text-sm font-semibold text-danger">+{{ formatPeso(reviewPenaltyTotal) }}</p>
+              </div>
+              <div>
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Total Balance (incl. Penalty)</p>
+                <p class="text-sm font-semibold text-slate-800">{{ formatPeso(reviewTotalAdvanceBalance) }}</p>
+              </div>
+            </template>
           </section>
 
           <!-- Receipts -->
@@ -244,7 +308,7 @@ function handleRoadmapNavigate(payload) {
               <article
                 v-for="(receipt, idx) in reviewReceipts"
                 :key="receipt.id"
-                class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col justify-between gap-3 shadow-sm hover:shadow-md transition-shadow"
+                class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col justify-between gap-3 shadow-sm"
               >
                 <!-- Reusable Receipt Image Preview (with zoom & clean title) -->
                 <ReceiptImagePreview
@@ -305,17 +369,43 @@ function handleRoadmapNavigate(payload) {
           </div>
 
           <!-- Report Attachment -->
-          <div v-if="reviewingCase.reportFilePath" class="pt-2">
-            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Report Attachment</p>
-            <a
-              :href="getFileUrl(reviewingCase.reportFilePath)"
-              target="_blank"
-              class="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-            >
-              <FileText class="w-3.5 h-3.5" />
-              <span>View / Download Report</span>
-              <Download class="w-3 h-3" />
-            </a>
+          <div v-if="hasReportAttachment" class="pt-2">
+            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-2">Report Attachment</p>
+            <div class="flex flex-wrap items-center gap-3">
+              <BaseButton
+                data-testid="preview-liquidation-report-btn"
+                variant="outline"
+                size="sm"
+                type="button"
+                @click="isReportPreviewOpen = true"
+              >
+                <Eye class="w-3.5 h-3.5" />
+                <span>Preview Report</span>
+              </BaseButton>
+              <a
+                v-if="reviewingCase.reportUrl || reviewingCase.reportFilePath"
+                :href="reviewingCase.reportUrl || getFileUrl(reviewingCase.reportFilePath)"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="download-liquidation-report-link"
+                class="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+              >
+                <FileText class="w-3.5 h-3.5" />
+                <span>View / Download Report</span>
+                <Download class="w-3 h-3" />
+              </a>
+              <BaseButton
+                v-else-if="resolvedTemplateData"
+                data-testid="download-liquidation-report-pdf-btn"
+                variant="ghost"
+                size="sm"
+                type="button"
+                @click="handleFallbackPdfDownload"
+              >
+                <Download class="w-3.5 h-3.5" />
+                <span>Download PDF</span>
+              </BaseButton>
+            </div>
           </div>
 
           <!-- Audit Trail Section -->
@@ -377,4 +467,13 @@ function handleRoadmapNavigate(payload) {
       </div>
     </div>
   </Transition>
+
+  <SbsiReportPreviewModal
+    :is-open="isReportPreviewOpen"
+    :template-data="resolvedTemplateData"
+    fallback-type="liquidation"
+    :record="reviewingCase"
+    :file-url="resolvedReportUrl"
+    @close="isReportPreviewOpen = false"
+  />
 </template>

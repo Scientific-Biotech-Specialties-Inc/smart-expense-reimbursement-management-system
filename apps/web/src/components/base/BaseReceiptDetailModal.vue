@@ -1,7 +1,13 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { formatAmount } from "@/utils/formatters";
+import { formatDiscountTypeLabel, normalizeDiscountType } from "@/utils/receiptUtils";
+import {
+  useCurrencyRates,
+  resolveReceiptExchangeRate,
+} from "@/composables/useCurrencyRates";
 import StatusBadge from "@/components/base/StatusBadge.vue";
+import BaseModal from "@/components/base/BaseModal.vue";
 import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import ImagePreviewModal from "@/components/base/ImagePreviewModal.vue";
 import { X, ZoomIn } from "lucide-vue-next";
@@ -41,6 +47,21 @@ function handleImageClick() {
 
 const hasItems = computed(() => props.receipt?.items?.length > 0);
 
+const discountAmount = computed(
+  () => Number(props.receipt?.discountAmount ?? props.receipt?.discount) || 0,
+);
+
+const discountType = computed(() =>
+  normalizeDiscountType(
+    props.receipt?.discountType ?? props.receipt?.discount_type,
+    discountAmount.value,
+  ),
+);
+
+const discountTypeLabel = computed(() =>
+  formatDiscountTypeLabel(discountType.value),
+);
+
 const subtotal = computed(() => {
   if (hasItems.value) {
     return props.receipt.items.reduce(
@@ -50,36 +71,60 @@ const subtotal = computed(() => {
   }
   return (Number(props.receipt?.amount) || 0) - (Number(props.receipt?.vat) || 0);
 });
+
+const { isForeignCurrency, ensureCurrencyRate, formatPhpConversionLabel } =
+  useCurrencyRates();
+
+watch(
+  () => [props.isOpen, props.receipt?.currency],
+  ([open, currency]) => {
+    if (open && isForeignCurrency(currency) && !resolveReceiptExchangeRate(props.receipt)) {
+      ensureCurrencyRate(currency);
+    }
+  },
+  { immediate: true },
+);
+
+const phpConversionLabel = computed(() => {
+  if (!props.receipt || !isForeignCurrency(props.receipt.currency)) return "";
+  return formatPhpConversionLabel(
+    props.receipt.amount || 0,
+    props.receipt.currency,
+    resolveReceiptExchangeRate(props.receipt),
+  );
+});
 </script>
 
 <template>
-  <Transition name="modal">
-    <div
-      v-if="isOpen && receipt"
-      class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
-      @click.self="emit('close')"
-    >
-      <div
-        class="relative bg-white w-full max-w-[840px] rounded-3xl shadow-[0_20px_40px_-10px_rgba(0,0,0,0.1)] flex flex-col md:flex-row p-6 gap-6 overflow-hidden min-h-[480px] max-h-[92vh]"
-        @click.stop
+  <BaseModal
+    :is-open="isOpen && !!receipt"
+    max-width-class="max-w-[840px]"
+    z-index-class="z-[60]"
+    content-class="w-full rounded-3xl shadow-[0_20px_40px_-10px_rgba(0,0,0,0.1)] flex flex-col md:flex-row p-6 gap-6 overflow-hidden min-h-[480px] max-h-[92vh]"
+    :title="receipt?.vendor ? `Receipt Details - ${receipt.vendor}` : 'Receipt Details'"
+    description="Receipt image and extracted expense details."
+    @close="emit('close')"
+  >
+    <template v-if="receipt">
+      <!-- Close Button -->
+      <button
+        type="button"
+        aria-label="Close receipt details"
+        @click="emit('close')"
+        class="absolute top-2 right-2 text-slate-400 hover:bg-slate-100 transition-colors p-1.5 rounded-full flex items-center justify-center z-10"
       >
-        <!-- Close Button -->
-        <button
-          @click="emit('close')"
-          class="absolute top-2 right-2 text-slate-400 hover:bg-slate-100 transition-colors p-1.5 rounded-full flex items-center justify-center z-10"
-        >
-          <X class="w-4 h-4" />
-        </button>
+        <X class="w-4 h-4" />
+      </button>
 
-        <!-- Left Column: Image -->
-        <div
-          :class="[
-            'w-full md:w-5/12 bg-gradient-to-b from-slate-100 to-slate-50 rounded-2xl flex items-center justify-center p-4 shrink-0 relative overflow-hidden min-h-[360px]',
-            canPreview ? 'cursor-pointer group' : '',
-          ]"
-          :title="canPreview ? 'Click to zoom and preview receipt' : ''"
-          @click="handleImageClick"
-        >
+      <!-- Left Column: Image -->
+      <div
+        :class="[
+          'w-full md:w-5/12 bg-gradient-to-b from-slate-100 to-slate-50 rounded-2xl flex items-center justify-center p-4 shrink-0 relative overflow-hidden min-h-[360px]',
+          canPreview ? 'cursor-pointer group' : '',
+        ]"
+        :title="canPreview ? 'Click to zoom and preview receipt' : ''"
+        @click="handleImageClick"
+      >
           <BaseReceiptImage
             :src="receipt.imageUrl"
             :alt="receipt.vendor || 'Receipt'"
@@ -120,6 +165,20 @@ const subtotal = computed(() => {
           <div class="mb-4">
             <span class="text-[11px] text-slate-400 uppercase tracking-wide">Vendor</span>
             <p class="text-base font-medium text-slate-800 mt-0.5">{{ receipt.vendor || "Unknown Vendor" }}</p>
+            <div v-if="receipt.vendorStatusTag" class="mt-1.5 flex flex-wrap items-center gap-2">
+              <span
+                class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border"
+                :class="
+                  receipt.vendorAccredited && !receipt.vendorAuditRequired
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : receipt.vendorFlagged
+                      ? 'bg-red-50 text-red-700 border-red-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+                "
+              >
+                {{ receipt.vendorStatusTag }}
+              </span>
+            </div>
           </div>
 
           <!-- Details Grid -->
@@ -147,6 +206,18 @@ const subtotal = computed(() => {
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Currency</p>
               <p class="text-sm text-slate-700">{{ receipt.currency || "PHP" }}</p>
             </div>
+            <div>
+              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Discount Type</p>
+              <slot name="discount-type-field">
+                <p class="text-sm text-slate-700">{{ discountTypeLabel }}</p>
+              </slot>
+            </div>
+            <div>
+              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Discount Amount</p>
+              <slot name="discount-amount-field">
+                <p class="text-sm text-slate-700">{{ formatAmount(discountAmount, receipt.currency || "PHP") }}</p>
+              </slot>
+            </div>
           </div>
 
           <!-- Items -->
@@ -170,6 +241,10 @@ const subtotal = computed(() => {
               <span class="text-slate-400">Subtotal</span>
               <span class="text-slate-600">{{ formatAmount(subtotal, receipt.currency || "PHP") }}</span>
             </div>
+            <div v-if="discountAmount > 0" class="flex justify-between text-sm text-emerald-700">
+              <span>Discount ({{ discountTypeLabel }})</span>
+              <span>-{{ formatAmount(discountAmount, receipt.currency || "PHP") }}</span>
+            </div>
             <div class="flex justify-between text-sm">
               <span class="text-slate-400">VAT</span>
               <span class="text-slate-600">{{ formatAmount(receipt.vat || 0, receipt.currency || "PHP") }}</span>
@@ -178,6 +253,15 @@ const subtotal = computed(() => {
               <span class="text-sm text-slate-700">Total</span>
               <span class="text-base font-semibold text-primary">
                 {{ formatAmount(receipt.amount || 0, receipt.currency || "PHP") }}
+              </span>
+            </div>
+            <div
+              v-if="phpConversionLabel"
+              data-testid="receipt-detail-php-conversion"
+              class="flex justify-end pt-1"
+            >
+              <span class="inline-flex items-center rounded-full bg-slate-100 border border-slate-200 px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
+                {{ phpConversionLabel }}
               </span>
             </div>
           </div>
@@ -189,13 +273,12 @@ const subtotal = computed(() => {
           </div>
 
           <!-- Action Footer (slot) -->
-          <div class="mt-auto pt-3 border-t border-slate-100">
+          <div v-if="$slots.actions" class="mt-auto pt-3 border-t border-slate-100">
             <slot name="actions" />
           </div>
         </div>
-      </div>
-    </div>
-  </Transition>
+    </template>
+  </BaseModal>
 
   <!-- Reusable Fullscreen Image Preview Lightbox -->
   <ImagePreviewModal

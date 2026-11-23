@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Modules\AuditLogs\Models\AuditLog;
 use App\Modules\CashAdvances\Models\CashAdvance;
-use App\Modules\CashAdvances\Models\CashAdvanceDisbursement;
 use App\Modules\Liquidations\Database\Seeders\LiquidationCountdownTestSeeder;
 use App\Modules\Liquidations\Models\Liquidation;
 use App\Modules\Reimbursements\Models\ExpenseCategory;

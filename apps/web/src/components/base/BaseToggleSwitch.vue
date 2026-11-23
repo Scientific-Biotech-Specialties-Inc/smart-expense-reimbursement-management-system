@@ -3,8 +3,10 @@ import { computed } from "vue";
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
-  onLabel: { type: String, default: "Mock OCR" },
-  offLabel: { type: String, default: "Real OCR" },
+  activeLabel: { type: String, default: "" },
+  inactiveLabel: { type: String, default: "" },
+  onLabel: { type: String, default: "" },
+  offLabel: { type: String, default: "" },
   disabled: { type: Boolean, default: false },
   hint: { type: String, default: "" },
 });
@@ -12,6 +14,8 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue"]);
 
 const isOn = computed(() => Boolean(props.modelValue));
+const effectiveOnLabel = computed(() => props.activeLabel || props.onLabel || "Mock OCR");
+const effectiveOffLabel = computed(() => props.inactiveLabel || props.offLabel || "Real OCR");
 
 function toggle() {
   if (props.disabled) return;
@@ -25,13 +29,13 @@ function toggle() {
       class="text-xs font-bold uppercase tracking-widest"
       :class="isOn ? 'text-slate-400' : 'text-primary'"
     >
-      {{ offLabel }}
+      {{ effectiveOffLabel }}
     </span>
     <button
       type="button"
       role="switch"
       :aria-checked="isOn ? 'true' : 'false'"
-      :aria-label="isOn ? onLabel : offLabel"
+      :aria-label="isOn ? effectiveOnLabel : effectiveOffLabel"
       :disabled="disabled"
       :class="[
         'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
@@ -51,7 +55,7 @@ function toggle() {
       class="text-xs font-bold uppercase tracking-widest"
       :class="isOn ? 'text-accent' : 'text-slate-400'"
     >
-      {{ onLabel }}
+      {{ effectiveOnLabel }}
     </span>
     <span v-if="hint" class="text-[11px] text-slate-400">{{ hint }}</span>
   </div>

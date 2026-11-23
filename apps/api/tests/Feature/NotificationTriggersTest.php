@@ -9,9 +9,7 @@ use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\Reimbursements\Models\ExpenseCategory;
 use App\Modules\Reimbursements\Services\ReimbursementService;
 use App\Modules\Reimbursements\Services\OcrCallbackService;
-use App\Modules\CashAdvances\Models\CashAdvance;
 use App\Modules\CashAdvances\Services\CashAdvanceService;
-use App\Modules\Notifications\Models\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 

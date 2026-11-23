@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from "vue";
-import { formatPeso, formatDate } from "@/utils/formatters";
+import { formatDate } from "@/utils/formatters";
+import { extractReceiptFxSnapshot } from "@/composables/useCurrencyRates";
 import BaseReceiptDetailModal from "@/components/base/BaseReceiptDetailModal.vue";
 import { CheckCircle, XCircle } from "lucide-vue-next";
 
@@ -12,7 +13,7 @@ const props = defineProps({
   getFileUrl: { type: Function, required: true },
 });
 
-const emit = defineEmits(["close", "close-review", "request-decision", "cancel-decision", "confirm-decision"]);
+const emit = defineEmits(["close", "request-decision", "cancel-decision", "confirm-decision"]);
 
 /** Normalize to shared shape */
 const normalizedReceipt = computed(() => {
@@ -24,11 +25,14 @@ const normalizedReceipt = computed(() => {
     vendor: props.receipt.merchantName || "Unknown Vendor",
     category: props.receipt.category || "—",
     tin: props.receipt.tinNumber || "—",
-    vatClassification: "VAT",
-    currency: "PHP",
+    vatClassification: props.receipt.vatClassification ?? props.receipt.vat_classification ?? "VAT",
+    currency: props.receipt.currency || "PHP",
+    ...extractReceiptFxSnapshot(props.receipt, props.receipt.currency || "PHP"),
     items: props.receipt.items || [],
     amount: props.receipt.amount || 0,
     vat: props.receipt.vat || 0,
+    discountAmount: props.receipt.discountAmount ?? props.receipt.discount_amount ?? 0,
+    discountType: props.receipt.discountType ?? props.receipt.discount_type ?? "none",
     status: props.receipt.decision === "accepted" ? "approved" : props.receipt.decision || "pending",
   };
 });

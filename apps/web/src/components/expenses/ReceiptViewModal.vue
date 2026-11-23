@@ -1,9 +1,18 @@
 <script setup>
-import { computed, ref } from "vue";
-import { formatAmount, formatDate } from "@/utils/formatters";
+import { computed } from "vue";
+import { useAuthStore } from "@/stores/auth";
+import { formatDate } from "@/utils/formatters";
 import { canEditReceipt, canDeleteReceipt } from "@/utils/receiptUtils";
 import BaseReceiptDetailModal from "@/components/base/BaseReceiptDetailModal.vue";
+import CmsSuggestVendorAction from "@/components/base/CmsSuggestVendorAction.vue";
 import { Pencil, Trash2 } from "lucide-vue-next";
+
+let auth = null;
+try {
+  auth = useAuthStore();
+} catch {
+  auth = null;
+}
 
 const props = defineProps({
   modelValue: { type: Boolean, required: true },
@@ -39,7 +48,13 @@ const normalizedReceipt = computed(() => {
     items: props.receipt.items || [],
     amount: props.receipt.amount || 0,
     vat: props.receipt.vatAmount || 0,
+    discountAmount: props.receipt.discountAmount ?? props.receipt.discount_amount ?? 0,
+    discountType: props.receipt.discountType ?? props.receipt.discount_type ?? "none",
     status: props.receipt.status || "pending",
+    vendorStatusTag: props.receipt.vendorStatusTag ?? props.receipt.vendor_status_tag ?? null,
+    vendorAccredited: Boolean(props.receipt.vendorAccredited ?? props.receipt.vendor_accredited),
+    vendorAuditRequired: Boolean(props.receipt.vendorAuditRequired ?? props.receipt.vendor_audit_required),
+    vendorFlagged: Boolean(props.receipt.vendorFlagged ?? props.receipt.vendor_flagged),
   };
 });
 </script>
@@ -67,6 +82,7 @@ const normalizedReceipt = computed(() => {
           <Trash2 class="w-4 h-4" />
         </button>
       </div>
+      <CmsSuggestVendorAction v-if="auth?.isAdmin && receipt" :receipt="receipt" />
     </template>
   </BaseReceiptDetailModal>
 </template>

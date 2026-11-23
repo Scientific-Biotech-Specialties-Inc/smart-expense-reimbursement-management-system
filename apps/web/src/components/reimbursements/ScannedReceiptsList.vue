@@ -1,23 +1,26 @@
 <script setup>
-import { computed } from "vue";
 import {
-  FileText,
-  Image as ImageIcon,
-  Trash2,
   MapPin,
   ChevronDown,
   X,
   PlusCircle,
 } from "lucide-vue-next";
 import {
+  DISCOUNT_TYPE_OPTIONS,
   itemsGrossAmount,
-  receiptFinancials,
   isReceiptFieldMissing,
+  cleanName,
+  formatTinValue,
 } from "@/utils/receiptUtils";
+import { truncateDecimal } from "@/utils/formatters";
 import { REIMBURSEMENT_EVENT_TYPES } from "@/utils/constants";
 import CurrencySelect from "@/components/base/CurrencySelect.vue";
-import BaseReceiptImage from "@/components/base/BaseReceiptImage.vue";
 import ReceiptImagePreview from "@/components/base/ReceiptImagePreview.vue";
+import {
+  useCurrencyRates,
+  useReceiptCurrencyWatcher,
+  resolveReceiptExchangeRate,
+} from "@/composables/useCurrencyRates";
 
 const props = defineProps({
   receipts: {
@@ -32,17 +35,29 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  requireEventType: {
+    type: Boolean,
+    default: true,
+  },
   disabled: {
     type: Boolean,
     default: false,
   },
 });
 
-const emit = defineEmits(["remove-receipt", "update:receipts"]);
+const emit = defineEmits(["remove-receipt"]);
 
-const hasUploadingReceipts = computed(() =>
-  props.receipts.some((receipt) => receipt.isUploading || receipt.isProcessing),
-);
+const { isForeignCurrency, formatPhpConversionLabel } = useCurrencyRates();
+useReceiptCurrencyWatcher(() => props.receipts);
+
+function getPhpConversionLabel(receipt) {
+  if (!receipt || !isForeignCurrency(receipt.currency)) return "";
+  return formatPhpConversionLabel(
+    receipt.amount ?? receipt.total_amount ?? receipt.ocrData?.amount ?? 0,
+    receipt.currency,
+    resolveReceiptExchangeRate(receipt),
+  );
+}
 
 function getCategoryOptions() {
   return props.categories;
@@ -56,26 +71,6 @@ function syncCategoryName(receipt) {
   if (receipt.ocrData) {
     receipt.ocrData.expense_category_id = receipt.categoryId;
   }
-}
-
-function cleanName(fileName) {
-  return (fileName || "").replace(/\.[^.]+$/, "").replace(/[_-]/g, " ");
-}
-
-function formatTinValue(value, { padLastBlock = false } = {}) {
-  let digits = String(value || "")
-    .replace(/\D/g, "")
-    .slice(0, 12);
-  if (padLastBlock && digits.length === 9) {
-    digits = `${digits}000`;
-  }
-
-  const parts = [];
-  if (digits.length > 0) parts.push(digits.slice(0, 3));
-  if (digits.length > 3) parts.push(digits.slice(3, 6));
-  if (digits.length > 6) parts.push(digits.slice(6, 9));
-  if (digits.length > 9) parts.push(digits.slice(9, 12));
-  return parts.join("-");
 }
 
 function handleTinInput(receipt) {
@@ -102,6 +97,8 @@ function syncOcrData(receipt) {
     receipt.ocrData.amount = receipt.amount;
     receipt.ocrData.subtotal = receipt.subtotal;
     receipt.ocrData.vat = receipt.tax;
+    receipt.ocrData.discount_amount = receipt.discountAmount;
+    receipt.ocrData.discount_type = receipt.discountType;
     receipt.ocrData.expense_category_id = receipt.categoryId;
     receipt.ocrData.event_type = receipt.eventType;
   }
@@ -115,7 +112,64 @@ function handleTaxChange(receipt) {
   syncOcrData(receipt);
 }
 
+function handleDiscountTypeChange(receipt) {
+  if (!receipt.discountType || receipt.discountType === "none") {
+    receipt.discountType = "none";
+    receipt.discountAmount = "0.00";
+  }
+  if ((receipt.items || []).length > 0) {
+    recalculateFromItems(receipt);
+  } else {
+    syncOcrData(receipt);
+  }
+}
+
+function handleDiscountAmountInput(receipt, event) {
+  const rawValue = event?.target?.value ?? receipt.discountAmount;
+  const truncated = truncateDecimal(rawValue, 2);
+  receipt.discountAmount = truncated;
+  if (event?.target && event.target.value !== truncated) {
+    event.target.value = truncated;
+  }
+  if (Number(receipt.discountAmount) > 0 && (!receipt.discountType || receipt.discountType === "none")) {
+    receipt.discountType = "other";
+  }
+  if ((receipt.items || []).length > 0) {
+    recalculateFromItems(receipt);
+  } else {
+    syncOcrData(receipt);
+  }
+}
+
+function handleAmountInput(receipt, event) {
+  const rawValue = event?.target?.value ?? receipt.amount;
+  const truncated = truncateDecimal(rawValue, 2);
+  receipt.amount = truncated;
+  if (event?.target && event.target.value !== truncated) {
+    event.target.value = truncated;
+  }
+  handleAmountChange(receipt);
+}
+
+function handleAmountBlur(receipt, event) {
+  if (receipt.amount !== null && receipt.amount !== undefined && receipt.amount !== "") {
+    let str = String(receipt.amount);
+    if (str.endsWith(".")) {
+      str = str.slice(0, -1);
+    }
+    const truncated = truncateDecimal(str, 2);
+    receipt.amount = truncated;
+    if (event?.target && event.target.value !== truncated) {
+      event.target.value = truncated;
+    }
+    syncOcrData(receipt);
+  }
+}
+
 function handleAmountChange(receipt) {
+  if (receipt.amount !== null && receipt.amount !== undefined && receipt.amount !== "") {
+    receipt.amount = truncateDecimal(receipt.amount, 2);
+  }
   if (receipt.vatClassification === 'non-vat') {
     receipt.tax = "0.00";
     if (!receipt.subtotal || receipt.subtotal === "" || Number(receipt.subtotal) <= 0) {
@@ -143,8 +197,12 @@ function addReceiptItem(receipt) {
 }
 
 function recalculateFromItems(receipt) {
-  const newTotal = itemsGrossAmount(receipt.items || []);
-  receipt.amount = newTotal > 0 ? newTotal.toFixed(2) : "";
+  const itemsSum = itemsGrossAmount(receipt.items || []);
+  const discountVal = (!receipt.discountType || receipt.discountType === "none")
+    ? 0
+    : (Number(receipt.discountAmount) || 0);
+  const newTotal = Math.max(0, itemsSum - discountVal);
+  receipt.amount = newTotal > 0 ? newTotal.toFixed(2) : (itemsSum > 0 ? "0.00" : "");
   if (receipt.vatClassification === 'non-vat') {
     receipt.tax = "0.00";
     if (!receipt.subtotal || receipt.subtotal === "" || Number(receipt.subtotal) <= 0) {
@@ -161,46 +219,34 @@ function removeReceiptItem(receipt, index) {
 </script>
 
 <template>
-  <section class="card p-6">
-    <div class="flex items-center justify-between mb-5">
+  <section class="card p-4 sm:p-6">
+    <div class="flex items-center justify-between mb-4 sm:mb-5">
       <h2
         class="text-lg font-bold text-primary"
       >
         Scanned Receipts
       </h2>
     </div>
-
-    <div
-      v-if="hasUploadingReceipts"
-      class="mb-5 flex items-center gap-2 rounded-xl border border-accent/20 bg-accent-50 px-4 py-3 text-xs font-bold uppercase tracking-widest text-accent"
-    >
-      <span
-        class="h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin"
-        aria-hidden="true"
-      />
-      Uploading and extracting receipt data...
-    </div>
-
     <!-- One block per receipt -->
-    <div class="flex flex-col gap-8">
+    <div class="flex flex-col gap-6 sm:gap-8">
       <div
         v-for="(receipt, idx) in receipts"
         :key="receipt.id"
-        class="border border-accent/15 rounded-xl p-6 bg-accent-50/20"
+        class="border border-accent/15 rounded-xl p-4 sm:p-6 bg-accent-50/20 min-w-0"
       >
         <!-- Receipt number badge -->
-        <div class="flex items-center gap-2 mb-4">
+        <div class="flex items-center gap-2 mb-4 min-w-0">
           <span
-            class="w-6 h-6 rounded-full bg-primary text-white text-[11px] font-bold flex items-center justify-center"
+            class="w-6 h-6 shrink-0 rounded-full bg-primary text-white text-[11px] font-bold flex items-center justify-center"
             >{{ idx + 1 }}</span
           >
           <span
-            class="text-xs font-bold text-primary"
+            class="text-xs font-bold text-primary truncate min-w-0"
             >{{ cleanName(receipt.fileName) }}</span
           >
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8">
           <!-- Left: Image Preview -->
           <div class="lg:col-span-4">
             <ReceiptImagePreview
@@ -219,9 +265,9 @@ function removeReceiptItem(receipt, index) {
           </div>
 
           <!-- Right: Extracted Fields -->
-          <div class="lg:col-span-8 flex flex-col gap-4">
+          <div class="lg:col-span-8 flex flex-col gap-4 min-w-0">
             <!-- Row 1: Invoice + Date -->
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div class="input-wrapper">
                 <label class="input-label">Invoice Number <span class="text-danger">*</span></label>
                 <input
@@ -369,7 +415,7 @@ function removeReceiptItem(receipt, index) {
               <!-- Type of Event -->
               <div class="input-wrapper">
                 <label class="input-label"
-                  >Type of Event <span class="text-danger">*</span></label
+                  >Type of Event <span v-if="requireEventType" class="text-danger">*</span></label
                 >
                 <div class="relative">
                   <select
@@ -377,13 +423,13 @@ function removeReceiptItem(receipt, index) {
                     class="input appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     :class="{
                       'cursor-not-allowed bg-slate-100 text-slate-500': disabled,
-                      'input-error !border-danger focus:!border-danger': isReceiptFieldMissing(receipt, 'eventType'),
+                      'input-error !border-danger focus:!border-danger': requireEventType && isReceiptFieldMissing(receipt, 'eventType'),
                     }"
                     v-model="receipt.eventType"
                     :disabled="disabled || receipt.isUploading || receipt.isProcessing"
                     @change="syncOcrData(receipt)"
                   >
-                    <option value="" disabled>Select type of event</option>
+                    <option value="" :disabled="requireEventType">Select type of event</option>
                     <option
                       v-for="eventType in REIMBURSEMENT_EVENT_TYPES"
                       :key="eventType"
@@ -396,7 +442,7 @@ function removeReceiptItem(receipt, index) {
                     class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
                   />
                 </div>
-                <span v-if="isReceiptFieldMissing(receipt, 'eventType')" class="text-[10px] text-danger font-medium mt-0.5">
+                <span v-if="requireEventType && isReceiptFieldMissing(receipt, 'eventType')" class="text-[10px] text-danger font-medium mt-0.5">
                   Type of event is required
                 </span>
               </div>
@@ -408,9 +454,9 @@ function removeReceiptItem(receipt, index) {
                 >Order Items <span class="text-danger">*</span></label
               >
               <div
-                class="border border-slate-100 rounded-lg overflow-hidden shadow-sm bg-white"
+                class="border border-slate-100 rounded-lg overflow-x-auto shadow-sm bg-white"
               >
-                <table class="w-full text-left border-collapse table-fixed">
+                <table class="w-full min-w-[420px] sm:min-w-0 text-left border-collapse table-fixed">
                   <thead
                     class="bg-slate-50 text-[11px] text-slate-500 uppercase"
                   >
@@ -515,6 +561,57 @@ function removeReceiptItem(receipt, index) {
                   </div>
                 </div>
               </div>
+              <div
+                v-if="isForeignCurrency(receipt.currency)"
+                data-testid="receipt-php-conversion-badge"
+                class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+              >
+                <span class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  PHP Equivalent (System Rate)
+                </span>
+                <span class="font-semibold text-primary">
+                  {{ getPhpConversionLabel(receipt) }}
+                </span>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-end">
+                <div class="input-wrapper">
+                  <label class="input-label">Discount Type</label>
+                  <div class="relative">
+                    <select
+                      data-testid="receipt-discount-type-select"
+                      class="input !bg-white appearance-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      :class="{ 'cursor-not-allowed bg-slate-100 text-slate-500': disabled }"
+                      v-model="receipt.discountType"
+                      :disabled="disabled || receipt.isUploading || receipt.isProcessing"
+                      @change="handleDiscountTypeChange(receipt)"
+                    >
+                      <option
+                        v-for="opt in DISCOUNT_TYPE_OPTIONS"
+                        :key="opt.value"
+                        :value="opt.value"
+                      >
+                        {{ opt.label }}
+                      </option>
+                    </select>
+                    <ChevronDown class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  </div>
+                </div>
+                <div class="input-wrapper">
+                  <label class="input-label">Discount Amount</label>
+                  <input
+                    data-testid="receipt-discount-amount-input"
+                    class="input !bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                    :class="{ 'cursor-not-allowed bg-slate-100 text-slate-500': disabled || !receipt.discountType || receipt.discountType === 'none' }"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    v-model="receipt.discountAmount"
+                    :disabled="disabled || !receipt.discountType || receipt.discountType === 'none' || receipt.isUploading || receipt.isProcessing"
+                    @input="handleDiscountAmountInput(receipt, $event)"
+                  />
+                </div>
+              </div>
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
                 <div class="input-wrapper">
                   <label class="input-label">Subtotal <span class="text-danger">*</span></label>
@@ -525,6 +622,8 @@ function removeReceiptItem(receipt, index) {
                       'input-error !border-danger focus:!border-danger': isReceiptFieldMissing(receipt, 'subtotal'),
                     }"
                     type="number"
+                    step="0.01"
+                    min="0"
                     v-model="receipt.subtotal"
                     :disabled="disabled || receipt.isUploading || receipt.isProcessing"
                     @input="handleSubtotalChange(receipt)"
@@ -539,6 +638,8 @@ function removeReceiptItem(receipt, index) {
                     class="input !bg-white disabled:opacity-50 disabled:cursor-not-allowed"
                     :class="{ 'cursor-not-allowed bg-slate-100 text-slate-500': disabled }"
                     type="number"
+                    step="0.01"
+                    min="0"
                     v-model="receipt.tax"
                     :disabled="disabled || receipt.vatClassification === 'non-vat' || receipt.isUploading || receipt.isProcessing"
                     @input="handleTaxChange(receipt)"
@@ -548,6 +649,8 @@ function removeReceiptItem(receipt, index) {
                   <label class="input-label text-accent">Total <span class="text-danger">*</span></label>
                   <input
                     type="number"
+                    step="0.01"
+                    min="0"
                     class="input !bg-white text-lg font-bold text-accent text-right disabled:opacity-50 disabled:cursor-not-allowed"
                     :class="{
                       'cursor-not-allowed !bg-slate-100 !text-slate-500': disabled,
@@ -555,7 +658,8 @@ function removeReceiptItem(receipt, index) {
                     }"
                     v-model="receipt.amount"
                     :disabled="disabled || receipt.isUploading || receipt.isProcessing"
-                    @input="handleAmountChange(receipt)"
+                    @input="handleAmountInput(receipt, $event)"
+                    @blur="handleAmountBlur(receipt, $event)"
                   />
                   <span v-if="isReceiptFieldMissing(receipt, 'amount')" class="text-[10px] text-danger font-medium mt-0.5">
                     Total amount is required

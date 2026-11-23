@@ -3,7 +3,7 @@
   - Dialog action buttons and selects in footers must size intrinsically to their text
     content plus standard padding (px-4 or px-5), rather than stretching to fill the
     parent container (avoid w-full or flex-1 on desktop viewports).
-  - Use sm:justify-end (forms/workflows) or justify-center (confirmation dialogs).
+  - Use sm:justify-end across all modal dialogs (including confirmation dialogs and forms/workflows).
   - See docs/DESIGN.md Section VI.5, VI.6 & VII.
 -->
 <script setup>

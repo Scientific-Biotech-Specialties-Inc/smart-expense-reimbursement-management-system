@@ -8,6 +8,8 @@ use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
 use App\Modules\Reimbursements\Jobs\UpdatePrsReimbursementStatusJob;
+use App\Modules\Reimbursements\Jobs\UpdateTsReimbursementStatusJob;
+use App\Modules\Shared\Services\CurrencyConversionService;
 use App\Modules\Shared\Services\PasswordVerificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -31,6 +33,49 @@ class ReimbursementService
     }
 
     /**
+     * Persist inline receipt metadata edits and lock FX conversion snapshots.
+     */
+    private function syncInlineReceipts(User $user, array $receiptsData, bool $rejectIfRejectedStatus = false): void
+    {
+        $conversionService = app(CurrencyConversionService::class);
+
+        foreach ($receiptsData as $receiptData) {
+            $receipt = Receipt::find($receiptData['id']);
+            if (!$receipt || $receipt->uploaded_by !== $user->id) {
+                continue;
+            }
+
+            if ($rejectIfRejectedStatus && $receipt->isRejectedStatus()) {
+                throw ValidationException::withMessages([
+                    'receipts' => ['Rejected receipts cannot be edited or attached to a reimbursement.'],
+                ]);
+            }
+
+            $updatePayload = $conversionService->enrichReceiptPayload([
+                'expense_category_id' => $receiptData['expense_category_id'] ?? $receipt->expense_category_id,
+                'event_type' => $receiptData['event_type'] ?? $receipt->event_type,
+                'vendor_name' => $receiptData['vendor_name'] ?? $receipt->vendor_name,
+                'transaction_date' => $receiptData['transaction_date'] ?? $receipt->transaction_date,
+                'total_amount' => $receiptData['total_amount'] ?? $receipt->total_amount,
+                'subtotal' => $receiptData['subtotal'] ?? $receipt->subtotal,
+                'vat_amount' => $receiptData['vat_amount'] ?? $receipt->vat_amount,
+                'vat_classification' => $receiptData['vat_classification'] ?? $receipt->vat_classification,
+                'currency' => $receiptData['currency'] ?? $receipt->currency,
+                'tin' => $receiptData['tin'] ?? $receipt->tin,
+                'invoice_number' => $receiptData['invoice_number'] ?? $receipt->invoice_number,
+                'location' => $receiptData['location'] ?? $receipt->location,
+            ], $receipt);
+
+            $receipt->update($updatePayload);
+
+            if (isset($receiptData['items'])) {
+                $receipt->items()->delete();
+                $receipt->items()->createMany($receiptData['items']);
+            }
+        }
+    }
+
+    /**
      * List all reimbursements.
      */
     public function listReimbursements(User $user, bool $canManage)
@@ -43,7 +88,12 @@ class ReimbursementService
             $query->where('user_id', $user->id);
         }
 
-        $reimbursements = $query->get();
+        $reimbursements = $query->get()
+            ->sortByDesc(function (Reimbursement $reimbursement) {
+                $isPending = in_array(strtolower((string) $reimbursement->status), ['pending', 'submitted'], true);
+                return ($isPending && $reimbursement->fast_track_eligible) ? 1 : 0;
+            })
+            ->values();
         AuditLogService::enrichReimbursements($reimbursements, $canManage);
         return $reimbursements;
     }
@@ -55,13 +105,19 @@ class ReimbursementService
     {
         return DB::transaction(function () use ($user, $validated, $reportFile) {
             $receiptIds = array_values(array_unique($validated['receipt_ids']));
-            $ownedReceiptCount = Receipt::whereIn('id', $receiptIds)
+            $ownedReceipts = Receipt::whereIn('id', $receiptIds)
                 ->where('uploaded_by', $user->id)
-                ->count();
+                ->get(['id', 'status']);
 
-            if ($ownedReceiptCount !== count($receiptIds)) {
+            if ($ownedReceipts->count() !== count($receiptIds)) {
                 throw ValidationException::withMessages([
                     'receipt_ids' => ['You can only submit reimbursements for your own receipts.'],
+                ]);
+            }
+
+            if ($ownedReceipts->contains(fn (Receipt $receipt) => $receipt->isRejectedStatus())) {
+                throw ValidationException::withMessages([
+                    'receipt_ids' => ['Rejected receipts cannot be submitted for reimbursement. Please delete them and upload clearer copies.'],
                 ]);
             }
 
@@ -77,30 +133,14 @@ class ReimbursementService
             }
 
             if (!empty($validated['receipts'])) {
-                foreach ($validated['receipts'] as $receiptData) {
-                    $receipt = Receipt::find($receiptData['id']);
-                    if ($receipt && $receipt->uploaded_by === $user->id) {
-                        $receipt->update([
-                            'expense_category_id' => $receiptData['expense_category_id'] ?? $receipt->expense_category_id,
-                            'event_type' => $receiptData['event_type'] ?? $receipt->event_type,
-                            'vendor_name' => $receiptData['vendor_name'] ?? $receipt->vendor_name,
-                            'transaction_date' => $receiptData['transaction_date'] ?? $receipt->transaction_date,
-                            'total_amount' => $receiptData['total_amount'] ?? $receipt->total_amount,
-                            'subtotal' => $receiptData['subtotal'] ?? $receipt->subtotal,
-                            'vat_amount' => $receiptData['vat_amount'] ?? $receipt->vat_amount,
-                            'vat_classification' => $receiptData['vat_classification'] ?? $receipt->vat_classification,
-                            'tin' => $receiptData['tin'] ?? $receipt->tin,
-                            'invoice_number' => $receiptData['invoice_number'] ?? $receipt->invoice_number,
-                            'location' => $receiptData['location'] ?? $receipt->location,
-                        ]);
-
-                        if (isset($receiptData['items'])) {
-                            $receipt->items()->delete();
-                            $receipt->items()->createMany($receiptData['items']);
-                        }
-                    }
-                }
+                $this->syncInlineReceipts($user, $validated['receipts']);
             }
+
+            $authoritativeAmount = app(CurrencyConversionService::class)->resolveAuthoritativePhpTotal(
+                $receiptIds,
+                (float) $validated['amount'],
+                backfillMissing: true
+            );
 
             $expenseCategoryId = $validated['expense_category_id']
                 ?? Receipt::whereIn('id', $receiptIds)->whereNotNull('expense_category_id')->value('expense_category_id');
@@ -115,10 +155,15 @@ class ReimbursementService
                 'description' => $validated['description'],
                 'user_comment' => $validated['user_comment'] ?? null,
                 'expense_category_id' => $expenseCategoryId,
+                'contract_id' => $validated['contract_id'] ?? null,
+                'client_name' => $validated['client_name'] ?? null,
+                'ticket_id' => $validated['ticket_id'] ?? null,
+                'ticket_number' => $validated['ticket_number'] ?? null,
                 'event_type' => $validated['event_type'] ?? null,
-                'amount' => $validated['amount'],
+                'amount' => $authoritativeAmount,
                 'date' => $validated['date'],
                 'report_file_path' => $reportPath,
+                'report_template_data' => $validated['report_template_data'] ?? null,
                 'status' => 'pending',
                 'submitted_by_name' => $user->name,
             ]);
@@ -197,9 +242,17 @@ class ReimbursementService
     /**
      * Approve claim.
      */
-    public function approveReimbursement(User $user, int $id, ?string $password, string $ipAddress, Request $requestContext)
+    public function approveReimbursement(
+        User $user,
+        int $id,
+        ?string $password,
+        string $ipAddress,
+        Request $requestContext,
+        bool $secondaryAuditConfirmed = false,
+        ?string $secondaryAuditNote = null
+    )
     {
-        return DB::transaction(function () use ($user, $id, $password, $ipAddress, $requestContext) {
+        return DB::transaction(function () use ($user, $id, $password, $ipAddress, $requestContext, $secondaryAuditConfirmed, $secondaryAuditNote) {
             // Verify password against external auth service if provided
             if (!empty($password) && !PasswordVerificationService::verify($requestContext, $password)) {
                 throw ValidationException::withMessages([
@@ -207,7 +260,7 @@ class ReimbursementService
                 ]);
             }
 
-            $reimbursement = Reimbursement::findOrFail($id);
+            $reimbursement = Reimbursement::with('receipts')->findOrFail($id);
 
             // Self-approval check
             if ($reimbursement->user_id === $user->id) {
@@ -218,12 +271,25 @@ class ReimbursementService
                 throw new \Illuminate\Auth\Access\AuthorizationException('Only pending reimbursements can be approved.');
             }
 
+            if ($reimbursement->vendor_audit_required && !$secondaryAuditConfirmed) {
+                throw ValidationException::withMessages([
+                    'secondary_audit_confirmed' => ['Secondary Accounting Audit confirmation is required before approving a claim with unverified or flagged vendors.'],
+                ]);
+            }
+
             $beforeState = $reimbursement->toArray();
-            $reimbursement->update([
+            $updateFields = [
                 'status' => 'approved',
                 'approved_by' => $user->name,
                 'approved_at' => now(),
-            ]);
+            ];
+            if ($reimbursement->vendor_audit_required) {
+                $cleanNote = trim((string) $secondaryAuditNote);
+                $updateFields['secondary_audit_confirmed_at'] = now();
+                $updateFields['secondary_audit_by'] = $user->name;
+                $updateFields['secondary_audit_note'] = $cleanNote !== '' ? $cleanNote : null;
+            }
+            $reimbursement->update($updateFields);
             $this->updateReceiptStatuses($reimbursement->receipts()->pluck('receipts.id')->all(), 'approved');
             $afterState = $reimbursement->toArray();
 
@@ -239,9 +305,11 @@ class ReimbursementService
                 ipAddress: $ipAddress
             );
 
-            if ($reimbursement->is_request == 1 && !empty($reimbursement->source_submission_id)) {
+            if ($reimbursement->source_system === 'prs' && $reimbursement->is_request == 1 && !empty($reimbursement->source_submission_id)) {
                 UpdatePrsReimbursementStatusJob::dispatch($reimbursement->source_submission_id);
             }
+
+            $this->dispatchTsStatusUpdateIfApplicable($reimbursement);
 
             $formattedAmount = NotificationService::formatPeso($reimbursement->amount);
             NotificationService::notifyUser(
@@ -321,6 +389,8 @@ class ReimbursementService
                 ipAddress: $ipAddress
             );
 
+            $this->dispatchTsStatusUpdateIfApplicable($reimbursement);
+
             $formattedAmount = NotificationService::formatPeso($reimbursement->amount);
             $statusType = $isTerminal ? 'reimbursement_rejected' : 'reimbursement_revised';
             $statusTitle = $isTerminal ? 'Reimbursement Rejected' : 'Reimbursement Needs Revision';
@@ -340,14 +410,6 @@ class ReimbursementService
             AuditLogService::enrichReimbursement($reimbursement, true);
             return $reimbursement;
         });
-    }
-
-    /**
-     * Backwards-compatible alias for revise flow.
-     */
-    public function reviseReimbursement(User $user, int $id, string $comment, ?string $password, string $ipAddress, Request $requestContext)
-    {
-        return $this->rejectReimbursement($user, $id, $comment, $password, $ipAddress, $requestContext, 'revise');
     }
 
     /**
@@ -415,9 +477,11 @@ class ReimbursementService
                 ipAddress: $ipAddress
             );
 
-            if ($reimbursement->is_request == 1 && !empty($reimbursement->source_submission_id)) {
+            if ($reimbursement->source_system === 'prs' && $reimbursement->is_request == 1 && !empty($reimbursement->source_submission_id)) {
                 UpdatePrsReimbursementStatusJob::dispatch($reimbursement->source_submission_id);
             }
+
+            $this->dispatchTsStatusUpdateIfApplicable($reimbursement);
 
             $formattedAmount = NotificationService::formatPeso($reimbursement->amount);
             NotificationService::notifyUser(
@@ -594,35 +658,23 @@ class ReimbursementService
 
             // Update receipt data if provided
             if (!empty($data['receipts'])) {
-                foreach ($data['receipts'] as $receiptData) {
-                    $receipt = Receipt::find($receiptData['id']);
-                    if ($receipt && $receipt->uploaded_by === $user->id) {
-                        $receipt->update([
-                            'expense_category_id' => $receiptData['expense_category_id'] ?? $receipt->expense_category_id,
-                            'event_type' => $receiptData['event_type'] ?? $receipt->event_type,
-                            'vendor_name' => $receiptData['vendor_name'] ?? $receipt->vendor_name,
-                            'transaction_date' => $receiptData['transaction_date'] ?? $receipt->transaction_date,
-                            'total_amount' => $receiptData['total_amount'] ?? $receipt->total_amount,
-                            'subtotal' => $receiptData['subtotal'] ?? $receipt->subtotal,
-                            'vat_amount' => $receiptData['vat_amount'] ?? $receipt->vat_amount,
-                            'vat_classification' => $receiptData['vat_classification'] ?? $receipt->vat_classification,
-                            'tin' => $receiptData['tin'] ?? $receipt->tin,
-                            'invoice_number' => $receiptData['invoice_number'] ?? $receipt->invoice_number,
-                            'location' => $receiptData['location'] ?? $receipt->location,
-                        ]);
-
-                        if (isset($receiptData['items'])) {
-                            $receipt->items()->delete();
-                            $receipt->items()->createMany($receiptData['items']);
-                        }
-                    }
-                }
+                $this->syncInlineReceipts($user, $data['receipts'], true);
             }
 
             // Sync receipt associations if provided
+            $newReceiptIds = null;
             if (!empty($data['receipt_ids'])) {
                 $currentReceiptIds = $reimbursement->receipts()->pluck('receipts.id')->all();
                 $newReceiptIds = array_values(array_unique($data['receipt_ids']));
+
+                $hasRejected = Receipt::whereIn('id', $newReceiptIds)
+                    ->get(['id', 'status'])
+                    ->contains(fn (Receipt $receipt) => $receipt->isRejectedStatus());
+                if ($hasRejected) {
+                    throw ValidationException::withMessages([
+                        'receipt_ids' => ['Rejected receipts cannot be attached to a reimbursement. Please delete them and upload clearer copies.'],
+                    ]);
+                }
 
                 $detachedReceiptIds = array_values(array_diff($currentReceiptIds, $newReceiptIds));
 
@@ -651,8 +703,43 @@ class ReimbursementService
                 'report_file_path' => $reportPath,
             ], fn($v) => $v !== null);
 
+            if (!empty($data['receipts']) || !empty($data['receipt_ids']) || array_key_exists('amount', $data)) {
+                $activeReceiptIds = $newReceiptIds ?? $reimbursement->receipts()->pluck('receipts.id')->all();
+                $fallbackAmount = array_key_exists('amount', $data)
+                    ? (float) $data['amount']
+                    : (float) $reimbursement->amount;
+                $authoritativeAmount = app(CurrencyConversionService::class)->resolveAuthoritativePhpTotal(
+                    $activeReceiptIds,
+                    $fallbackAmount,
+                    backfillMissing: true
+                );
+                if ($authoritativeAmount !== null) {
+                    $updatePayload['amount'] = $authoritativeAmount;
+                }
+            }
+
             if (array_key_exists('user_comment', $data)) {
                 $updatePayload['user_comment'] = $data['user_comment'];
+            }
+
+            if (array_key_exists('report_template_data', $data)) {
+                $updatePayload['report_template_data'] = $data['report_template_data'];
+            }
+
+            if (array_key_exists('contract_id', $data)) {
+                $updatePayload['contract_id'] = $data['contract_id'];
+            }
+
+            if (array_key_exists('client_name', $data)) {
+                $updatePayload['client_name'] = $data['client_name'];
+            }
+
+            if (array_key_exists('ticket_id', $data)) {
+                $updatePayload['ticket_id'] = $data['ticket_id'];
+            }
+
+            if (array_key_exists('ticket_number', $data)) {
+                $updatePayload['ticket_number'] = $data['ticket_number'];
             }
 
             // Reset revise → pending on re-submission (rejected terminal cannot be reset)
@@ -747,5 +834,25 @@ class ReimbursementService
 
             return true;
         });
+    }
+
+    /**
+     * Dispatch outbound status sync job to Ticketing System (TS) when claim originated from or links to a ticket.
+     */
+    private function dispatchTsStatusUpdateIfApplicable(Reimbursement $reimbursement): void
+    {
+        if ($reimbursement->source_system === 'ts' || !empty($reimbursement->ticket_id)) {
+            $ticketId = $reimbursement->ticket_id
+                ? (int) $reimbursement->ticket_id
+                : (is_numeric($reimbursement->source_submission_id) ? (int) $reimbursement->source_submission_id : null);
+
+            UpdateTsReimbursementStatusJob::dispatch(
+                (int) $reimbursement->id,
+                $ticketId,
+                $reimbursement->ticket_number,
+                (string) $reimbursement->status,
+                $reimbursement->rejection_comment
+            );
+        }
     }
 }

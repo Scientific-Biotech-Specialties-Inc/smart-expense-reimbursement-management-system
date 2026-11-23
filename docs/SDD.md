@@ -143,11 +143,11 @@ app/Modules/{ModuleName}/
 | `CashAdvances` | `/api/cash-advances`<br>`App\Modules\CashAdvances` | `CashAdvanceController`<br>`CashAdvanceService` | `CalculateOverdueCashAdvancesJob` | Cash advance request lifecycle (submission, policy threshold validation, accounting approval/rejection, disbursement logging, and employee acknowledgment). |
 | `Reimbursements` | `/api/reimbursements`<br>`App\Modules\Reimbursements` | `ReimbursementController`<br>`ReceiptController`<br>`ExpenseCategoryController`<br>`PrsReimbursementRequestController`<br>`PrsWebhookController`<br>`OcrCallbackController`<br>`ReimbursementService`<br>`ReceiptService` | `UpdatePrsReimbursementStatusJob`<br>`DispatchReceiptToAiService` | Reimbursement claim lifecycle, multi-receipt uploading & OCR dispatch, 90-day duplicate checking, BIR VAT classification, PRS status sync, and approval workflows. |
 | `Expenses` | `/api/expenses`<br>`App\Modules\Expenses` | `ExpenseController`<br>`ExpenseService` | — | Generic expense logging, line-item recording, receipt linkage, and expense category association. |
-| `Liquidations` | `/api/liquidations`<br>`App\Modules\Liquidations` | `LiquidationController`<br>`LiquidationOcrCallbackController` | `CalculateDailyPenaltiesJob`<br>`DispatchReceiptToAiService` | Cash advance liquidation reports, receipt item matching & scanning, variance/shortfall computation, accounting audit verification, and daily penalty accruals. |
+| `Liquidations` | `/api/liquidations`<br>`App\Modules\Liquidations` | `LiquidationController` | `CalculateDailyPenaltiesJob`<br>`DispatchReceiptToAiService` | Cash advance liquidation reports, receipt item matching & scanning, variance/shortfall computation, accounting audit verification, and daily penalty accruals. |
 | `AuditLogs` | `App\Modules\AuditLogs` | `AuditLogService` | — | Centralized append-only audit trail logging (`AuditLogService::log()`) and compliance export action tracking. |
 | `Notifications` | `App\Modules\Notifications` | `NotificationDeliveryService` | — | Template-based in-app notification dispatching, failed attempt logging, and role-based hierarchy resolution. |
 | `Ai` | `App\Modules\Ai` | `AiServiceOcrEngine`<br>`TesseractOcrEngine` | — | OCR contract bindings (`OcrEngineInterface`, `AsyncOcrEngineInterface`), external OCR service communication, payload signing, and webhook validation. |
-| `Users` | `App\Modules\Users` | `User` Model & Providers | — | User identity mapping, department and organizational hierarchy resolution, and role policy checks. |
+| `Users` | `/api/profile`<br>`App\Modules\Users` | `ProfileController`<br>`ProfileService`<br>`User` Model & Providers | — | User identity mapping, profile management (personal/contact details Dual-Sync with `capstone-auth-module`), Supabase avatar and hybrid signature storage, client-encrypted password updates, and user-scoped audit activity logs. |
 | `Shared` | `/api/crypto`<br>`/api/auth`<br>`App\Modules\Shared` | `CryptoController`<br>`AuthController`<br>`PayloadDecryptionService`<br>`PasswordVerificationService` | — | Cryptographic public key distribution (`GET /api/crypto/key`), client payload pre-encryption decryption middleware (`DecryptPayloadMiddleware`), external auth SSO proxying (`/api/auth/me`), and password re-verification. |
 
 ### Cross-Cutting Services
@@ -173,7 +173,18 @@ erDiagram
     users {
         bigint id PK
         string name
+        string first_name
+        string middle_name
+        string last_name
         string email
+        string role
+        string grade
+        string department
+        string contact_number
+        string avatar
+        longtext signature
+        string signature_path
+        timestamp last_login_at
         boolean is_admin
         string auth_id
     }
@@ -236,6 +247,8 @@ erDiagram
         date transaction_date
         decimal total_amount
         decimal vat_amount
+        decimal discount_amount
+        string discount_type
         string tin
         string invoice_number
         enum vat_classification

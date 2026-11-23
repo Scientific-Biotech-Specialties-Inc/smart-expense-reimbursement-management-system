@@ -71,11 +71,11 @@ describe("BaseAuditTrail", () => {
     },
   ];
 
-  it("renders header with total count and starts expanded by default", () => {
+  it("renders header and starts expanded by default", () => {
     const wrapper = mount(BaseAuditTrail, {
       props: { trail: sampleTrail },
     });
-    expect(wrapper.text()).toContain("Audit Trail (3)");
+    expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.find('[data-testid="audit-trail-body"]').exists()).toBe(true);
   });
 

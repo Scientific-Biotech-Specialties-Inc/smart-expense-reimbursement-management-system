@@ -51,16 +51,23 @@ vi.mock("@/composables/useToast", () => ({
   }),
 }));
 
-vi.mock("@/composables/useOcrMode", () => ({
-  useOcrMode: () => ({
-    isMockOcr: false,
-    setMockMode: vi.fn(),
-  }),
-}));
-
 vi.mock("@/composables/useNotificationDeepLink", () => ({
   useNotificationDeepLink: () => ({
     checkDeepLink: vi.fn(),
+  }),
+}));
+
+vi.mock("@/utils/apiFetch", () => ({
+  apiFetch: vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      data: {
+        id: "mock-receipt-1",
+        status: "processing",
+        total_amount: 100,
+        vat_amount: 10.71,
+      },
+    }),
   }),
 }));
 
