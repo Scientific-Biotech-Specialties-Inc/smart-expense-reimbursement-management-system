@@ -610,4 +610,143 @@ describe("LiquidationSettlementForm — revise Update button stays disabled unti
     expect(wrapper.find("#submit-liquidation-btn").attributes("disabled")).toBeDefined();
     expect(wrapper.find('[data-testid="liquidation-balance-error"]').exists()).toBe(true);
   });
+
+  it("renders unified layout (Roadmap -> Tabs -> Notes -> Summary), preserves state with v-show across tabs in settle mode, and handles view mode notes & summary", async () => {
+    const templateData = buildSampleTemplate();
+    const wrapper = mount(LiquidationSettlementForm, {
+      props: {
+        selectedAdvance: {
+          id: 41,
+          purpose: "Davao Field Deployment",
+          amount: 2000,
+          balance: 2000,
+          status: "signed",
+          acknowledged_at: "2026-09-01",
+          dueDate: "2026-09-15",
+          audit_trail: [
+            {
+              id: "ca-ev-1",
+              action_type: "CASH_ADVANCE_DISBURSED",
+              label: "Disbursed",
+              actor_name: "Finance Admin",
+              created_at: "2026-09-01T10:00:00Z",
+            },
+          ],
+        },
+        existingLiquidation: {
+          id: 88,
+          cash_advance_id: 41,
+          status: "revise",
+          admin_note: "Please verify receipt date",
+        },
+        receipts: buildSampleReceipts(),
+        receiptCategoryOptions: categoriesState,
+        reportTemplateData: templateData,
+        isManualMode: false,
+        shortfallExplanation: "Initial explanation",
+        totalExpenseAmount: 2000,
+        variance: 0,
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: {
+            name: "UnifiedRoadmapStepper",
+            template: '<div data-testid="settlement-roadmap-stub" />',
+          },
+          ReceiptImagePreview: true,
+          BaseReceiptDetailModal: true,
+          BaseSignaturePad: true,
+          SbsiReportPreviewModal: true,
+          ConfirmModal: true,
+        },
+      },
+    });
+    await flushPromises();
+
+    const tabReceipts = wrapper.find('[data-testid="modal-tab-receipts"]');
+    const tabReport = wrapper.find('[data-testid="modal-tab-report"]');
+    const tabAudit = wrapper.find('[data-testid="modal-tab-audit"]');
+    const panelReceipts = wrapper.find('[data-testid="modal-panel-receipts"]');
+    const panelReport = wrapper.find('[data-testid="modal-panel-report"]');
+    const panelAudit = wrapper.find('[data-testid="modal-panel-audit"]');
+    const notesSection = wrapper.find('[data-testid="modal-notes-section"]');
+    const summarySection = wrapper.find('[data-testid="modal-summary-section"]');
+    const reportCard = wrapper.find('[data-testid="liquidation-report-attachment-card"]');
+
+    expect(tabReceipts.exists()).toBe(true);
+    expect(tabReport.exists()).toBe(true);
+    expect(tabAudit.exists()).toBe(true);
+    expect(notesSection.exists()).toBe(true);
+    expect(summarySection.exists()).toBe(true);
+
+    // Root container uses overflow-x-clip (not overflow-hidden) so sticky bottom-0 anchors to modal scroll body
+    expect(wrapper.classes()).toContain("overflow-x-clip");
+    expect(wrapper.classes()).not.toContain("overflow-hidden");
+
+    // Reviewer Note / Explanation is outside liquidation-report-attachment-card
+    expect(reportCard.find("textarea").exists()).toBe(false);
+    expect(notesSection.find("textarea").exists()).toBe(true);
+    expect(notesSection.text()).toContain("Please verify receipt date");
+
+    // Verify strict DOM order: Roadmap -> Tabs -> Notes -> Summary
+    const roadmapEl = wrapper.find('[data-testid="settlement-roadmap-stub"]').element;
+    const tabsEl = tabReceipts.element.closest('[role="tablist"]');
+    expect(
+      Boolean(roadmapEl.compareDocumentPosition(tabsEl) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
+    expect(
+      Boolean(tabsEl.compareDocumentPosition(notesSection.element) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
+    expect(
+      Boolean(
+        notesSection.element.compareDocumentPosition(summarySection.element) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+
+    // v-show keeps SbsiReportDocumentEditor mounted while hidden on receipts tab
+    expect(panelReceipts.element.style.display).not.toBe("none");
+    expect(panelReport.element.style.display).toBe("none");
+    expect(wrapper.findComponent(SbsiReportDocumentEditor).exists()).toBe(true);
+
+    // Switch to Report Attachment tab -> visible, FileUpload/ScannedReceiptsList remain mounted
+    await tabReport.trigger("click");
+    expect(panelReceipts.element.style.display).toBe("none");
+    expect(panelReport.element.style.display).not.toBe("none");
+    expect(wrapper.findComponent(SbsiReportDocumentEditor).exists()).toBe(true);
+
+    // Switch to Audit Trail tab -> shows BaseAuditTrail events
+    await tabAudit.trigger("click");
+    expect(panelReport.element.style.display).toBe("none");
+    expect(panelAudit.element.style.display).not.toBe("none");
+    expect(panelAudit.text()).toContain("Finance Admin");
+
+    // Summary section displays Cash Advance Purpose & Due Date in Medium Date format
+    expect(summarySection.text()).toContain("Davao Field Deployment");
+    expect(summarySection.text()).toContain("Sep 15, 2026");
+
+    // Switching to another advance resets activeTab to 'receipts' and supports read-only view mode
+    await wrapper.setProps({
+      disabled: true,
+      shortfallExplanation: "",
+      existingLiquidation: null,
+      selectedAdvance: {
+        id: 42,
+        purpose: "Iloilo Inspection",
+        amount: 1500,
+        balance: 1500,
+        status: "signed",
+        acknowledged_at: "2026-09-02",
+        dueDate: "2026-09-20",
+      },
+    });
+    await flushPromises();
+
+    expect(tabReceipts.attributes("aria-selected")).toBe("true");
+    expect(panelReceipts.element.style.display).not.toBe("none");
+    expect(notesSection.find("textarea").exists()).toBe(false);
+    expect(notesSection.text()).toContain("No notes provided");
+    expect(summarySection.text()).toContain("Iloilo Inspection");
+    expect(summarySection.text()).toContain("Sep 20, 2026");
+  });
 });

@@ -535,6 +535,11 @@ const sourceCases = computed(() => {
       submittedReceiptTotal: Number(item.total_expense_amount || 0),
       shortfallExplanation: item.shortfall_explanation || "",
       adminNote: item.admin_note || "",
+      revision_count: item.revision_count ?? 0,
+      cash_advance: item.cash_advance || null,
+      audit_trail: item.audit_trail || item.cash_advance?.audit_trail || [],
+      status_history:
+        item.status_history || item.cash_advance?.status_history || [],
       reportFilePath: item.report_file_path || null,
       reportUrl: item.report_url || null,
       reportTemplateData: item.report_template_data || null,
@@ -1198,6 +1203,7 @@ function handleEditLiquidation(row) {
     // Fallback: fabricate minimal advance so form can still load existing liquidation
     selectAdvance({
       id: advId,
+      purpose: row.purpose || "",
       amount: row.cashAdvanceAmount,
       balance: row.outstandingBalance,
       outstanding_balance: row.outstandingBalance,
@@ -1205,6 +1211,7 @@ function handleEditLiquidation(row) {
       penalties_total: row.penaltiesTotal || 0,
       dueDate: row.dueDate,
       status: row.cashAdvanceStatus || row.status,
+      audit_trail: row.audit_trail || [],
     });
   }
   // Scroll to settlement form for immediate editing
@@ -2015,16 +2022,6 @@ onMounted(async () => {
                         : "Settle Cash Advance"
                 }}
               </h2>
-              <p
-                v-if="settlementModalStep === 'select' || settlementModalMode !== 'view'"
-                class="mt-0.5 truncate text-xs text-slate-400"
-              >
-                {{
-                  settlementModalStep === "select"
-                    ? "Choose a cash advance to liquidate."
-                    : selectedAdvance?.purpose || "Cash advance details"
-                }}
-              </p>
             </div>
           </div>
           <div class="flex items-center gap-2 sm:gap-2.5 shrink-0">

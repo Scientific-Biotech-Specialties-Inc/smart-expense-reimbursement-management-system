@@ -11,6 +11,7 @@ import {
   Eye,
 } from "lucide-vue-next";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseModalTabs from "@/components/base/BaseModalTabs.vue";
 import FileUpload from "@/components/base/FileUpload.vue";
 import ScannedReceiptsList from "@/components/reimbursements/ScannedReceiptsList.vue";
 import UnifiedRoadmapStepper from "@/components/base/UnifiedRoadmapStepper.vue";
@@ -294,18 +295,24 @@ const isUnchangedRevision = computed(() => {
   return internalRevisionUnchanged.value;
 });
 
-const resolvedAuditTrail = computed(() => {
-  if (props.existingLiquidation?.audit_trail?.length) {
-    return props.existingLiquidation.audit_trail;
-  }
-  if (props.selectedAdvance?.audit_trail?.length) {
-    return props.selectedAdvance.audit_trail;
-  }
-  if (Array.isArray(props.auditTrail) && props.auditTrail.length) {
-    return props.auditTrail;
-  }
-  return [];
-});
+const activeTab = ref("receipts");
+
+const applicantNoteText = computed(() =>
+  String(
+    props.shortfallExplanation ||
+      props.existingLiquidation?.shortfall_explanation ||
+      props.existingLiquidation?.shortfallExplanation ||
+      "",
+  ).trim(),
+);
+
+const adminNoteText = computed(() =>
+  String(
+    props.existingLiquidation?.admin_note ||
+      props.existingLiquidation?.adminNote ||
+      "",
+  ).trim(),
+);
 
 // Phase 2 gate: liquidation is editable only after acknowledgement (signed)
 // or when the workflow has already entered Phase 2. Until then preview-only.
@@ -537,9 +544,41 @@ function handleCloseReceiptDetails() {
   selectedViewReceipt.value = null;
 }
 
+const settlementAuditTrail = computed(() => {
+  if (props.existingLiquidation?.audit_trail?.length) {
+    return props.existingLiquidation.audit_trail;
+  }
+  if (props.selectedAdvance?.audit_trail?.length) {
+    return props.selectedAdvance.audit_trail;
+  }
+  if (Array.isArray(props.auditTrail) && props.auditTrail.length) {
+    return props.auditTrail;
+  }
+  if (roadmapHistory.value?.length) {
+    return roadmapHistory.value;
+  }
+  return (
+    props.existingLiquidation?.audit_trail ||
+    props.selectedAdvance?.audit_trail ||
+    roadmapHistory.value ||
+    []
+  );
+});
+
+const modalTabs = computed(() => [
+  { key: "receipts", label: "Receipts", count: props.receipts.length },
+  { key: "report", label: "Report Attachment" },
+  {
+    key: "audit",
+    label: "Audit Trail",
+    count: settlementAuditTrail.value.length,
+  },
+]);
+
 watch(
   () => [props.selectedAdvance?.id, props.existingLiquidation?.id],
   () => {
+    activeTab.value = "receipts";
     handleCloseReceiptDetails();
   },
 );
@@ -603,43 +642,7 @@ const normalizedViewReceipt = computed(() => {
     </BaseButton>
   </div>
 
-  <div v-else class="flex flex-col gap-6 p-4 shadow-sm card sm:p-6 w-full min-w-0 max-w-full overflow-hidden">
-    <div
-      class="flex flex-col gap-3 pb-4 border-b border-slate-100 sm:flex-row sm:items-start sm:justify-between"
-    >
-      <div class="min-w-0">
-        <h3 class="text-base font-bold text-primary">
-          {{ selectedAdvance.purpose }}
-        </h3>
-      </div>
-      <div class="sm:text-right">
-        <p class="text-xs font-medium text-slate-500 mb-1">
-          Outstanding Balance
-        </p>
-        <p class="text-xl font-bold text-primary">
-          {{ formatPeso(totalAdvanceBalance) }}
-        </p>
-        <p
-          v-if="totalPenaltyAmount > 0"
-          class="text-[11px] font-medium text-danger mt-0.5"
-        >
-          Includes {{ formatPeso(totalPenaltyAmount) }} overdue penalty
-        </p>
-      </div>
-    </div>
-
-    <!-- Mini Unified Roadmap (horizontal progress snapshot) -->
-    <UnifiedRoadmapStepper
-      v-if="selectedAdvance"
-      :cash-advance="roadmapCashAdvance"
-      :liquidation="roadmapLiquidation"
-      :status-history="roadmapHistory"
-      :penalties="roadmapPenalties"
-      :overpayment-amount="overpaymentAmount"
-      :aging="roadmapAging"
-      class="!p-2"
-    />
-
+  <div v-else class="flex flex-col gap-5 p-4 shadow-sm card sm:p-6 w-full min-w-0 max-w-full overflow-x-clip">
     <!-- Needs Revision Banner -->
     <div
       v-if="
@@ -681,249 +684,349 @@ const normalizedViewReceipt = computed(() => {
       </span>
     </div>
 
-    <div class="pt-4 border-t border-slate-100 space-y-3">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <label class="input-label !mb-0">
-          Receipt Attachments ({{ receipts.length }})
-        </label>
-        <div class="flex items-center gap-3">
-          <BaseButton
-            data-testid="export-liquidation-report-btn"
-            variant="secondary"
-            size="sm"
-            type="button"
-            :loading="isExporting"
-            :disabled="isExporting"
-            @click="handleExportLiquidationReport"
-          >
-            <Download class="w-3.5 h-3.5" />
-            <span>{{ isExporting ? "Exporting..." : "Export Report" }}</span>
-          </BaseButton>
-        </div>
-      </div>
+    <!-- Unified Roadmap (horizontal progress snapshot) -->
+    <UnifiedRoadmapStepper
+      v-if="selectedAdvance"
+      :cash-advance="roadmapCashAdvance"
+      :liquidation="roadmapLiquidation"
+      :status-history="roadmapHistory"
+      :penalties="roadmapPenalties"
+      :overpayment-amount="overpaymentAmount"
+      :aging="roadmapAging"
+      class="!p-2"
+    />
 
-      <template v-if="!isFormDisabled">
-        <FileUpload
-          :model-value="receipts"
-          @update:model-value="$emit('update:receipts', $event)"
-          :max-size-mb="2"
-          @upload-error="$emit('upload-error', $event)"
-        />
-      </template>
-    </div>
+    <!-- Tabs + Active Tab Panels (v-show preserves draft/reactive state across switches) -->
+    <div class="space-y-4">
+      <BaseModalTabs v-model="activeTab" :tabs="modalTabs" />
 
-    <!-- View Mode: Even, controlled receipt card grid boxes with section max-width -->
-    <template v-if="isFormDisabled">
+      <!-- Receipts Tab -->
       <div
-        v-if="receipts.length > 0"
-        class="w-full max-w-full"
+        v-show="activeTab === 'receipts'"
+        data-testid="modal-panel-receipts"
+        class="space-y-4"
       >
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
-          <article
-            v-for="(receipt, idx) in receipts"
-            :key="receipt.id || idx"
-            class="relative min-h-[390px] rounded-3xl bg-slate-800 flex flex-col justify-end shadow-md h-full overflow-hidden isolate transform-gpu"
-          >
-            <!-- Full-bleed Stretched Receipt Image Background (no top, left, or right margin/padding) -->
-            <div class="absolute inset-0 overflow-hidden rounded-3xl">
-              <ReceiptImagePreview
-                class="h-full rounded-3xl"
-                :file-name="receipt.fileName || receipt.name || receipt.merchantName || `receipt_${receipt.id || idx + 1}`"
-                :src="getReceiptSrc(receipt)"
-                :file-type="receipt.fileType"
-                :alt="receipt.merchantName || receipt.name || 'Receipt'"
-                :enable-zoom="true"
-                :show-badge="false"
-                :show-delete-button="false"
-                aspect-class="h-full w-full"
-                frame-class="border-0 rounded-3xl bg-slate-100"
-                img-class="w-full h-full object-cover"
-                :receipt="receipt"
-              />
-            </div>
-
-            <!-- Transparent Frosted Blur Overlay for Lower Card Contrast -->
-            <div
-              class="pointer-events-none absolute inset-x-0 bottom-0 h-56 rounded-b-3xl backdrop-blur-md bg-gradient-to-t from-slate-800/75 via-slate-800/45 to-transparent"
-              style="mask-image: linear-gradient(to bottom, transparent 0%, black 38%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 38%);"
-              aria-hidden="true"
-            />
-
-            <!-- Lower Card Content: Title, Price, Status, View Details -->
-            <div class="relative z-10 px-5 pb-5 pt-4 flex flex-col gap-3.5">
-              <div class="space-y-2.5">
-                <div class="flex items-center justify-between gap-2.5">
-                  <p
-                    class="text-base font-bold text-white truncate min-w-0 flex-1 drop-shadow-sm"
-                    :title="receipt.merchantName || receipt.vendor || receipt.name || 'Receipt'"
-                  >
-                    {{ receipt.merchantName || receipt.vendor || receipt.name || "Receipt" }}
-                  </p>
-                  <span
-                    class="rounded-full bg-slate-800/45 backdrop-blur-sm border border-white/15 px-3 py-1 text-xs font-semibold text-white shrink-0"
-                  >
-                    {{ formatAmount(getReceiptAmount(receipt), receipt.currency || "PHP") }}
-                  </span>
-                </div>
-                <p
-                  v-if="isForeignCurrency(receipt.currency)"
-                  data-testid="liquidation-card-php-conversion"
-                  class="text-[11px] font-medium text-slate-200/95 truncate"
-                >
-                  {{ formatPhpConversionLabel(getReceiptAmount(receipt), receipt.currency, resolveReceiptExchangeRate(receipt)) }}
-                </p>
-
-                <div class="flex items-center">
-                  <StatusBadge
-                    :status="receipt.decision === 'accepted' ? 'approved' : (receipt.decision || receipt.status || 'pending')"
-                    tier="high"
-                  />
-                </div>
-              </div>
-
+        <div class="space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <label class="input-label !mb-0">
+              Receipt Attachments ({{ receipts.length }})
+            </label>
+            <div class="flex items-center gap-3">
               <BaseButton
-                variant="primary"
+                data-testid="export-liquidation-report-btn"
+                variant="secondary"
+                size="sm"
                 type="button"
-                class="w-full sm:w-auto sm:self-end"
-                @click="handleOpenReceiptDetails(receipt)"
+                :loading="isExporting"
+                :disabled="isExporting"
+                @click="handleExportLiquidationReport"
               >
-                <Eye class="w-3.5 h-3.5" />
-                <span>View Details</span>
+                <Download class="w-3.5 h-3.5" />
+                <span>{{ isExporting ? "Exporting..." : "Export Report" }}</span>
               </BaseButton>
             </div>
-          </article>
+          </div>
+
+          <template v-if="!isFormDisabled">
+            <FileUpload
+              :model-value="receipts"
+              @update:model-value="$emit('update:receipts', $event)"
+              :max-size-mb="2"
+              @upload-error="$emit('upload-error', $event)"
+            />
+          </template>
         </div>
+
+        <!-- View Mode: Even, controlled receipt card grid boxes with section max-width -->
+        <template v-if="isFormDisabled">
+          <div
+            v-if="receipts.length > 0"
+            class="w-full max-w-full"
+          >
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 auto-rows-fr">
+              <article
+                v-for="(receipt, idx) in receipts"
+                :key="receipt.id || idx"
+                class="relative min-h-[390px] rounded-3xl bg-slate-800 flex flex-col justify-end shadow-md h-full overflow-hidden isolate transform-gpu"
+              >
+                <!-- Full-bleed Stretched Receipt Image Background (no top, left, or right margin/padding) -->
+                <div class="absolute inset-0 overflow-hidden rounded-3xl">
+                  <ReceiptImagePreview
+                    class="h-full rounded-3xl"
+                    :file-name="receipt.fileName || receipt.name || receipt.merchantName || `receipt_${receipt.id || idx + 1}`"
+                    :src="getReceiptSrc(receipt)"
+                    :file-type="receipt.fileType"
+                    :alt="receipt.merchantName || receipt.name || 'Receipt'"
+                    :enable-zoom="true"
+                    :show-badge="false"
+                    :show-delete-button="false"
+                    aspect-class="h-full w-full"
+                    frame-class="border-0 rounded-3xl bg-slate-100"
+                    img-class="w-full h-full object-cover"
+                    :receipt="receipt"
+                  />
+                </div>
+
+                <!-- Transparent Frosted Blur Overlay for Lower Card Contrast -->
+                <div
+                  class="pointer-events-none absolute inset-x-0 bottom-0 h-56 rounded-b-3xl backdrop-blur-md bg-gradient-to-t from-slate-800/75 via-slate-800/45 to-transparent"
+                  style="mask-image: linear-gradient(to bottom, transparent 0%, black 38%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 38%);"
+                  aria-hidden="true"
+                />
+
+                <!-- Lower Card Content: Title, Price, Status, View Details -->
+                <div class="relative z-10 px-5 pb-5 pt-4 flex flex-col gap-3.5">
+                  <div class="space-y-2.5">
+                    <div class="flex items-center justify-between gap-2.5">
+                      <p
+                        class="text-base font-bold text-white truncate min-w-0 flex-1 drop-shadow-sm"
+                        :title="receipt.merchantName || receipt.vendor || receipt.name || 'Receipt'"
+                      >
+                        {{ receipt.merchantName || receipt.vendor || receipt.name || "Receipt" }}
+                      </p>
+                      <span
+                        class="rounded-full bg-slate-800/45 backdrop-blur-sm border border-white/15 px-3 py-1 text-xs font-semibold text-white shrink-0"
+                      >
+                        {{ formatAmount(getReceiptAmount(receipt), receipt.currency || "PHP") }}
+                      </span>
+                    </div>
+                    <p
+                      v-if="isForeignCurrency(receipt.currency)"
+                      data-testid="liquidation-card-php-conversion"
+                      class="text-[11px] font-medium text-slate-200/95 truncate"
+                    >
+                      {{ formatPhpConversionLabel(getReceiptAmount(receipt), receipt.currency, resolveReceiptExchangeRate(receipt)) }}
+                    </p>
+
+                    <div class="flex items-center">
+                      <StatusBadge
+                        :status="receipt.decision === 'accepted' ? 'approved' : (receipt.decision || receipt.status || 'pending')"
+                        tier="high"
+                      />
+                    </div>
+                  </div>
+
+                  <BaseButton
+                    variant="primary"
+                    type="button"
+                    class="w-full sm:w-auto sm:self-end"
+                    @click="handleOpenReceiptDetails(receipt)"
+                  >
+                    <Eye class="w-3.5 h-3.5" />
+                    <span>View Details</span>
+                  </BaseButton>
+                </div>
+              </article>
+            </div>
+          </div>
+
+          <div
+            v-else
+            class="p-6 text-center text-sm text-slate-400 bg-slate-50 border border-dashed rounded-xl border-slate-200"
+          >
+            No receipts attached to this liquidation.
+          </div>
+        </template>
+
+        <!-- Create / Edit Mode: Scanned Receipts List for Interactive Editing -->
+        <template v-else>
+          <ScannedReceiptsList
+            v-if="receipts.length > 0"
+            :receipts="receipts"
+            :categories="receiptCategoryOptions"
+            :allow-remove="true"
+            :disabled="false"
+            @remove-receipt="handleRemoveReceipt"
+          />
+        </template>
       </div>
 
+      <!-- Report Attachment Tab -->
       <div
-        v-else
-        class="p-6 text-center text-sm text-slate-400 bg-slate-50 border border-dashed rounded-xl border-slate-200"
+        v-show="activeTab === 'report'"
+        data-testid="modal-panel-report"
       >
-        No receipts attached to this liquidation.
+        <section
+          class="p-5 sm:p-6 bg-white border rounded-2xl border-slate-200/90 shadow-sm space-y-4"
+          data-testid="liquidation-report-attachment-card"
+        >
+          <div class="flex items-center justify-between">
+            <label class="input-label !mb-0">
+              Report Attachment
+              <span class="text-danger ml-0.5">*</span>
+            </label>
+          </div>
+
+          <SbsiReportDocumentEditor
+            type="liquidation"
+            :model-value="effectiveTemplateData"
+            :report-file="localManualAttachment"
+            :receipts="receipts"
+            :allocated-amount="selectedAdvance?.amount ?? selectedAdvance?.balance ?? 0"
+            :utilized-amount="totalExpenseAmount"
+            :variance="variance"
+            :purpose="selectedAdvance?.purpose || ''"
+            :disbursement-date="disbursementDateValue"
+            :record-id="existingLiquidation?.id || selectedAdvance?.id || null"
+            :disabled="isFormDisabled"
+            :readonly="isFormDisabled"
+            @update:model-value="handleTemplateModelUpdate"
+            @update:report-file="handleReportFileUpdate"
+            @update:mode="handleEditorModeUpdate"
+          />
+        </section>
       </div>
-    </template>
 
-    <!-- Create / Edit Mode: Scanned Receipts List for Interactive Editing -->
-    <template v-else>
-      <ScannedReceiptsList
-        v-if="receipts.length > 0"
-        :receipts="receipts"
-        :categories="receiptCategoryOptions"
-        :allow-remove="true"
-        :disabled="false"
-        @remove-receipt="handleRemoveReceipt"
-      />
-    </template>
+      <!-- Audit Trail Tab -->
+      <div
+        v-show="activeTab === 'audit'"
+        data-testid="modal-panel-audit"
+      >
+        <BaseAuditTrail
+          :trail="settlementAuditTrail"
+          :entity-title="
+            existingLiquidation?.id
+              ? `Liquidation-#${existingLiquidation.id}`
+              : `Cash-Advance-#${selectedAdvance?.id}`
+          "
+        />
+      </div>
+    </div>
 
+    <!-- Reviewer Note / Explanation Section (always visible below tab panels) -->
     <section
-      class="p-5 sm:p-6 bg-white border rounded-2xl border-slate-200/90 shadow-sm space-y-4"
-      data-testid="liquidation-report-attachment-card"
+      data-testid="modal-notes-section"
+      class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 space-y-3"
     >
-      <div class="flex items-center justify-between">
-        <label class="input-label !mb-0">
-          Report Attachment
-          <span class="text-danger ml-0.5">*</span>
-        </label>
-      </div>
+      <template v-if="!isFormDisabled">
+        <div class="space-y-2">
+          <div class="flex items-center justify-between">
+            <label class="input-label !mb-0">
+              Reviewer Note / Explanation
+              <span class="text-xs font-normal text-slate-400 ml-1">(Optional)</span>
+            </label>
+          </div>
 
-      <SbsiReportDocumentEditor
-        type="liquidation"
-        :model-value="effectiveTemplateData"
-        :report-file="localManualAttachment"
-        :receipts="receipts"
-        :allocated-amount="selectedAdvance?.amount ?? selectedAdvance?.balance ?? 0"
-        :utilized-amount="totalExpenseAmount"
-        :variance="variance"
-        :purpose="selectedAdvance?.purpose || ''"
-        :disbursement-date="disbursementDateValue"
-        :record-id="existingLiquidation?.id || selectedAdvance?.id || null"
-        :disabled="isFormDisabled"
-        :readonly="isFormDisabled"
-        @update:model-value="handleTemplateModelUpdate"
-        @update:report-file="handleReportFileUpdate"
-        @update:mode="handleEditorModeUpdate"
-      />
-
-      <div class="pt-2 border-t border-slate-100 space-y-2">
-        <div class="flex items-center justify-between">
-          <label class="input-label !mb-0">
-            Reviewer Note / Explanation
-            <span class="text-xs font-normal text-slate-400 ml-1">(Optional)</span>
-          </label>
+          <div
+            class="relative rounded-xl border border-slate-200 bg-white transition overflow-hidden focus-within:border-primary focus-within:ring-1 focus-within:ring-primary"
+          >
+            <textarea
+              :value="shortfallExplanation"
+              @input="
+                (e) =>
+                  $emit('update:shortfallExplanation', e.target.value.slice(0, 255))
+              "
+              rows="3"
+              maxlength="255"
+              class="w-full resize-none border-0 bg-transparent p-4 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 min-h-[96px]"
+              placeholder="Provide an optional note for this liquidation..."
+            />
+            <div
+              class="flex items-center justify-end px-4 pb-3 pt-1 text-xs font-medium text-slate-400 select-none"
+            >
+              <span>{{ (shortfallExplanation || "").length }} / 255</span>
+            </div>
+          </div>
         </div>
 
         <div
-          class="relative rounded-xl border border-slate-200 bg-white transition overflow-hidden"
-          :class="
-            isFormDisabled
-              ? 'bg-slate-50 cursor-not-allowed select-none'
-              : 'focus-within:border-primary focus-within:ring-1 focus-within:ring-primary'
-          "
+          v-if="adminNoteText"
+          class="pt-3 border-t border-slate-100 space-y-1"
         >
-          <textarea
-            :value="shortfallExplanation"
-            @input="
-              (e) =>
-                $emit('update:shortfallExplanation', e.target.value.slice(0, 255))
-            "
-            rows="3"
-            maxlength="255"
-            :tabindex="isFormDisabled ? -1 : 0"
-            :readonly="isFormDisabled"
-            :disabled="isFormDisabled"
-            class="w-full resize-none border-0 bg-transparent p-4 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 disabled:text-slate-500 min-h-[96px]"
-            :class="{
-              'pointer-events-none select-none cursor-not-allowed':
-                isFormDisabled,
-            }"
-            placeholder="Provide an optional note for this liquidation..."
-          />
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Admin Notes
+          </p>
+          <p class="text-sm leading-relaxed text-slate-700">
+            {{ adminNoteText }}
+          </p>
+        </div>
+      </template>
+
+      <template v-else>
+        <h4 class="text-sm font-semibold text-slate-800">
+          Reviewer Note / Explanation
+        </h4>
+
+        <template v-if="applicantNoteText || adminNoteText">
+          <div v-if="applicantNoteText" class="space-y-1">
+            <p class="text-[11px] text-slate-400 uppercase tracking-wide">
+              Applicant Explanation
+            </p>
+            <p class="text-sm leading-relaxed text-slate-700">
+              {{ applicantNoteText }}
+            </p>
+          </div>
           <div
-            class="flex items-center justify-end px-4 pb-3 pt-1 text-xs font-medium text-slate-400 select-none"
+            v-if="adminNoteText"
+            class="space-y-1"
+            :class="{ 'pt-2.5 border-t border-slate-100': applicantNoteText }"
           >
-            <span>{{ (shortfallExplanation || "").length }} / 255</span>
+            <p class="text-[11px] text-slate-400 uppercase tracking-wide">
+              Admin Notes
+            </p>
+            <p class="text-sm leading-relaxed text-slate-700">
+              {{ adminNoteText }}
+            </p>
+          </div>
+        </template>
+
+        <p v-else class="text-sm italic text-slate-400">
+          No notes provided
+        </p>
+      </template>
+    </section>
+
+    <!-- Summary Section (always visible below Notes) -->
+    <section
+      data-testid="modal-summary-section"
+      class="space-y-4"
+    >
+      <div
+        data-testid="liquidation-settlement-summary"
+        class="rounded-2xl border border-slate-200 bg-clinical/20 p-4 sm:p-5 space-y-4"
+      >
+        <h4 class="text-sm font-semibold text-slate-800">
+          Settlement Summary
+        </h4>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pb-3 border-b border-slate-200/80">
+          <div class="min-w-0">
+            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">
+              Purpose
+            </p>
+            <p class="text-sm font-semibold text-slate-800 break-words">
+              {{ selectedAdvance.purpose || "--" }}
+            </p>
+          </div>
+          <div>
+            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">
+              Due Date
+            </p>
+            <p class="text-sm font-medium text-slate-700">
+              {{ formatDate(selectedAdvance.dueDate || selectedAdvance.expected_liquidation_date) }}
+            </p>
           </div>
         </div>
-      </div>
-    </section>
 
-    <section
-      v-if="existingLiquidation?.admin_note || existingLiquidation?.adminNote"
-      class="p-4 bg-white border rounded-xl border-slate-200"
-    >
-      <p class="text-sm font-semibold text-slate-700">Admin Notes</p>
-      <p class="mt-2 text-sm leading-relaxed text-slate-600">
-        {{ existingLiquidation.admin_note || existingLiquidation.adminNote }}
-      </p>
-    </section>
-
-    <div
-      data-testid="liquidation-settlement-summary"
-      class="p-4 mt-2 border border-slate-200 bg-clinical/20 sm:p-5"
-    >
-      <h4 class="text-sm font-semibold text-slate-700 mb-4">
-        Settlement Summary
-      </h4>
-
-      <div class="flex">
-        <div class="w-full space-y-4">
-          <template v-if="totalPenaltyAmount > 0">
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-sm text-slate-600">Requested Amount</span>
-              <span class="font-semibold text-slate-700">{{
-                formatPeso(requestedAdvanceAmount)
-              }}</span>
-            </div>
-            <div class="flex items-center justify-between gap-3">
-              <span class="text-sm text-slate-600">
-                Overdue Penalty ({{ penaltyDaysCount }}
-                {{ penaltyDaysCount === 1 ? "day" : "days" }} &times; ₱50.00)
-              </span>
-              <span class="font-semibold text-danger"
-                >+{{ formatPeso(totalPenaltyAmount) }}</span
-              >
-            </div>
-          </template>
+        <div class="w-full space-y-3">
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-sm text-slate-600">Requested Amount</span>
+            <span class="font-semibold text-slate-700">{{
+              formatPeso(requestedAdvanceAmount)
+            }}</span>
+          </div>
+          <div
+            v-if="totalPenaltyAmount > 0"
+            class="flex items-center justify-between gap-3"
+          >
+            <span class="text-sm text-slate-600">
+              Overdue Penalty ({{ penaltyDaysCount }}
+              {{ penaltyDaysCount === 1 ? "day" : "days" }} &times; ₱50.00)
+            </span>
+            <span class="font-semibold text-danger"
+              >+{{ formatPeso(totalPenaltyAmount) }}</span
+            >
+          </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-sm text-slate-600">Total Balance</span>
             <span class="font-bold text-primary">{{
@@ -931,10 +1034,28 @@ const normalizedViewReceipt = computed(() => {
             }}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
-            <span class="text-sm text-slate-600">Total Expenses</span>
+            <span class="text-sm text-slate-600">Receipts Total</span>
             <span class="font-bold text-danger"
               >-{{ formatPeso(totalExpenseAmount) }}</span
             >
+          </div>
+          <div
+            v-if="overpaymentAmount > 0"
+            class="flex items-center justify-between gap-3"
+          >
+            <span class="text-sm text-slate-600">Overpayment</span>
+            <span class="font-semibold text-emerald-600"
+              >+{{ formatPeso(overpaymentAmount) }}</span
+            >
+          </div>
+          <div
+            v-else-if="isBelowBalance && receipts.length > 0"
+            class="flex items-center justify-between gap-3"
+          >
+            <span class="text-sm text-slate-600">Remaining Shortfall</span>
+            <span class="font-semibold text-danger">{{
+              formatPeso(shortfallAmount)
+            }}</span>
           </div>
           <div
             class="flex items-center justify-between gap-3 pt-2 border-t border-slate-200"
@@ -953,64 +1074,52 @@ const normalizedViewReceipt = computed(() => {
           </div>
         </div>
       </div>
-    </div>
 
-    <section
-      v-if="overpaymentAmount > 0"
-      class="p-4 border rounded-xl border-accent/20 bg-accent-50"
-      aria-label="Step 9 overpayment forward to reimbursement"
-    >
-      <div
-        class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"
+      <section
+        v-if="overpaymentAmount > 0"
+        class="p-4 border rounded-xl border-accent/20 bg-accent-50"
+        aria-label="Step 9 overpayment forward to reimbursement"
       >
-        <div>
-          <p
-            class="inline-flex items-center gap-2 text-base font-bold font-heading text-primary"
-          >
-            <span
-              class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-white"
-              >9</span
-            >
-            Overpayment → Forward to Reimbursement
-          </p>
-          <p class="mt-1 text-sm leading-relaxed text-slate-600">
-            Step <span class="font-bold text-primary">9</span> — Any excess
-            amount spent beyond the cash advance can be filed as a
-            reimbursement. Current excess amount:
-            <span class="font-bold text-primary">{{
-              formatPeso(overpaymentAmount)
-            }}</span
-            >.
-          </p>
-          <p class="mt-1 text-[11px] text-slate-400">
-            Shows as optional step 9 in the roadmap above. Click below to create
-            a reimbursement linked to this advance.
-          </p>
-        </div>
-        <BaseButton
-          variant="primary"
-          class="min-h-[42px] w-full shrink-0 sm:w-fit"
-          type="button"
-          :disabled="isFormDisabled"
-          @click="!isFormDisabled && $emit('forward-overpayment')"
+        <div
+          class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"
         >
-          <Upload class="w-4 h-4" />
-          File Reimbursement
-        </BaseButton>
-      </div>
+          <div>
+            <p
+              class="inline-flex items-center gap-2 text-base font-bold font-heading text-primary"
+            >
+              <span
+                class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary text-[11px] font-bold text-white"
+                >9</span
+              >
+              Overpayment → Forward to Reimbursement
+            </p>
+            <p class="mt-1 text-sm leading-relaxed text-slate-600">
+              Step <span class="font-bold text-primary">9</span> — Any excess
+              amount spent beyond the cash advance can be filed as a
+              reimbursement. Current excess amount:
+              <span class="font-bold text-primary">{{
+                formatPeso(overpaymentAmount)
+              }}</span
+              >.
+            </p>
+            <p class="mt-1 text-[11px] text-slate-400">
+              Shows as optional step 9 in the roadmap above. Click below to create
+              a reimbursement linked to this advance.
+            </p>
+          </div>
+          <BaseButton
+            variant="primary"
+            class="min-h-[42px] w-full shrink-0 sm:w-fit"
+            type="button"
+            :disabled="isFormDisabled"
+            @click="!isFormDisabled && $emit('forward-overpayment')"
+          >
+            <Upload class="w-4 h-4" />
+            File Reimbursement
+          </BaseButton>
+        </div>
+      </section>
     </section>
-
-    <!-- Audit Trail Section -->
-    <BaseAuditTrail
-      v-if="resolvedAuditTrail && resolvedAuditTrail.length"
-      :trail="resolvedAuditTrail"
-      :entity-title="
-        existingLiquidation
-          ? `Liquidation-#${existingLiquidation.id}`
-          : `Advance-#${selectedAdvance?.id}`
-      "
-      class="mt-4"
-    />
 
     <div
       v-if="!isFormDisabled && receipts.length > 0 && isBelowBalance"
@@ -1029,7 +1138,9 @@ const normalizedViewReceipt = computed(() => {
       </div>
     </div>
 
-    <div class="mt-4 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+    <div
+      class="sticky bottom-0 z-10 -mx-4 sm:-mx-6 -mb-4 sm:-mb-6 px-4 sm:px-6 py-4 bg-white border-t border-slate-100 mt-2 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"
+    >
       <BaseButton
         v-if="existingLiquidation && existingLiquidation.status === 'pending'"
         id="delete-liquidation-btn"

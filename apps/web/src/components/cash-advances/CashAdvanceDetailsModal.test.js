@@ -163,7 +163,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
     expect(stepper.attributes("data-layout")).toBe("horizontal");
   });
 
-  it("renders BaseAuditTrail in Admin view", () => {
+  it("renders BaseAuditTrail in Admin view", async () => {
     mockAuth.isAdmin = true;
     const wrapper = mount(CashAdvanceDetailsModal, {
       props: {
@@ -195,11 +195,12 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
       },
     });
 
+    await wrapper.find('[data-testid="modal-tab-audit"]').trigger("click");
     expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Carlo Gomez");
   });
 
-  it("renders BaseAuditTrail in Employee view", () => {
+  it("renders BaseAuditTrail in Employee view", async () => {
     mockAuth.isAdmin = false;
     const wrapper = mount(CashAdvanceDetailsModal, {
       props: {
@@ -231,6 +232,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
       },
     });
 
+    await wrapper.find('[data-testid="modal-tab-audit"]').trigger("click");
     expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Elena Cruz");
   });
@@ -509,7 +511,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
       expect(acknowledgeBtn.attributes("disabled")).toBeUndefined();
     });
 
-    it("renders verified signature preview when viewing an already signed cash advance in Employee view", () => {
+    it("renders verified signature preview when viewing an already signed cash advance in Employee view", async () => {
       mockAuth.isAdmin = false;
       mockAuth.user = {
         id: 10,
@@ -540,6 +542,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
         },
       });
 
+      await wrapper.find('[data-testid="modal-tab-signatures"]').trigger("click");
       expect(wrapper.text()).toContain("Signature");
       expect(wrapper.text()).toContain("Verified");
       const img = wrapper.find('img[alt="Signature"]');
@@ -804,7 +807,7 @@ describe("CashAdvanceDetailsModal — GrantPayoutModal Disbursement Flow", () =>
     ).toBe(true);
   });
 
-  it("displays payout metadata, granter signature, and synchronized employee signature in Admin and Employee views", () => {
+  it("displays payout metadata, granter signature, and synchronized employee signature in Admin and Employee views", async () => {
     const disbursedWithPayout = {
       id: 72,
       userId: 10,
@@ -829,6 +832,7 @@ describe("CashAdvanceDetailsModal — GrantPayoutModal Disbursement Flow", () =>
       mockAuth.user = isAdmin ? { id: 99, name: "Admin User" } : { id: 10, name: "Juan Dela Cruz" };
 
       const wrapper = mountWithStubs(disbursedWithPayout);
+      await wrapper.find('[data-testid="modal-tab-signatures"]').trigger("click");
       const text = wrapper.text();
 
       expect(text).toContain("Direct Bank Wire");
@@ -845,6 +849,278 @@ describe("CashAdvanceDetailsModal — GrantPayoutModal Disbursement Flow", () =>
       expect(empImg.exists()).toBe(true);
       expect(empImg.attributes("src")).toBe("data:image/png;base64,empSig72");
     }
+  });
+});
+
+describe("CashAdvanceDetailsModal — Unified Tabbed Layout, Notes & Summary", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    mockAuth.isAdmin = true;
+    mockAuth.user = { id: 99, name: "Admin User" };
+  });
+
+  const baseStubs = {
+    UnifiedRoadmapStepper: {
+      name: "UnifiedRoadmapStepper",
+      template: '<div data-testid="roadmap-stepper-stub"></div>',
+    },
+    StatusBadge: true,
+    DecisionConfirmationModal: true,
+    GrantPayoutModal: true,
+    BaseModal: true,
+    SbsiReportPreviewModal: true,
+  };
+
+  it("enforces Roadmap -> Tabs -> Notes -> Summary vertical order in both Admin and Employee views", () => {
+    for (const isAdmin of [true, false]) {
+      mockAuth.isAdmin = isAdmin;
+      mockAuth.user = isAdmin
+        ? { id: 99, name: "Admin User" }
+        : { id: 10, name: "Juan Dela Cruz" };
+
+      const wrapper = mount(CashAdvanceDetailsModal, {
+        props: {
+          isOpen: true,
+          record: {
+            id: 201,
+            userId: 10,
+            requestedBy: "Juan Dela Cruz",
+            purpose: "Site Inspection",
+            amount: 6000,
+            balance: 6000,
+            date: "2026-10-01",
+            dueDate: "2026-10-15",
+            status: "pending",
+          },
+        },
+        global: { stubs: baseStubs },
+      });
+
+      const roadmap = wrapper.find('[data-testid="roadmap-stepper-stub"]');
+      const reportTab = wrapper.find('[data-testid="modal-tab-report"]');
+      const notesSection = wrapper.find('[data-testid="modal-notes-section"]');
+      const summarySection = wrapper.find('[data-testid="modal-summary-section"]');
+
+      expect(roadmap.exists()).toBe(true);
+      expect(reportTab.exists()).toBe(true);
+      expect(notesSection.exists()).toBe(true);
+      expect(summarySection.exists()).toBe(true);
+
+      const Compare = Node.DOCUMENT_POSITION_FOLLOWING;
+      expect(roadmap.element.compareDocumentPosition(reportTab.element) & Compare).toBeTruthy();
+      expect(reportTab.element.compareDocumentPosition(notesSection.element) & Compare).toBeTruthy();
+      expect(notesSection.element.compareDocumentPosition(summarySection.element) & Compare).toBeTruthy();
+    }
+  });
+
+  it("renders Report Attachment, Signatures, and Audit Trail (with count) tabs and switches panels cleanly", async () => {
+    mockAuth.isAdmin = true;
+    const wrapper = mount(CashAdvanceDetailsModal, {
+      props: {
+        isOpen: true,
+        record: {
+          id: 202,
+          userId: 10,
+          requestedBy: "Maria Santos",
+          purpose: "Conference Registration",
+          amount: 4500,
+          balance: 4500,
+          date: "2026-10-05",
+          dueDate: "2026-10-20",
+          status: "pending",
+          audit_trail: [
+            { id: "a1", action_type: "SUBMITTED", label: "Submitted", actor_name: "Maria Santos", created_at: "2026-10-05T08:00:00Z" },
+            { id: "a2", action_type: "VIEWED", label: "Reviewed", actor_name: "Admin User", created_at: "2026-10-06T09:00:00Z" },
+          ],
+        },
+      },
+      global: { stubs: baseStubs },
+    });
+
+    const reportTab = wrapper.find('[data-testid="modal-tab-report"]');
+    const signaturesTab = wrapper.find('[data-testid="modal-tab-signatures"]');
+    const auditTab = wrapper.find('[data-testid="modal-tab-audit"]');
+
+    expect(reportTab.text()).toContain("Report Attachment");
+    expect(signaturesTab.text()).toContain("Signatures");
+    expect(auditTab.text()).toContain("Audit Trail");
+    expect(auditTab.text()).toContain("2");
+    expect(wrapper.find('[data-testid="modal-tab-receipts"]').exists()).toBe(false);
+
+    // Default active tab is 'report' with empty state when no document exists
+    expect(reportTab.attributes("aria-selected")).toBe("true");
+    expect(wrapper.find('[data-testid="modal-panel-report"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="modal-panel-signatures"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="modal-panel-audit"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="modal-panel-report"]').text()).toContain(
+      "No report attachment uploaded.",
+    );
+
+    // Switch to 'signatures' -> empty state before disbursement
+    await signaturesTab.trigger("click");
+    expect(signaturesTab.attributes("aria-selected")).toBe("true");
+    expect(wrapper.find('[data-testid="modal-panel-report"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="modal-panel-signatures"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="modal-panel-signatures"]').text()).toContain(
+      "Signatures and payout details will appear once the cash advance is disbursed.",
+    );
+
+    // Switch to 'audit'
+    await auditTab.trigger("click");
+    expect(auditTab.attributes("aria-selected")).toBe("true");
+    expect(wrapper.find('[data-testid="modal-panel-signatures"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="modal-panel-audit"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="modal-panel-audit"]').text()).toContain("Maria Santos");
+  });
+
+  it("auto-selects Signatures tab when canAcknowledgeFromCurrentView is true and resets on record change", async () => {
+    mockAuth.isAdmin = false;
+    mockAuth.user = { id: 10, name: "Juan Dela Cruz", signature: "data:image/png;base64,sig" };
+
+    const wrapper = mount(CashAdvanceDetailsModal, {
+      props: {
+        isOpen: true,
+        record: {
+          id: 203,
+          userId: 10,
+          purpose: "Disbursed Advance Ready To Sign",
+          amount: 5000,
+          balance: 5000,
+          status: "disbursed",
+          acknowledgedAt: null,
+          signatureImage: null,
+        },
+      },
+      global: { stubs: baseStubs },
+    });
+
+    expect(wrapper.find('[data-testid="modal-tab-signatures"]').attributes("aria-selected")).toBe("true");
+    expect(wrapper.find('[data-testid="modal-panel-signatures"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="modal-panel-report"]').exists()).toBe(false);
+    expect(wrapper.findComponent({ name: "BaseSignaturePad" }).exists()).toBe(true);
+
+    // Changing record to a pending advance resets active tab to 'report'
+    await wrapper.setProps({
+      record: {
+        id: 204,
+        userId: 10,
+        purpose: "Pending Advance",
+        amount: 3000,
+        balance: 3000,
+        status: "pending",
+      },
+    });
+
+    expect(wrapper.find('[data-testid="modal-tab-report"]').attributes("aria-selected")).toBe("true");
+    expect(wrapper.find('[data-testid="modal-panel-report"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="modal-panel-signatures"]').exists()).toBe(false);
+
+    // Manually switch to audit, close modal, and reopen -> resets back to 'report'
+    await wrapper.find('[data-testid="modal-tab-audit"]').trigger("click");
+    expect(wrapper.find('[data-testid="modal-tab-audit"]').attributes("aria-selected")).toBe("true");
+    await wrapper.setProps({ isOpen: false });
+    await wrapper.setProps({ isOpen: true });
+    expect(wrapper.find('[data-testid="modal-tab-report"]').attributes("aria-selected")).toBe("true");
+  });
+
+  it("always renders Reviewer Note section with adminNotes/admin_notes or italic fallback when empty", async () => {
+    mockAuth.isAdmin = false;
+    mockAuth.user = { id: 10, name: "Juan Dela Cruz" };
+
+    const wrapper = mount(CashAdvanceDetailsModal, {
+      props: {
+        isOpen: true,
+        record: {
+          id: 205,
+          userId: 10,
+          purpose: "Equipment Transport",
+          amount: 2500,
+          balance: 2500,
+          status: "pending",
+        },
+      },
+      global: { stubs: baseStubs },
+    });
+
+    const notes = wrapper.find('[data-testid="modal-notes-section"]');
+    expect(notes.exists()).toBe(true);
+    expect(notes.text()).toContain("No notes provided");
+
+    await wrapper.setProps({
+      record: {
+        id: 206,
+        userId: 10,
+        purpose: "Equipment Transport",
+        amount: 2500,
+        balance: 2500,
+        status: "revise",
+        admin_notes: "Please attach signed itinerary breakdown.",
+      },
+    });
+
+    expect(notes.text()).toContain("Please attach signed itinerary breakdown.");
+    expect(notes.text()).not.toContain("No notes provided");
+  });
+
+  it("renders Summary section with Medium Date metadata, CMS contract, overdue penalties, and balances", async () => {
+    mockAuth.isAdmin = true;
+    const wrapper = mount(CashAdvanceDetailsModal, {
+      props: {
+        isOpen: true,
+        record: {
+          id: 207,
+          userId: 10,
+          requestedBy: "Pedro Penduko",
+          purpose: "Regional Calibration Deployment",
+          amount: 8000,
+          balance: 8150,
+          date: "2026-10-02",
+          dueDate: "2026-10-16",
+          contract_id: 44,
+          client_name: "Acme Lab Corp",
+          status: "disbursed",
+          penalties: [
+            { id: 1, penalty_amount: 50 },
+            { id: 2, amount: 100 },
+          ],
+        },
+      },
+      global: { stubs: baseStubs },
+    });
+
+    const summary = wrapper.find('[data-testid="modal-summary-section"]');
+    expect(summary.exists()).toBe(true);
+    const summaryText = summary.text();
+    expect(summaryText).toContain("Pedro Penduko");
+    expect(summaryText).toContain("Oct 2, 2026");
+    expect(summaryText).toContain("Oct 16, 2026");
+    expect(summaryText).toContain("Regional Calibration Deployment");
+    expect(summaryText).toContain("Acme Lab Corp (Contract #44)");
+    expect(summaryText).toContain("₱8,000.00");
+    expect(summaryText).toContain("Overdue Penalty");
+    expect(summaryText).toContain("₱150.00");
+    expect(summaryText).toContain("₱8,150.00");
+
+    // Without penalties, Overdue Penalty row is omitted
+    await wrapper.setProps({
+      record: {
+        id: 208,
+        userId: 10,
+        requestedBy: "Pedro Penduko",
+        purpose: "Standard Visit",
+        amount: 4000,
+        balance: 4000,
+        date: "2026-10-02",
+        dueDate: "2026-10-16",
+        status: "pending",
+        penalties: [],
+      },
+    });
+
+    expect(wrapper.find('[data-testid="modal-summary-section"]').text()).not.toContain(
+      "Overdue Penalty",
+    );
   });
 });
 
