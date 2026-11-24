@@ -14,7 +14,7 @@ vi.mock("@/stores/auth", () => ({
   useAuthStore: () => authState,
 }));
 
-describe("ReimbursementDetailsModal — Custom User Comment Display", () => {
+describe("ReimbursementDetailsModal — Notes & Explanation Section", () => {
   it("displays the custom user comment on admin side when present", () => {
     const wrapper = mount(ReimbursementDetailsModal, {
       props: {
@@ -37,11 +37,41 @@ describe("ReimbursementDetailsModal — Custom User Comment Display", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("User Comment");
-    expect(wrapper.text()).toContain("Lunch meeting with clients from Acme Corp.");
+    const notesSection = wrapper.find('[data-testid="modal-notes-section"]');
+    expect(notesSection.exists()).toBe(true);
+    expect(notesSection.text()).toContain("User Comment");
+    expect(notesSection.text()).toContain("Lunch meeting with clients from Acme Corp.");
   });
 
-  it("displays fallback message when user_comment is empty or null", () => {
+  it("displays Reviewer / Admin Note when admin_notes or rejection_comment is present", () => {
+    const wrapper = mount(ReimbursementDetailsModal, {
+      props: {
+        viewingRecord: {
+          id: 12,
+          status: "revise",
+          description: "Site visit",
+          user_comment: null,
+          rejection_comment: "Attach clearer VAT TIN photo.",
+          user: { name: "Jane Smith" },
+          amount: 950,
+          receipts: [],
+        },
+        modalLoading: false,
+      },
+      global: {
+        stubs: {
+          StatusBadge: true,
+          BaseReceiptImage: true,
+        },
+      },
+    });
+
+    const notesSection = wrapper.find('[data-testid="modal-notes-section"]');
+    expect(notesSection.exists()).toBe(true);
+    expect(notesSection.text()).toContain("Attach clearer VAT TIN photo.");
+  });
+
+  it("displays 'No notes provided' fallback when neither user_comment nor reviewer note is present", () => {
     const wrapper = mount(ReimbursementDetailsModal, {
       props: {
         viewingRecord: {
@@ -49,6 +79,8 @@ describe("ReimbursementDetailsModal — Custom User Comment Display", () => {
           status: "pending",
           description: "Office Supplies",
           user_comment: null,
+          admin_notes: null,
+          rejection_comment: null,
           user: { name: "Jane Smith" },
           amount: 500,
           receipts: [],
@@ -63,11 +95,12 @@ describe("ReimbursementDetailsModal — Custom User Comment Display", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("User Comment");
-    expect(wrapper.text()).toContain("No comment provided");
+    const notesSection = wrapper.find('[data-testid="modal-notes-section"]');
+    expect(notesSection.exists()).toBe(true);
+    expect(notesSection.text()).toContain("No notes provided");
   });
 
-  it("renders Export Report button beside Receipts header and triggers reimbursement report export (G2-055, G2-058)", async () => {
+  it("renders Export Report button beside Receipts header in default Receipts tab (G2-055, G2-058)", () => {
     const wrapper = mount(ReimbursementDetailsModal, {
       props: {
         viewingRecord: {
@@ -92,6 +125,181 @@ describe("ReimbursementDetailsModal — Custom User Comment Display", () => {
     const exportBtn = wrapper.find('[data-testid="export-reimbursement-report-btn"]');
     expect(exportBtn.exists()).toBe(true);
     expect(exportBtn.text()).toContain("Export Report");
+    expect(wrapper.text()).toContain("No receipts attached.");
+  });
+});
+
+describe("ReimbursementDetailsModal — Unified Vertical Layout, Tabs & Summary", () => {
+  it("enforces vertical order: Alert Banner -> Roadmap -> BaseModalTabs -> Notes -> Summary", () => {
+    authState.isAdmin = false;
+    authState.user = { id: 10, name: "Employee User" };
+
+    const wrapper = mount(ReimbursementDetailsModal, {
+      props: {
+        viewingRecord: {
+          id: 77,
+          status: "revise",
+          user_id: 10,
+          user: { id: 10, name: "Employee User" },
+          amount: 3200,
+          admin_notes: "Please attach itemized OR.",
+          vendor_audit_required: true,
+          unverified_vendors: ["Corner Store"],
+          receipts: [],
+          audit_trail: [],
+        },
+        modalLoading: false,
+      },
+      global: {
+        stubs: {
+          StatusBadge: true,
+          BaseReceiptImage: true,
+        },
+      },
+    });
+
+    const html = wrapper.html();
+    const bannerIdx = html.indexOf("Needs Revision");
+    const auditBannerIdx = html.indexOf("[Unverified Vendor — Secondary Accounting Audit Required]");
+    const roadmapIdx = html.indexOf('aria-label="Reimbursement Timeline"');
+    const tabsIdx = html.indexOf('data-testid="modal-tab-receipts"');
+    const notesIdx = html.indexOf('data-testid="modal-notes-section"');
+    const summaryIdx = html.indexOf('data-testid="modal-summary-section"');
+
+    expect(bannerIdx).toBeGreaterThan(-1);
+    expect(auditBannerIdx).toBeGreaterThan(-1);
+    expect(roadmapIdx).toBeGreaterThan(bannerIdx);
+    expect(roadmapIdx).toBeGreaterThan(auditBannerIdx);
+    expect(tabsIdx).toBeGreaterThan(roadmapIdx);
+    expect(notesIdx).toBeGreaterThan(tabsIdx);
+    expect(summaryIdx).toBeGreaterThan(notesIdx);
+  });
+
+  it("switches between Receipts, Report Attachment, and Audit Trail tabs and resets to Receipts when viewingRecord changes", async () => {
+    authState.isAdmin = true;
+    authState.user = { id: "admin-1", name: "Admin User" };
+
+    const wrapper = mount(ReimbursementDetailsModal, {
+      props: {
+        viewingRecord: {
+          id: 88,
+          status: "pending",
+          user: { name: "Alex Cruz" },
+          amount: 1200,
+          receipts: [
+            {
+              id: "r-1",
+              vendor_name: "Jollibee",
+              invoice_number: "INV-001",
+              total_amount: 1200,
+              currency: "PHP",
+              status: "verified",
+            },
+          ],
+          audit_trail: [
+            {
+              id: "t-1",
+              action_type: "CLAIM_SUBMITTED",
+              label: "Claim Submitted via Portal",
+              actor_name: "Alex Cruz",
+              created_at: "2026-10-20T08:00:00Z",
+            },
+          ],
+        },
+        modalLoading: false,
+      },
+      global: {
+        stubs: {
+          StatusBadge: true,
+          BaseReceiptImage: true,
+        },
+      },
+    });
+
+    const receiptsTab = wrapper.find('[data-testid="modal-tab-receipts"]');
+    const reportTab = wrapper.find('[data-testid="modal-tab-report"]');
+    const auditTab = wrapper.find('[data-testid="modal-tab-audit"]');
+
+    expect(receiptsTab.exists()).toBe(true);
+    expect(receiptsTab.text()).toContain("Receipts");
+    expect(receiptsTab.text()).toContain("1");
+    expect(reportTab.text()).toContain("Report Attachment");
+    expect(auditTab.text()).toContain("Audit Trail");
+    expect(auditTab.text()).toContain("1");
+
+    // Default tab is receipts
+    expect(wrapper.text()).toContain("Jollibee");
+    expect(wrapper.text()).not.toContain("No report attachment uploaded.");
+    expect(wrapper.text()).not.toContain("Claim Submitted via Portal");
+
+    // Switch to report tab (empty state)
+    await reportTab.trigger("click");
+    expect(wrapper.text()).toContain("No report attachment uploaded.");
+    expect(wrapper.find('[data-testid="modal-notes-section"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="modal-summary-section"]').exists()).toBe(true);
+
+    // Switch to audit tab
+    await auditTab.trigger("click");
+    expect(wrapper.text()).toContain("Claim Submitted via Portal");
+    expect(wrapper.find('[data-testid="modal-notes-section"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="modal-summary-section"]').exists()).toBe(true);
+
+    // Changing viewingRecord resets activeTab back to 'receipts'
+    await wrapper.setProps({
+      viewingRecord: {
+        id: 89,
+        status: "pending",
+        user: { name: "Bea Lim" },
+        amount: 450,
+        receipts: [],
+        audit_trail: [],
+      },
+    });
+    expect(receiptsTab.attributes("aria-selected")).toBe("true");
+    expect(wrapper.text()).toContain("No receipts attached.");
+  });
+
+  it("renders consolidated metadata and financial breakdown in Summary section with Medium Date format", () => {
+    const wrapper = mount(ReimbursementDetailsModal, {
+      props: {
+        viewingRecord: {
+          id: 90,
+          status: "approved",
+          user: { name: "Carlos Reyes" },
+          event_type: "Client Presentation",
+          contract_id: 501,
+          client_name: "Globe Business",
+          ticket_id: 77,
+          ticket_number: "TKT-0077",
+          approved_by: "Maria Santos",
+          approved_at: "2026-10-20T09:15:00Z",
+          amount: 4500,
+          currency: "PHP",
+          receipts: [{ id: 1, total_amount: 2000 }, { id: 2, total_amount: 2500 }],
+        },
+        modalLoading: false,
+      },
+      global: {
+        stubs: {
+          StatusBadge: true,
+          BaseReceiptImage: true,
+        },
+      },
+    });
+
+    const summary = wrapper.find('[data-testid="modal-summary-section"]');
+    expect(summary.exists()).toBe(true);
+    expect(summary.text()).toContain("Carlos Reyes");
+    expect(summary.text()).toContain("Client Presentation");
+    expect(summary.text()).toContain("Globe Business (Contract #501)");
+    expect(summary.text()).toContain("Linked Support Ticket (TS)");
+    expect(summary.text()).toContain("Ticket TKT-0077");
+    expect(summary.text()).toContain("Maria Santos");
+    expect(summary.text()).toContain("Oct 20, 2026");
+    expect(summary.text()).toContain("Receipt Count");
+    expect(summary.text()).toContain("2");
+    expect(summary.text()).toContain("Total Claim Amount");
+    expect(summary.text()).toContain("4,500.00");
   });
 });
 
@@ -125,7 +333,7 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
 
     expect(wrapper.text()).toContain("Needs Revision");
     expect(wrapper.text()).toContain("Please upload official receipts.");
-    const editBtn = wrapper.find("button.bg-orange-500");
+    const editBtn = wrapper.find('[data-testid="edit-resubmit-btn"]');
     expect(editBtn.exists()).toBe(true);
     expect(editBtn.text()).toContain("Edit & Resubmit");
 
@@ -217,7 +425,7 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
       },
     });
 
-    const editBtn = wrapper.find("button.bg-orange-500");
+    const editBtn = wrapper.find('[data-testid="edit-resubmit-btn"]');
     expect(editBtn.exists()).toBe(true);
     expect(editBtn.text()).toContain("Edit & Resubmit");
 
@@ -226,7 +434,7 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
     expect(wrapper.emitted("edit")[0][0]).toEqual(expect.objectContaining({ id: 102 }));
   });
 
-  it("renders BaseAuditTrail section with audit events", () => {
+  it("renders BaseAuditTrail section with audit events inside Audit Trail tab", async () => {
     const wrapper = mount(ReimbursementDetailsModal, {
       props: {
         viewingRecord: {
@@ -240,7 +448,7 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
             {
               id: "trail-1",
               action_type: "CLAIM_SUBMITTED",
-              label: "Submitted",
+              label: "Submitted for Finance Review",
               actor_name: "Jane Doe",
               created_at: "2026-10-20T08:00:00Z",
             },
@@ -255,12 +463,18 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
       },
     });
 
+    expect(wrapper.text()).not.toContain("Submitted for Finance Review");
+    await wrapper.find('[data-testid="modal-tab-audit"]').trigger("click");
     expect(wrapper.text()).toContain("Audit Trail");
     expect(wrapper.text()).toContain("Jane Doe");
+    expect(wrapper.text()).toContain("Submitted for Finance Review");
   });
 
   describe("Admin Modal Button Sizing Guardrails", () => {
     it("sizes Actions select and Approve Claim button intrinsically with sm:justify-end (no flex-1)", () => {
+      authState.isAdmin = true;
+      authState.user = { id: "admin-1", name: "Admin User" };
+
       const wrapper = mount(ReimbursementDetailsModal, {
         props: {
           viewingRecord: {
@@ -283,7 +497,7 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
       expect(footer.exists()).toBe(true);
       expect(footer.classes()).toContain("sm:justify-end");
 
-      const approveBtn = wrapper.findAll("button").find(b => b.text().includes("Approve Claim"));
+      const approveBtn = wrapper.findAll("button").find((b) => b.text().includes("Approve Claim"));
       expect(approveBtn).toBeDefined();
       expect(approveBtn.classes()).not.toContain("flex-1");
       expect(approveBtn.classes()).toContain("px-5");
@@ -293,6 +507,9 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
     });
 
     it("sizes Grant Claim button intrinsically with sm:w-auto and px-5 in approved state", () => {
+      authState.isAdmin = true;
+      authState.user = { id: "admin-1", name: "Admin User" };
+
       const wrapper = mount(ReimbursementDetailsModal, {
         props: {
           viewingRecord: {
@@ -311,15 +528,15 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
         },
       });
 
-      const grantBtn = wrapper.findAll("button").find(b => b.text().includes("Grant Claim"));
+      const grantBtn = wrapper.findAll("button").find((b) => b.text().includes("Grant Claim"));
       expect(grantBtn).toBeDefined();
       expect(grantBtn.classes()).toContain("px-5");
       expect(grantBtn.classes()).toContain("sm:w-auto");
     });
   });
 
-  describe("Report Preview & Template PDF Download", () => {
-    it("opens SbsiReportPreviewModal when Preview Report button is clicked", async () => {
+  describe("Report Preview & Template PDF Download (Report Attachment Tab)", () => {
+    it("opens SbsiReportPreviewModal when Preview Report button is clicked in Report tab", async () => {
       const templateData = { type: "reimbursement", purpose: "Field work" };
       const wrapper = mount(ReimbursementDetailsModal, {
         props: {
@@ -341,9 +558,14 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
         },
       });
 
+      await wrapper.find('[data-testid="modal-tab-report"]').trigger("click");
+
       const previewBtn = wrapper.find('[data-testid="preview-report-btn"]');
       expect(previewBtn.exists()).toBe(true);
       expect(previewBtn.text()).toContain("Preview Report");
+
+      const downloadLink = wrapper.find('a[href="https://example.com/report.pdf"]');
+      expect(downloadLink.exists()).toBe(true);
 
       await previewBtn.trigger("click");
       const previewModal = wrapper.findComponent(SbsiReportPreviewModal);
@@ -376,6 +598,8 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
           },
         },
       });
+
+      await wrapper.find('[data-testid="modal-tab-report"]').trigger("click");
 
       const downloadBtn = wrapper.find('[data-testid="download-template-report-btn"]');
       expect(downloadBtn.exists()).toBe(true);
@@ -484,7 +708,7 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
         },
       });
 
-      expect(wrapper.text()).toContain("RMB-2026-00042");
+      expect(wrapper.text()).not.toContain("RMB-2026-00042");
       expect(wrapper.text()).toContain("From TS");
       expect(wrapper.text()).toContain("Ticket TKT-0077");
       expect(wrapper.text()).toContain("Linked Support Ticket (TS)");

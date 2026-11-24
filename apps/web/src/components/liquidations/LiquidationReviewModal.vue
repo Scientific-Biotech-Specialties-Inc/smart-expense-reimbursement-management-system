@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { X, ShieldCheck, Eye, FileText, Download } from "lucide-vue-next";
 import { formatPeso, formatDate } from "@/utils/formatters";
 import {
@@ -8,6 +8,7 @@ import {
 } from "@/utils/liquidationPenalties";
 import { downloadSbsiReportPdf } from "@/utils/sbsiPdfGenerator";
 import BaseButton from "@/components/base/BaseButton.vue";
+import BaseModalTabs from "@/components/base/BaseModalTabs.vue";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
 import ReceiptImagePreview from "@/components/base/ReceiptImagePreview.vue";
@@ -62,6 +63,47 @@ const liqStore = useLiquidationStore();
 const { isExporting, exportReport } = useReportExport();
 
 const isReportPreviewOpen = ref(false);
+const activeTab = ref("receipts");
+
+watch(
+  () => [props.reviewingCase?.id, props.isOpen],
+  ([nextId, open], [prevId, wasOpen] = []) => {
+    if ((open && !wasOpen) || nextId !== prevId) {
+      activeTab.value = "receipts";
+    }
+  },
+);
+
+const auditTrailItems = computed(() => props.reviewingCase?.audit_trail || []);
+
+const modalTabs = computed(() => [
+  { key: "receipts", label: "Receipts", count: props.reviewReceipts.length },
+  { key: "report", label: "Report Attachment" },
+  { key: "audit", label: "Audit Trail", count: auditTrailItems.value.length },
+]);
+
+const applicantExplanation = computed(() =>
+  String(
+    props.reviewingCase?.shortfallExplanation ??
+      props.reviewingCase?.shortfall_explanation ??
+      "",
+  ).trim(),
+);
+
+const reviewerAdminNote = computed(() =>
+  String(
+    props.reviewingCase?.adminNote ?? props.reviewingCase?.admin_note ?? "",
+  ).trim(),
+);
+
+const reviewPurpose = computed(() =>
+  String(
+    props.reviewingCase?.purpose ||
+      props.reviewingCase?.cash_advance?.purpose ||
+      props.reviewingCase?.cashAdvance?.purpose ||
+      "",
+  ).trim(),
+);
 const resolvedTemplateData = computed(
   () =>
     props.reviewingCase?.reportTemplateData ||
@@ -241,8 +283,9 @@ function handleRoadmapNavigate(payload) {
         <div class="flex-1 overflow-y-auto px-6 py-5 space-y-5">
           <div v-if="String(reviewStatus).toLowerCase() === 'revise'" class="p-3 rounded-lg border border-orange-200 bg-orange-50">
             <p class="text-[11px] text-orange-600 uppercase tracking-wide font-bold">Needs Revision — Attempt {{ reviewingCase.revision_count || 1 }}/3</p>
-            <p class="text-sm text-orange-800 mt-1">{{ reviewingCase.adminNote || 'Please revise per admin feedback.' }}</p>
+            <p class="text-sm text-orange-800 mt-1">{{ reviewingCase.adminNote || reviewingCase.admin_note || 'Please revise per admin feedback.' }}</p>
           </div>
+
           <!-- UNIFIED 8-step Roadmap -->
           <UnifiedRoadmapStepper
             :cash-advance="roadmapCashAdvance"
@@ -254,166 +297,286 @@ function handleRoadmapNavigate(payload) {
             @navigate="handleRoadmapNavigate"
           />
 
-          <!-- Details Grid -->
-          <section class="grid grid-cols-2 gap-x-6 gap-y-3 pt-4 border-t border-slate-100">
-            <div>
-              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Employee Name</p>
-              <p class="text-sm text-slate-700">{{ reviewingCase.requestorName || "--" }}</p>
-            </div>
-            <div>
-              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Due Date</p>
-              <p class="text-sm text-slate-700">{{ formatDateOnly(reviewingCase.dueDate) }}</p>
-            </div>
-            <div>
-              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Outstanding Balance</p>
-              <p class="text-sm font-semibold text-primary">{{ formatPeso(reviewOutstandingBalance) }}</p>
-            </div>
-            <div>
-              <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Advance Date</p>
-              <p class="text-sm text-slate-700">{{ formatDateOnly(reviewingCase.dateOfAdvances) }}</p>
-            </div>
-            <template v-if="reviewPenaltyTotal > 0">
-              <div>
-                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Overdue Penalty</p>
-                <p class="text-sm font-semibold text-danger">+{{ formatPeso(reviewPenaltyTotal) }}</p>
+          <!-- Tabs + Active Panel -->
+          <div class="space-y-4">
+            <BaseModalTabs v-model="activeTab" :tabs="modalTabs" />
+
+            <!-- Receipts Tab -->
+            <div
+              v-show="activeTab === 'receipts'"
+              data-testid="modal-panel-receipts"
+            >
+              <div class="flex items-center justify-between gap-3 mb-3">
+                <h3 class="text-sm font-medium text-slate-700">
+                  Receipts ({{ reviewReceipts.length }})
+                </h3>
+                <BaseButton
+                  data-testid="export-admin-liquidation-report-btn"
+                  variant="secondary"
+                  size="sm"
+                  type="button"
+                  :loading="isExporting"
+                  :disabled="isExporting"
+                  @click="exportReport('liquidation', reviewingCase.databaseId ?? reviewingCase.id)"
+                >
+                  <Download class="w-3.5 h-3.5" />
+                  <span>{{ isExporting ? "Exporting..." : "Export Report" }}</span>
+                </BaseButton>
               </div>
-              <div>
-                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">Total Balance (incl. Penalty)</p>
-                <p class="text-sm font-semibold text-slate-800">{{ formatPeso(reviewTotalAdvanceBalance) }}</p>
-              </div>
-            </template>
-          </section>
 
-          <!-- Receipts -->
-          <div>
-            <div class="flex items-center justify-between gap-3 mb-3">
-              <h3 class="text-sm font-medium text-slate-700">
-                Receipts ({{ reviewReceipts.length }})
-              </h3>
-              <BaseButton
-                data-testid="export-admin-liquidation-report-btn"
-                variant="secondary"
-                size="sm"
-                type="button"
-                :loading="isExporting"
-                :disabled="isExporting"
-                @click="exportReport('liquidation', reviewingCase.databaseId ?? reviewingCase.id)"
+              <div
+                v-if="reviewReceipts.length > 0"
+                class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
               >
-                <Download class="w-3.5 h-3.5" />
-                <span>{{ isExporting ? "Exporting..." : "Export Report" }}</span>
-              </BaseButton>
-            </div>
+                <article
+                  v-for="(receipt, idx) in reviewReceipts"
+                  :key="receipt.id"
+                  class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col justify-between gap-3 shadow-sm"
+                >
+                  <!-- Reusable Receipt Image Preview (with zoom & clean title) -->
+                  <ReceiptImagePreview
+                    :index="idx + 1"
+                    :file-name="receipt.fileName || receipt.name || receipt.merchantName || `receipt_${receipt.id}`"
+                    :src="receipt.filePath ? getFileUrl(receipt.filePath) : (receipt.thumbnail || receipt.preview || receipt.file_url)"
+                    :file-type="receipt.fileType"
+                    :alt="receipt.merchantName || 'Receipt'"
+                    :enable-zoom="true"
+                    :show-badge="true"
+                    :show-delete-button="false"
+                    :receipt="receipt"
+                  />
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <article
-                v-for="(receipt, idx) in reviewReceipts"
-                :key="receipt.id"
-                class="rounded-xl border border-slate-200 bg-white p-4 flex flex-col justify-between gap-3 shadow-sm"
-              >
-                <!-- Reusable Receipt Image Preview (with zoom & clean title) -->
-                <ReceiptImagePreview
-                  :index="idx + 1"
-                  :file-name="receipt.fileName || receipt.name || receipt.merchantName || `receipt_${receipt.id}`"
-                  :src="receipt.filePath ? getFileUrl(receipt.filePath) : (receipt.thumbnail || receipt.preview || receipt.file_url)"
-                  :file-type="receipt.fileType"
-                  :alt="receipt.merchantName || 'Receipt'"
-                  :enable-zoom="true"
-                  :show-badge="true"
-                  :show-delete-button="false"
-                  :receipt="receipt"
-                />
-
-                <!-- Receipt Info & Details Action -->
-                <div class="space-y-2.5 pt-2 border-t border-slate-100">
-                  <div class="flex justify-between items-start gap-2">
-                    <div class="min-w-0">
-                      <p class="text-sm font-semibold text-slate-800 truncate">
-                        {{ receipt.merchantName || "Receipt" }}
-                      </p>
-                      <p class="text-xs text-slate-400 mt-0.5">
-                        {{ receipt.location || "--" }}
-                      </p>
+                  <!-- Receipt Info & Details Action -->
+                  <div class="space-y-2.5 pt-2 border-t border-slate-100">
+                    <div class="flex justify-between items-start gap-2">
+                      <div class="min-w-0">
+                        <p class="text-sm font-semibold text-slate-800 truncate">
+                          {{ receipt.merchantName || "Receipt" }}
+                        </p>
+                        <p class="text-xs text-slate-400 mt-0.5">
+                          {{ receipt.location || "--" }}
+                        </p>
+                      </div>
+                      <StatusBadge :status="receipt.decision === 'accepted' ? 'approved' : receipt.decision" />
                     </div>
-                    <StatusBadge :status="receipt.decision === 'accepted' ? 'approved' : receipt.decision" />
-                  </div>
 
-                  <div class="flex justify-between items-center">
-                    <span class="text-[10px] font-medium uppercase tracking-wide text-primary bg-primary/5 px-2 py-0.5 rounded">
-                      {{ receipt.category || "General" }}
-                    </span>
-                    <span class="text-sm font-semibold text-slate-800">
-                      {{ formatPeso(receipt.amount || 0) }}
-                    </span>
-                  </div>
+                    <div class="flex justify-between items-center">
+                      <span class="text-[10px] font-medium uppercase tracking-wide text-primary bg-primary/5 px-2 py-0.5 rounded">
+                        {{ receipt.category || "General" }}
+                      </span>
+                      <span class="text-sm font-semibold text-slate-800">
+                        {{ formatPeso(receipt.amount || 0) }}
+                      </span>
+                    </div>
 
-                  <button
-                    class="w-full py-2 bg-slate-50 text-slate-600 text-xs font-medium rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center gap-1.5"
+                    <button
+                      class="w-full py-2 bg-slate-50 text-slate-600 text-xs font-medium rounded-lg hover:bg-slate-100 transition-colors flex items-center justify-center gap-1.5"
+                      type="button"
+                      @click="$emit('view-receipt', receipt)"
+                    >
+                      <Eye class="w-3.5 h-3.5" />
+                      Details
+                    </button>
+                  </div>
+                </article>
+              </div>
+
+              <div
+                v-else
+                class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-400"
+              >
+                No receipts attached.
+              </div>
+            </div>
+
+            <!-- Report Attachment Tab -->
+            <div
+              v-show="activeTab === 'report'"
+              data-testid="modal-panel-report"
+            >
+              <div
+                v-if="hasReportAttachment"
+                class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 space-y-3"
+              >
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide">
+                  Report Attachment
+                </p>
+                <div class="flex flex-wrap items-center gap-3">
+                  <BaseButton
+                    data-testid="preview-liquidation-report-btn"
+                    variant="outline"
+                    size="sm"
                     type="button"
-                    @click="$emit('view-receipt', receipt)"
+                    @click="isReportPreviewOpen = true"
                   >
                     <Eye class="w-3.5 h-3.5" />
-                    Details
-                  </button>
+                    <span>Preview Report</span>
+                  </BaseButton>
+                  <a
+                    v-if="reviewingCase.reportUrl || reviewingCase.reportFilePath"
+                    :href="reviewingCase.reportUrl || getFileUrl(reviewingCase.reportFilePath)"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="download-liquidation-report-link"
+                    class="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+                  >
+                    <FileText class="w-3.5 h-3.5" />
+                    <span>View / Download Report</span>
+                    <Download class="w-3 h-3" />
+                  </a>
+                  <BaseButton
+                    v-else-if="resolvedTemplateData"
+                    data-testid="download-liquidation-report-pdf-btn"
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    @click="handleFallbackPdfDownload"
+                  >
+                    <Download class="w-3.5 h-3.5" />
+                    <span>Download PDF</span>
+                  </BaseButton>
                 </div>
-              </article>
+              </div>
+
+              <div
+                v-else
+                class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-400"
+              >
+                No report attachment uploaded.
+              </div>
+            </div>
+
+            <!-- Audit Trail Tab -->
+            <div
+              v-show="activeTab === 'audit'"
+              data-testid="modal-panel-audit"
+            >
+              <BaseAuditTrail
+                :trail="auditTrailItems"
+                :entity-title="`Liquidation-#${reviewingCase.id}`"
+              />
             </div>
           </div>
 
-          <!-- Admin Notes -->
-          <div
-            v-if="reviewingCase.adminNote"
-            class="pt-2 border-t border-slate-100"
+          <!-- Reviewer Note / Explanation Section -->
+          <section
+            data-testid="modal-notes-section"
+            class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 space-y-3"
           >
-            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">Admin Notes</p>
-            <p class="text-sm text-slate-700">{{ reviewingCase.adminNote }}</p>
-          </div>
+            <h3 class="text-sm font-semibold text-slate-800">
+              Reviewer Note / Explanation
+            </h3>
 
-          <!-- Report Attachment -->
-          <div v-if="hasReportAttachment" class="pt-2">
-            <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-2">Report Attachment</p>
-            <div class="flex flex-wrap items-center gap-3">
-              <BaseButton
-                data-testid="preview-liquidation-report-btn"
-                variant="outline"
-                size="sm"
-                type="button"
-                @click="isReportPreviewOpen = true"
+            <template v-if="applicantExplanation || reviewerAdminNote">
+              <div v-if="applicantExplanation" class="space-y-1">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide">
+                  Applicant Explanation
+                </p>
+                <p class="text-sm leading-relaxed text-slate-700">
+                  {{ applicantExplanation }}
+                </p>
+              </div>
+              <div
+                v-if="reviewerAdminNote"
+                class="space-y-1"
+                :class="{ 'pt-2.5 border-t border-slate-100': applicantExplanation }"
               >
-                <Eye class="w-3.5 h-3.5" />
-                <span>Preview Report</span>
-              </BaseButton>
-              <a
-                v-if="reviewingCase.reportUrl || reviewingCase.reportFilePath"
-                :href="reviewingCase.reportUrl || getFileUrl(reviewingCase.reportFilePath)"
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid="download-liquidation-report-link"
-                class="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-              >
-                <FileText class="w-3.5 h-3.5" />
-                <span>View / Download Report</span>
-                <Download class="w-3 h-3" />
-              </a>
-              <BaseButton
-                v-else-if="resolvedTemplateData"
-                data-testid="download-liquidation-report-pdf-btn"
-                variant="ghost"
-                size="sm"
-                type="button"
-                @click="handleFallbackPdfDownload"
-              >
-                <Download class="w-3.5 h-3.5" />
-                <span>Download PDF</span>
-              </BaseButton>
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide">
+                  Admin Notes
+                </p>
+                <p class="text-sm leading-relaxed text-slate-700">
+                  {{ reviewerAdminNote }}
+                </p>
+              </div>
+            </template>
+
+            <p v-else class="text-sm italic text-slate-400">
+              No notes provided
+            </p>
+          </section>
+
+          <!-- Summary Section -->
+          <section
+            data-testid="modal-summary-section"
+            class="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 sm:p-5 space-y-4"
+          >
+            <h3 class="text-sm font-semibold text-slate-800">
+              Liquidation Summary
+            </h3>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
+              <div>
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">
+                  Employee Name
+                </p>
+                <p class="text-sm font-medium text-slate-700">
+                  {{ reviewingCase.requestorName || "--" }}
+                </p>
+              </div>
+              <div v-if="reviewPurpose">
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">
+                  Purpose
+                </p>
+                <p class="text-sm font-medium text-slate-700">
+                  {{ reviewPurpose }}
+                </p>
+              </div>
+              <div>
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">
+                  Advance Date
+                </p>
+                <p class="text-sm text-slate-700">
+                  {{ formatDateOnly(reviewingCase.dateOfAdvances || roadmapCashAdvance?.date) }}
+                </p>
+              </div>
+              <div>
+                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">
+                  Due Date
+                </p>
+                <p class="text-sm text-slate-700">
+                  {{ formatDateOnly(reviewingCase.dueDate || roadmapCashAdvance?.expected_liquidation_date) }}
+                </p>
+              </div>
             </div>
-          </div>
 
-          <!-- Audit Trail Section -->
-          <BaseAuditTrail
-            :trail="reviewingCase.audit_trail || []"
-            :entity-title="`Liquidation-#${reviewingCase.id}`"
-            class="mt-4"
-          />
+            <div class="pt-3 border-t border-slate-200 space-y-2.5">
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-sm text-slate-600">Cash Advance Amount</span>
+                <span class="text-sm font-semibold text-slate-700">
+                  {{ formatPeso(reviewingCase.cashAdvanceAmount || 0) }}
+                </span>
+              </div>
+              <div
+                v-if="reviewPenaltyTotal > 0"
+                class="flex items-center justify-between gap-3"
+              >
+                <span class="text-sm text-slate-600">Overdue Penalty</span>
+                <span class="text-sm font-semibold text-danger">
+                  +{{ formatPeso(reviewPenaltyTotal) }}
+                </span>
+              </div>
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-sm text-slate-600">
+                  {{ reviewPenaltyTotal > 0 ? "Total Balance (incl. Penalty)" : "Total Balance" }}
+                </span>
+                <span class="text-sm font-semibold text-slate-800">
+                  {{ formatPeso(reviewTotalAdvanceBalance) }}
+                </span>
+              </div>
+              <div class="flex items-center justify-between gap-3">
+                <span class="text-sm text-slate-600">Accepted Receipts Total</span>
+                <span class="text-sm font-semibold text-primary">
+                  {{ formatPeso(acceptedReviewTotal) }}
+                </span>
+              </div>
+              <div class="flex items-center justify-between gap-3 pt-2 border-t border-slate-200">
+                <span class="text-sm font-medium text-slate-700">Outstanding Balance</span>
+                <span class="text-base font-bold text-primary">
+                  {{ formatPeso(reviewOutstandingBalance) }}
+                </span>
+              </div>
+            </div>
+          </section>
         </div>
 
         <!-- Footer -->

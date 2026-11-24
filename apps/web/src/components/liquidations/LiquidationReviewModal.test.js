@@ -350,4 +350,137 @@ describe("LiquidationReviewModal Header Chipsets", () => {
     const stepper = wrapper.findComponent({ name: "UnifiedRoadmapStepper" });
     expect(stepper.props("overpaymentAmount")).toBe(2250);
   });
+
+  it("enforces unified layout order (Roadmap -> Tabs -> Notes -> Summary), tab switching, empty states, and resets active tab on record change", async () => {
+    const wrapper = mount(LiquidationReviewModal, {
+      props: {
+        isOpen: true,
+        reviewingCase: {
+          id: "LIQ-301",
+          purpose: "Cebu Regional Audit",
+          cashAdvanceAmount: 4000,
+          outstandingBalance: 4000,
+          dueDate: "2026-10-25",
+          dateOfAdvances: "2026-10-18",
+          requestorName: "Maria Clara",
+          shortfallExplanation: "",
+          adminNote: "",
+          audit_trail: [
+            {
+              id: "ev-1",
+              action_type: "LIQUIDATION_SUBMITTED",
+              label: "Submitted",
+              actor_name: "Maria Clara",
+              created_at: "2026-10-20T09:00:00Z",
+            },
+          ],
+        },
+        reviewStatus: "under-review",
+        reviewOutstandingBalance: 1000,
+        acceptedReviewTotal: 3000,
+        reviewReceipts: [],
+        getFileUrl: () => "",
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: {
+            name: "UnifiedRoadmapStepper",
+            template: '<div data-testid="roadmap-stub" />',
+          },
+          ReceiptImagePreview: true,
+          BaseReceiptImage: true,
+          SbsiReportPreviewModal: true,
+        },
+      },
+    });
+
+    const tabReceipts = wrapper.find('[data-testid="modal-tab-receipts"]');
+    const tabReport = wrapper.find('[data-testid="modal-tab-report"]');
+    const tabAudit = wrapper.find('[data-testid="modal-tab-audit"]');
+    expect(tabReceipts.exists()).toBe(true);
+    expect(tabReport.exists()).toBe(true);
+    expect(tabAudit.exists()).toBe(true);
+    expect(tabReceipts.attributes("aria-selected")).toBe("true");
+
+    const panelReceipts = wrapper.find('[data-testid="modal-panel-receipts"]');
+    const panelReport = wrapper.find('[data-testid="modal-panel-report"]');
+    const panelAudit = wrapper.find('[data-testid="modal-panel-audit"]');
+    const notesSection = wrapper.find('[data-testid="modal-notes-section"]');
+    const summarySection = wrapper.find('[data-testid="modal-summary-section"]');
+
+    expect(panelReceipts.exists()).toBe(true);
+    expect(panelReport.exists()).toBe(true);
+    expect(panelAudit.exists()).toBe(true);
+    expect(notesSection.exists()).toBe(true);
+    expect(summarySection.exists()).toBe(true);
+
+    // Verify strict DOM order: Roadmap -> Tabs -> Notes -> Summary
+    const roadmapEl = wrapper.find('[data-testid="roadmap-stub"]').element;
+    const tabsEl = tabReceipts.element.closest('[role="tablist"]');
+    expect(
+      Boolean(roadmapEl.compareDocumentPosition(tabsEl) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
+    expect(
+      Boolean(tabsEl.compareDocumentPosition(notesSection.element) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
+    expect(
+      Boolean(
+        notesSection.element.compareDocumentPosition(summarySection.element) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ),
+    ).toBe(true);
+
+    // Default tab is receipts; empty state shown
+    expect(panelReceipts.element.style.display).not.toBe("none");
+    expect(panelReport.element.style.display).toBe("none");
+    expect(panelAudit.element.style.display).toBe("none");
+    expect(panelReceipts.text()).toContain("No receipts attached.");
+
+    // Switch to Report Attachment tab -> empty state when no report attached
+    await tabReport.trigger("click");
+    expect(tabReport.attributes("aria-selected")).toBe("true");
+    expect(panelReceipts.element.style.display).toBe("none");
+    expect(panelReport.element.style.display).not.toBe("none");
+    expect(panelReport.text()).toContain("No report attachment uploaded.");
+
+    // Switch to Audit Trail tab
+    await tabAudit.trigger("click");
+    expect(tabAudit.attributes("aria-selected")).toBe("true");
+    expect(panelReport.element.style.display).toBe("none");
+    expect(panelAudit.element.style.display).not.toBe("none");
+    expect(panelAudit.text()).toContain("Maria Clara");
+
+    // Notes section shows "No notes provided" when both notes are empty
+    expect(notesSection.text()).toContain("No notes provided");
+
+    // Summary section displays Medium Date format, Purpose, Employee Name, and financial breakdown
+    const summaryText = summarySection.text();
+    expect(summaryText).toContain("Maria Clara");
+    expect(summaryText).toContain("Cebu Regional Audit");
+    expect(summaryText).toContain("Oct 18, 2026");
+    expect(summaryText).toContain("Oct 25, 2026");
+    expect(summaryText).toContain("4,000.00");
+    expect(summaryText).toContain("3,000.00");
+    expect(summaryText).toContain("1,000.00");
+
+    // Changing reviewingCase resets active tab back to 'receipts' and renders notes when provided
+    await wrapper.setProps({
+      reviewingCase: {
+        id: "LIQ-302",
+        cashAdvanceAmount: 2500,
+        outstandingBalance: 2500,
+        dueDate: "2026-10-28",
+        dateOfAdvances: "2026-10-20",
+        requestorName: "Pedro Penduko",
+        shortfallExplanation: "Excess returned to cashier",
+        adminNote: "Verified receipt serial numbers",
+        audit_trail: [],
+      },
+    });
+
+    expect(tabReceipts.attributes("aria-selected")).toBe("true");
+    expect(panelReceipts.element.style.display).not.toBe("none");
+    expect(notesSection.text()).toContain("Excess returned to cashier");
+    expect(notesSection.text()).toContain("Verified receipt serial numbers");
+  });
 });

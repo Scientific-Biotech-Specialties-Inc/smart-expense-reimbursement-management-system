@@ -113,8 +113,8 @@ describe("PayoutDetailsModal", () => {
     const typeBadge = wrapper.find('[data-testid="payout-type-badge"]');
     expect(typeBadge.exists()).toBe(true);
     expect(typeBadge.text()).toContain("Cash Advance");
-    expect(wrapper.text()).toContain("Payout Details");
-    expect(wrapper.text()).toContain("Ref #25");
+    expect(wrapper.text()).not.toContain("Payout Details");
+    expect(wrapper.text()).toContain("₱1,500.00");
     expect(wrapper.text()).toContain("Oct 20, 2026");
     expect(wrapper.text()).toContain("Oct 21, 2026");
     expect(wrapper.text()).toContain("Oct 22, 2026");
@@ -190,5 +190,171 @@ describe("PayoutDetailsModal", () => {
     expect(wrapper.findComponent({ name: "BaseSignaturePad" }).exists()).toBe(false);
     expect(wrapper.find('[data-testid="acknowledge-payout-btn"]').exists()).toBe(false);
     expect(wrapper.text()).toContain("Awaiting Acknowledgement");
+  });
+
+  it("renders the 4-step Payout Roadmap accurately across awaiting, acknowledged, and date-fallback states", async () => {
+    const wrapper = mount(PayoutDetailsModal, {
+      props: {
+        record: samplePayout,
+        isAdmin: true,
+      },
+      global: {
+        stubs: {
+          StatusBadge: true,
+          BaseButton: true,
+          BaseSignaturePad: true,
+          BaseAuditTrail: true,
+        },
+      },
+    });
+
+    const stepper = wrapper.find('[data-testid="payout-roadmap-stepper"]');
+    expect(stepper.exists()).toBe(true);
+
+    const stepRequested = stepper.find('[data-testid="payout-step-requested"]');
+    const stepApproved = stepper.find('[data-testid="payout-step-approved"]');
+    const stepGranted = stepper.find('[data-testid="payout-step-granted"]');
+    const stepAcknowledged = stepper.find('[data-testid="payout-step-acknowledged"]');
+
+    expect(stepRequested.text()).toContain("Requested");
+    expect(stepRequested.text()).toContain("Oct 20, 2026");
+    expect(stepApproved.text()).toContain("Approved");
+    expect(stepApproved.text()).toContain("Oct 21, 2026");
+    expect(stepGranted.text()).toContain("Granted");
+    expect(stepGranted.text()).toContain("Oct 22, 2026");
+
+    expect(stepAcknowledged.attributes("aria-current")).toBe("step");
+    expect(stepAcknowledged.find(".bg-amber-400").exists()).toBe(true);
+    expect(stepAcknowledged.text()).toContain("Awaiting");
+
+    // Update to acknowledged with timestamp
+    await wrapper.setProps({
+      record: {
+        ...samplePayout,
+        acknowledged: true,
+        acknowledgedAt: "2026-10-23T09:00:00Z",
+      },
+    });
+
+    expect(stepAcknowledged.attributes("aria-current")).toBeUndefined();
+    expect(stepAcknowledged.find(".bg-emerald-500").exists()).toBe(true);
+    expect(stepAcknowledged.text()).toContain("Oct 23, 2026");
+
+    // Update to acknowledged without timestamp and missing dates for sublabel fallbacks
+    await wrapper.setProps({
+      record: {
+        id: 11,
+        amount: 500,
+        acknowledged: true,
+      },
+    });
+
+    expect(stepRequested.text()).toContain("Recorded");
+    expect(stepApproved.text()).toContain("Approved");
+    expect(stepGranted.text()).toContain("Disbursed");
+    expect(stepAcknowledged.text()).toContain("Signed");
+  });
+
+  it("switches between Signatures and Audit Trail tabs via BaseModalTabs and resets to Signatures when record changes", async () => {
+    const wrapper = mount(PayoutDetailsModal, {
+      props: {
+        record: samplePayout,
+        isAdmin: true,
+      },
+      global: {
+        stubs: {
+          StatusBadge: true,
+          BaseButton: true,
+          BaseSignaturePad: true,
+        },
+      },
+    });
+
+    const sigTabBtn = wrapper.find('[data-testid="modal-tab-signatures"]');
+    const auditTabBtn = wrapper.find('[data-testid="modal-tab-audit"]');
+    expect(sigTabBtn.exists()).toBe(true);
+    expect(auditTabBtn.exists()).toBe(true);
+    expect(sigTabBtn.attributes("aria-selected")).toBe("true");
+    expect(auditTabBtn.attributes("aria-selected")).toBe("false");
+    expect(auditTabBtn.text()).toContain("Audit Trail");
+    expect(auditTabBtn.text()).toContain("2");
+
+    const sigPanel = wrapper.find('[data-testid="payout-tab-panel-signatures"]');
+    const auditPanel = wrapper.find('[data-testid="payout-tab-panel-audit"]');
+    expect(sigPanel.element.style.display).not.toBe("none");
+    expect(auditPanel.element.style.display).toBe("none");
+
+    // Switch to Audit Trail tab
+    await auditTabBtn.trigger("click");
+    expect(sigTabBtn.attributes("aria-selected")).toBe("false");
+    expect(auditTabBtn.attributes("aria-selected")).toBe("true");
+    expect(sigPanel.element.style.display).toBe("none");
+    expect(auditPanel.element.style.display).not.toBe("none");
+
+    // Notes and Summary remain visible when on Audit Trail tab
+    expect(wrapper.find('[data-testid="modal-notes-section"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="modal-summary-section"]').exists()).toBe(true);
+
+    // Changing record resets active tab to signatures
+    await wrapper.setProps({
+      record: { ...samplePayout, id: 99 },
+    });
+    expect(sigTabBtn.attributes("aria-selected")).toBe("true");
+    expect(sigPanel.element.style.display).not.toBe("none");
+    expect(auditPanel.element.style.display).toBe("none");
+  });
+
+  it("enforces unified vertical layout order (Roadmap -> Tabs -> Notes -> Summary) and handles Notes & Summary content", async () => {
+    const wrapper = mount(PayoutDetailsModal, {
+      props: {
+        record: {
+          ...samplePayout,
+          notes: "Released via petty cash box #2",
+        },
+        isAdmin: true,
+      },
+      global: {
+        stubs: {
+          StatusBadge: true,
+          BaseButton: true,
+          BaseSignaturePad: true,
+          BaseAuditTrail: true,
+        },
+      },
+    });
+
+    const html = wrapper.html();
+    const roadmapIdx = html.indexOf('data-testid="payout-roadmap-stepper"');
+    const tabsIdx = html.indexOf('data-testid="modal-tab-signatures"');
+    const notesIdx = html.indexOf('data-testid="modal-notes-section"');
+    const summaryIdx = html.indexOf('data-testid="modal-summary-section"');
+
+    expect(roadmapIdx).toBeGreaterThan(-1);
+    expect(tabsIdx).toBeGreaterThan(roadmapIdx);
+    expect(notesIdx).toBeGreaterThan(tabsIdx);
+    expect(summaryIdx).toBeGreaterThan(notesIdx);
+
+    const notesSection = wrapper.find('[data-testid="modal-notes-section"]');
+    expect(notesSection.text()).toContain("Released via petty cash box #2");
+
+    const summarySection = wrapper.find('[data-testid="modal-summary-section"]');
+    expect(summarySection.text()).toContain("Oct 20, 2026");
+    expect(summarySection.text()).toContain("Oct 21, 2026");
+    expect(summarySection.text()).toContain("Oct 22, 2026");
+    expect(summarySection.text()).toContain("Cash");
+    expect(summarySection.text()).toContain("Approver Dan");
+    expect(summarySection.text()).toContain("Cashier Jane");
+    expect(summarySection.text()).toContain("1,500.00");
+
+    // Empty notes fallback
+    await wrapper.setProps({
+      record: {
+        ...samplePayout,
+        notes: "",
+        adminNotes: "",
+        description: "",
+      },
+    });
+    expect(notesSection.text()).toContain("No notes provided");
   });
 });

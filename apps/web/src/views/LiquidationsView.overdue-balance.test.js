@@ -48,6 +48,15 @@ const { mockItems, mockSettlements } = vi.hoisted(() => ({
           { days_overdue: 5, penalty_amount: 50 },
         ],
       },
+      audit_trail: [
+        {
+          id: "liq-audit-7",
+          action_type: "LIQUIDATION_SUBMITTED",
+          label: "Submitted",
+          actor_name: "Employee",
+          created_at: "2026-11-05T10:00:00Z",
+        },
+      ],
       receipts: [
         {
           id: 101,
@@ -183,5 +192,12 @@ describe("LiquidationsView — Penalty-inclusive balance & status", () => {
     expect(wrapper.vm.liquidationOutstandingBalance).toBe(250);
     expect(wrapper.vm.overpaymentAmount).toBe(0);
     expect(wrapper.vm.liquidationStatus).toBe("Incomplete");
+  });
+
+  it("preserves audit_trail on mapped sourceCases rows for LiquidationReviewModal", () => {
+    const wrapper = mountView();
+    const row = wrapper.vm.sourceCases[0];
+    expect(row.audit_trail).toHaveLength(1);
+    expect(row.audit_trail[0].id).toBe("liq-audit-7");
   });
 });
