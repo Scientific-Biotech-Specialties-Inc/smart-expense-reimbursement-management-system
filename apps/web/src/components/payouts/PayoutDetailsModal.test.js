@@ -113,8 +113,8 @@ describe("PayoutDetailsModal", () => {
     const typeBadge = wrapper.find('[data-testid="payout-type-badge"]');
     expect(typeBadge.exists()).toBe(true);
     expect(typeBadge.text()).toContain("Cash Advance");
-    expect(wrapper.text()).toContain("Payout Details");
-    expect(wrapper.text()).toContain("Ref #25");
+    expect(wrapper.text()).not.toContain("Payout Details");
+    expect(wrapper.text()).toContain("₱1,500.00");
     expect(wrapper.text()).toContain("Oct 20, 2026");
     expect(wrapper.text()).toContain("Oct 21, 2026");
     expect(wrapper.text()).toContain("Oct 22, 2026");

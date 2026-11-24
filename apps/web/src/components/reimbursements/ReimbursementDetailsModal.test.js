@@ -708,7 +708,7 @@ describe("ReimbursementDetailsModal — Edit & Resubmit button for revised reimb
         },
       });
 
-      expect(wrapper.text()).toContain("RMB-2026-00042");
+      expect(wrapper.text()).not.toContain("RMB-2026-00042");
       expect(wrapper.text()).toContain("From TS");
       expect(wrapper.text()).toContain("Ticket TKT-0077");
       expect(wrapper.text()).toContain("Linked Support Ticket (TS)");
