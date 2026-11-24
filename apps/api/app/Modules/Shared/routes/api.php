@@ -6,6 +6,7 @@ use App\Modules\Shared\Http\Controllers\CmsController;
 use App\Modules\Shared\Http\Controllers\CryptoController;
 use App\Modules\Shared\Http\Controllers\CurrencyRateController;
 use App\Modules\Shared\Http\Controllers\InternalCmsController;
+use App\Modules\Shared\Http\Controllers\InternalPrsController;
 use App\Modules\Shared\Http\Controllers\InternalTsController;
 use App\Modules\Shared\Http\Controllers\ReportController;
 use App\Modules\Shared\Http\Controllers\TsController;
@@ -15,15 +16,32 @@ Route::prefix('api')->group(function () {
     Route::get('/crypto/key', [CryptoController::class, 'publicKey'])
         ->middleware('throttle:serms-api');
 
+    $registerPrsInternalRoutes = static function (): void {
+        Route::post('/prs/reimbursements', [InternalPrsController::class, 'storeReimbursement']);
+        Route::get('/prs/reimbursements/by-activity/{activityId}', [InternalPrsController::class, 'reimbursementByActivity'])
+            ->whereNumber('activityId');
+
+        Route::post('/prs/cash-advances', [InternalPrsController::class, 'storeCashAdvance']);
+        Route::get('/prs/cash-advances/by-itinerary/{itineraryId}', [InternalPrsController::class, 'cashAdvanceByItinerary'])
+            ->whereNumber('itineraryId');
+        Route::delete('/prs/cash-advances/by-itinerary/{itineraryId}', [InternalPrsController::class, 'removeCashAdvanceByItinerary'])
+            ->whereNumber('itineraryId');
+    };
+
     // Internal service-to-service endpoints (protected by X-Internal-Secret).
-    Route::middleware('auth.internal')->prefix('internal')->group(function () {
+    Route::middleware('auth.internal')->prefix('internal')->group(function () use ($registerPrsInternalRoutes) {
         Route::get('/expenses/by-contract', [InternalCmsController::class, 'expensesByContract']);
         Route::get('/reimbursements/by-vendor', [InternalCmsController::class, 'reimbursementsByVendor']);
 
         Route::post('/ts/reimbursements', [InternalTsController::class, 'storeReimbursement']);
         Route::get('/ts/reimbursements/by-ticket/{ticketId}', [InternalTsController::class, 'reimbursementByTicket'])
             ->whereNumber('ticketId');
+
+        $registerPrsInternalRoutes();
     });
+
+    // Direct-port alias when partners call /api/serms/internal/prs/* against serms_api directly.
+    Route::middleware('auth.internal')->prefix('serms/internal')->group($registerPrsInternalRoutes);
 
     Route::middleware(['auth.external', 'throttle:serms-api'])->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);

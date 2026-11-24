@@ -38,10 +38,15 @@ return [
     ],
 
     'prs' => [
-        'reimbursement_api_key'            => env('PRS_REIMBURSEMENT_API_KEY'),
+        'api_url'                          => env('PRS_API_URL'),
+        'portal_url'                       => env('PRS_PORTAL_URL'),
+        'internal_secret'                  => env('PRS_INTERNAL_SECRET') ?: env('INTERNAL_SERVICE_SECRET') ?: env('PRS_REIMBURSEMENT_API_KEY'),
+        'webhook_secret'                   => env('PRS_WEBHOOK_SECRET') ?: env('PRS_INTERNAL_SECRET') ?: env('INTERNAL_SERVICE_SECRET'),
         'reimbursement_status_api_url'     => env('PRS_REIMBURSEMENT_STATUS_API_URL'),
+        'cash_advance_status_api_url'      => env('PRS_CASH_ADVANCE_STATUS_API_URL'),
+        'reimbursement_api_key'            => env('PRS_REIMBURSEMENT_API_KEY'),
         'reimbursement_status_api_key'     => env('PRS_REIMBURSEMENT_STATUS_API_KEY'),
-        'reimbursement_status_api_timeout' => env('PRS_REIMBURSEMENT_STATUS_API_TIMEOUT', 10),
+        'reimbursement_status_api_timeout' => (int) env('PRS_REIMBURSEMENT_STATUS_API_TIMEOUT', 10),
     ],
 
     /*

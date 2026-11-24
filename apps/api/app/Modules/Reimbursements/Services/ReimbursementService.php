@@ -305,10 +305,7 @@ class ReimbursementService
                 ipAddress: $ipAddress
             );
 
-            if ($reimbursement->source_system === 'prs' && $reimbursement->is_request == 1 && !empty($reimbursement->source_submission_id)) {
-                UpdatePrsReimbursementStatusJob::dispatch($reimbursement->source_submission_id);
-            }
-
+            $this->dispatchPrsStatusUpdateIfApplicable($reimbursement);
             $this->dispatchTsStatusUpdateIfApplicable($reimbursement);
 
             $formattedAmount = NotificationService::formatPeso($reimbursement->amount);
@@ -389,6 +386,7 @@ class ReimbursementService
                 ipAddress: $ipAddress
             );
 
+            $this->dispatchPrsStatusUpdateIfApplicable($reimbursement);
             $this->dispatchTsStatusUpdateIfApplicable($reimbursement);
 
             $formattedAmount = NotificationService::formatPeso($reimbursement->amount);
@@ -477,10 +475,7 @@ class ReimbursementService
                 ipAddress: $ipAddress
             );
 
-            if ($reimbursement->source_system === 'prs' && $reimbursement->is_request == 1 && !empty($reimbursement->source_submission_id)) {
-                UpdatePrsReimbursementStatusJob::dispatch($reimbursement->source_submission_id);
-            }
-
+            $this->dispatchPrsStatusUpdateIfApplicable($reimbursement);
             $this->dispatchTsStatusUpdateIfApplicable($reimbursement);
 
             $formattedAmount = NotificationService::formatPeso($reimbursement->amount);
@@ -834,6 +829,26 @@ class ReimbursementService
 
             return true;
         });
+    }
+
+    /**
+     * Dispatch outbound status sync job to PRS when claim originated from or links to a PRS activity.
+     */
+    private function dispatchPrsStatusUpdateIfApplicable(Reimbursement $reimbursement): void
+    {
+        if ($reimbursement->source_system === 'prs' || !empty($reimbursement->prs_activity_id)) {
+            $activityId = $reimbursement->prs_activity_id
+                ? (int) $reimbursement->prs_activity_id
+                : (is_numeric($reimbursement->source_submission_id) ? (int) $reimbursement->source_submission_id : null);
+
+            UpdatePrsReimbursementStatusJob::dispatch(
+                $reimbursement->source_submission_id ?? ($activityId !== null ? (string) $activityId : null),
+                (int) $reimbursement->id,
+                $activityId,
+                (string) $reimbursement->status,
+                $reimbursement->rejection_comment
+            );
+        }
     }
 
     /**

@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronsUpDown,
   Eye,
+  MapPin,
   Pencil,
   Ticket,
   Trash2,
@@ -201,7 +202,14 @@ const tableMinWidth = computed(() =>
                   :title="row.reportDescription"
                 >{{ row.reportDescription }}</span>
                 <div
-                  v-if="row.reference_no || row.source_system === 'ts' || row.ticket_id || row.ticket_number"
+                  v-if="
+                    row.reference_no ||
+                    row.source_system === 'ts' ||
+                    row.ticket_id ||
+                    row.ticket_number ||
+                    row.source_system === 'prs' ||
+                    row.prs_activity_id
+                  "
                   class="mt-1 flex flex-wrap items-center gap-1.5"
                 >
                   <span
@@ -222,6 +230,19 @@ const tableMinWidth = computed(() =>
                     class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700"
                   >
                     Ticket {{ row.ticket_number || `#${row.ticket_id}` }}
+                  </span>
+                  <span
+                    v-if="row.source_system === 'prs' || row.prs_activity_id"
+                    class="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700"
+                  >
+                    <MapPin class="w-2.5 h-2.5" aria-hidden="true" />
+                    <span>From PRS</span>
+                  </span>
+                  <span
+                    v-if="(row.source_system === 'prs' || row.prs_activity_id) && (row.prs_activity_id || row.source_submission_id)"
+                    class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700"
+                  >
+                    Activity #{{ row.prs_activity_id || row.source_submission_id }}
                   </span>
                 </div>
                 <div

@@ -29,7 +29,15 @@ const searchedRows = computed(() => {
   if (!searchQuery.value.trim()) return filteredRows.value;
   const q = searchQuery.value.trim().toLowerCase();
   return filteredRows.value.filter((row) =>
-    [row.purpose, row.status, row.user, row.requested, row.dueDate].some(
+    [
+      row.purpose,
+      row.status,
+      row.user,
+      row.requested,
+      row.dueDate,
+      row.itinerary_id,
+      row.source_system,
+    ].some(
       (value) =>
         String(value || "")
           .toLowerCase()
