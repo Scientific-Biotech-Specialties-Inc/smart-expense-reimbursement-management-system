@@ -16,7 +16,9 @@ class AuthenticateInternalService
         $secret = $this->resolveExpectedSecret($request);
         $provided = $request->header('X-Internal-Secret');
 
-        if ((!is_string($provided) || $provided === '') && $request->is('api/internal/prs*')) {
+        $isPrsInternal = $request->is('api/internal/prs*', 'api/serms/internal/prs*');
+
+        if ((!is_string($provided) || $provided === '') && $isPrsInternal) {
             $provided = $request->bearerToken();
         }
 
@@ -29,7 +31,7 @@ class AuthenticateInternalService
 
     private function resolveExpectedSecret(Request $request): ?string
     {
-        if ($request->is('api/internal/prs*')) {
+        if ($request->is('api/internal/prs*', 'api/serms/internal/prs*')) {
             $prsSecret = config('services.prs.internal_secret');
             if (!empty($prsSecret)) {
                 return (string) $prsSecret;
