@@ -183,11 +183,8 @@ const statusFilters = [
 ];
 const employeeStatusFilters = [
   "All",
-  "Pending",
   "Under Review",
   "Revise",
-  "Approved",
-  "Disbursed",
   "Signed",
   "Incomplete",
   "Overpayment",
@@ -317,6 +314,41 @@ const NON_NEW_LIQUIDATION_STATUSES = new Set([
   "liquidated",
 ]);
 
+const PHASE_2_ADVANCE_STATUSES = new Set([
+  "signed",
+  "overdue",
+  "incomplete",
+  "under-review",
+  "liquidated",
+  "settled",
+]);
+
+function normalizeAdvanceStatus(advance) {
+  return String(advance?.status || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[\s/_-]+/g, "-");
+}
+
+function isAdvanceAcknowledged(advance) {
+  if (!advance) return false;
+  if (advance.acknowledgedAt || advance.acknowledged_at) return true;
+  if (advance.signature || advance.signatureImage) return true;
+  return normalizeAdvanceStatus(advance) === "signed";
+}
+
+function isEmployeeLiquidationAdvanceVisible(advance) {
+  if (findLiquidationForAdvance(advance)) return true;
+  return (
+    isAdvanceAcknowledged(advance) &&
+    PHASE_2_ADVANCE_STATUSES.has(normalizeAdvanceStatus(advance))
+  );
+}
+
+const employeeVisibleAdvances = computed(() =>
+  store.items.filter(isEmployeeLiquidationAdvanceVisible),
+);
+
 const employeeOutstandingAdvances = computed(() =>
   store.items.filter((item) => {
     const status = String(item.status || "").toLowerCase();
@@ -342,7 +374,7 @@ const employeeOutstandingAdvances = computed(() =>
 
 const employeeFilteredAdvances = computed(() => {
   const query = employeeSearchQuery.value.trim().toLowerCase();
-  const rows = store.items.filter((advance) => {
+  const rows = employeeVisibleAdvances.value.filter((advance) => {
     const status = employeeAdvanceStatus(advance);
     const matchesStatus =
       employeeActiveStatus.value === "All" ||
@@ -803,8 +835,9 @@ const employeeLiquidationKpis = computed(() => {
     0,
   );
 
-  const activeAdvances = store.items.filter((item) =>
-    ["pending", "approved", "disbursed", "signed"].includes(item.status),
+  const terminalStatuses = new Set(["Liquidated", "Settled", "Rejected"]);
+  const activeAdvances = employeeVisibleAdvances.value.filter(
+    (item) => !terminalStatuses.has(employeeAdvanceStatus(item)),
   ).length;
 
   return [
@@ -1037,33 +1070,14 @@ function employeeAdvanceActions(row) {
   ];
 }
 
-const selectedAdvanceAcknowledged = computed(() => {
-  const adv = selectedAdvance.value;
-  if (!adv) return false;
-  if (adv.acknowledgedAt || adv.acknowledged_at) return true;
-  if (adv.signature || adv.signatureImage) return true;
-  return (
-    String(adv.status || "")
-      .toLowerCase()
-      .trim() === "signed"
-  );
-});
+const selectedAdvanceAcknowledged = computed(() =>
+  isAdvanceAcknowledged(selectedAdvance.value),
+);
 
 const selectedAdvanceIsPhase2 = computed(() => {
   if (existingLiquidation.value) return true;
-  const status = String(selectedAdvance.value?.status || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[\s/_-]+/g, "-");
-  return [
-    "signed",
-    "under-review",
-    "pending-under-review",
-    "incomplete",
-    "overdue",
-    "liquidated",
-    "settled",
-  ].includes(status);
+  const status = normalizeAdvanceStatus(selectedAdvance.value);
+  return PHASE_2_ADVANCE_STATUSES.has(status) || status === "pending-under-review";
 });
 
 const selectedAdvanceCanLiquidate = computed(() => {
