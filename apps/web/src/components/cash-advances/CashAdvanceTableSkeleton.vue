@@ -27,6 +27,11 @@ defineProps({
     <td class="px-5 py-5">
       <div class="h-3.5 w-20 max-w-full animate-pulse rounded bg-slate-200 sm:w-24"></div>
     </td>
+    <td class="px-5 py-5 text-center">
+      <div
+        class="mx-auto h-6 w-20 max-w-full animate-pulse rounded-full bg-slate-200 sm:w-24"
+      ></div>
+    </td>
     <td class="px-5 py-5">
       <div class="h-3.5 w-16 max-w-full animate-pulse rounded bg-slate-200 sm:w-20"></div>
     </td>
