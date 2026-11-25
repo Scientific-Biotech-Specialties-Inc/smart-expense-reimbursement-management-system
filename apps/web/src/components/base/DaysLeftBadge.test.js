@@ -252,4 +252,78 @@ describe("DaysLeftBadge", () => {
     const progressbar = wrapper.find('[role="progressbar"]');
     expect(progressbar.attributes("aria-valuenow")).toBe("43");
   });
+
+  describe("variant = 'signing' (3-day Cash Advance signing window)", () => {
+    it("renders green when 3 days remain, yellow when 2 days remain, and red for 1 day left and Due today", () => {
+      const day3 = mount(DaysLeftBadge, {
+        props: {
+          variant: "signing",
+          dueDate: "2026-10-24T00:00:00Z",
+          startDate: "2026-10-21T00:00:00Z",
+          totalDays: 3,
+        },
+      });
+      expect(day3.text()).toContain("3 days left");
+      expect(day3.classes()).toContain("bg-emerald-50");
+      expect(day3.classes()).toContain("text-emerald-700");
+      expect(day3.find('[role="progressbar"]').find("div").classes()).toContain("bg-emerald-600");
+
+      const day2 = mount(DaysLeftBadge, {
+        props: {
+          variant: "signing",
+          dueDate: "2026-10-23T00:00:00Z",
+          startDate: "2026-10-20T00:00:00Z",
+          totalDays: 3,
+        },
+      });
+      expect(day2.text()).toContain("2 days left");
+      expect(day2.classes()).toContain("bg-amber-50");
+      expect(day2.classes()).toContain("text-amber-700");
+      expect(day2.find('[role="progressbar"]').find("div").classes()).toContain("bg-amber-500");
+
+      const day1 = mount(DaysLeftBadge, {
+        props: {
+          variant: "signing",
+          dueDate: "2026-10-22T00:00:00Z",
+          startDate: "2026-10-19T00:00:00Z",
+          totalDays: 3,
+        },
+      });
+      expect(day1.text()).toContain("1 day left");
+      expect(day1.classes()).toContain("bg-red-50");
+      expect(day1.classes()).toContain("text-red-700");
+      expect(day1.find('[role="progressbar"]').find("div").classes()).toContain("bg-red-600");
+
+      const dueToday = mount(DaysLeftBadge, {
+        props: {
+          variant: "signing",
+          dueDate: "2026-10-21T00:00:00Z",
+          startDate: "2026-10-18T00:00:00Z",
+          totalDays: 3,
+        },
+      });
+      expect(dueToday.text()).toContain("Due today");
+      expect(dueToday.classes()).toContain("bg-red-50");
+      expect(dueToday.find('[role="progressbar"]').attributes("aria-valuenow")).toBe("100");
+    });
+
+    it("renders red 'PENALTY' immediately once past the 3-day signing deadline with no extra 7-day grace", () => {
+      const overdue = mount(DaysLeftBadge, {
+        props: {
+          variant: "signing",
+          dueDate: "2026-10-20T00:00:00Z", // 1 day past 3-day deadline (day 4)
+          startDate: "2026-10-17T00:00:00Z",
+          totalDays: 3,
+          status: "awaiting-acknowledgement",
+        },
+      });
+
+      expect(overdue.text()).toBe("PENALTY");
+      expect(overdue.classes()).toContain("bg-red-50");
+      expect(overdue.classes()).toContain("text-red-700");
+      expect(overdue.find('[role="progressbar"]').exists()).toBe(false);
+      expect(overdue.find('[data-testid="days-left-penalty-icon"]').exists()).toBe(true);
+      expect(overdue.attributes("title")).toContain("Signing deadline exceeded");
+    });
+  });
 });
