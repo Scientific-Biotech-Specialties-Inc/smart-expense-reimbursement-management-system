@@ -711,5 +711,77 @@ describe("LiquidationsView — Employee table plumbing", () => {
       mockSettlements.length = 0;
     }
   });
+
+  it("hides pre-Phase-2 unliquidatable advances from the employee table while keeping Phase 2 and liquidation-stage rows", () => {
+    const backup = [...mockItems];
+    mockItems.length = 0;
+    mockItems.push(
+      { id: "ca-pending", status: "pending", acknowledgedAt: null, amount: 1000, balance: 1000, purpose: "Pending CA", date: "2026-10-01", dueDate: "2026-10-08" },
+      { id: "ca-ca-revise", status: "revise", acknowledgedAt: null, amount: 1000, balance: 1000, purpose: "Revise CA", date: "2026-10-01", dueDate: "2026-10-08" },
+      { id: "ca-approved", status: "approved", acknowledgedAt: null, amount: 1000, balance: 1000, purpose: "Approved CA", date: "2026-10-01", dueDate: "2026-10-08" },
+      { id: "ca-disbursed", status: "disbursed", acknowledgedAt: null, amount: 1000, balance: 1000, purpose: "Disbursed Unsigned", date: "2026-10-01", dueDate: "2026-10-08" },
+      { id: "ca-unack-overdue", status: "overdue", acknowledgedAt: null, amount: 1000, balance: 1050, purpose: "Overdue Unsigned", date: "2026-10-01", dueDate: "2026-10-08" },
+      { id: "ca-rejected", status: "rejected", acknowledgedAt: null, amount: 1000, balance: 0, purpose: "Rejected CA", date: "2026-10-01", dueDate: "2026-10-08" },
+      { id: "ca-signed", status: "signed", acknowledgedAt: "2026-10-02", amount: 1500, balance: 1500, purpose: "Signed CA", date: "2026-10-01", dueDate: "2026-10-08" },
+      { id: "ca-overdue", status: "overdue", acknowledgedAt: "2026-10-02", amount: 2000, balance: 2050, purpose: "Overdue Signed", date: "2026-10-01", dueDate: "2026-10-08" },
+      { id: "ca-incomplete", status: "incomplete", acknowledgedAt: "2026-10-02", amount: 2500, balance: 1000, purpose: "Incomplete Signed", date: "2026-10-01", dueDate: "2026-10-08" },
+      { id: "ca-under-review", status: "under-review", acknowledgedAt: "2026-10-02", amount: 3000, balance: 3000, purpose: "Under Review Liq", date: "2026-10-01", dueDate: "2026-10-08" },
+      { id: "ca-liquidated", status: "liquidated", acknowledgedAt: "2026-10-02", amount: 3500, balance: 0, purpose: "Liquidated CA", date: "2026-10-01", dueDate: "2026-10-08" },
+    );
+    mockSettlements.push(
+      { id: "liq-ur", cash_advance_id: "ca-under-review", status: "pending", receipts: [] },
+      { id: "liq-done", cash_advance_id: "ca-liquidated", status: "liquidated", receipts: [] },
+      { id: "liq-rev", cash_advance_id: "ca-incomplete", status: "revise", receipts: [] },
+    );
+
+    try {
+      const wrapper = mountView();
+      const visibleIds = wrapper.vm.employeeFilteredAdvances.map((a) => a.id);
+
+      expect(visibleIds).not.toContain("ca-pending");
+      expect(visibleIds).not.toContain("ca-ca-revise");
+      expect(visibleIds).not.toContain("ca-approved");
+      expect(visibleIds).not.toContain("ca-disbursed");
+      expect(visibleIds).not.toContain("ca-unack-overdue");
+      expect(visibleIds).not.toContain("ca-rejected");
+
+      expect(visibleIds).toEqual(
+        expect.arrayContaining([
+          "ca-signed",
+          "ca-overdue",
+          "ca-incomplete",
+          "ca-under-review",
+          "ca-liquidated",
+        ]),
+      );
+      expect(visibleIds).toHaveLength(5);
+
+      const renderedPurposes = wrapper.findAll("tbody tr").map((tr) => tr.text());
+      expect(renderedPurposes).toHaveLength(5);
+
+      expect(wrapper.vm.employeeStatusFilters).toEqual([
+        "All",
+        "Under Review",
+        "Revise",
+        "Signed",
+        "Incomplete",
+        "Overpayment",
+        "Liquidated",
+        "Rejected",
+        "Overdue",
+      ]);
+
+      // Active Advances KPI excludes hidden pre-Phase-2 rows and terminal Liquidated/Rejected rows:
+      // counts ca-signed, ca-overdue, ca-incomplete (Revise), and ca-under-review (Under Review) = 4
+      const activeKpi = wrapper.vm.employeeLiquidationKpis.find(
+        (k) => k.label === "Active Advances",
+      );
+      expect(activeKpi?.value).toBe(4);
+    } finally {
+      mockItems.length = 0;
+      mockItems.push(...backup);
+      mockSettlements.length = 0;
+    }
+  });
 });
 
