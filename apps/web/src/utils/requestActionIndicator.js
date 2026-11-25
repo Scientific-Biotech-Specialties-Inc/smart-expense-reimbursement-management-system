@@ -108,9 +108,6 @@ export function getRequiredActionLabel(row, type, context = {}) {
     const status = normalizeIndicatorStatus(row.status);
     if (status === "disbursed") return "Sign to acknowledge receipt";
     if (status === "revise") return "Edit & resubmit liquidation";
-    if (["signed", "incomplete", "overdue", "overpayment"].includes(status)) {
-      return "Submit liquidation";
-    }
     return null;
   }
 

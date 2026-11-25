@@ -267,7 +267,7 @@ describe("LiquidationsView — Employee table plumbing", () => {
     expect(wrapper.find("div.grid.grid-cols-1.gap-6").exists()).toBe(false);
   });
 
-  it("always shows View in the ellipsis menu and opens a read-only modal, while Settle opens the editable modal", async () => {
+  it("removes Settle from the ellipsis menu, keeps View read-only, and shows Edit only for revise rows", async () => {
     const wrapper = mountView();
 
     const firstRow = wrapper.find("tbody tr");
@@ -284,8 +284,8 @@ describe("LiquidationsView — Employee table plumbing", () => {
 
     // The settlement form no longer renders inline below the table.
     const actions = menus[0].props("actions");
-    expect(actions.map((a) => a.label)).toEqual(["Settle", "View", "Delete"]);
-    expect(actions[0].visible).not.toBe(false);
+    expect(actions.map((a) => a.label)).toEqual(["Edit", "View", "Delete"]);
+    expect(actions[0].visible).toBe(false);
     expect(actions[1].visible).not.toBe(false);
     expect(actions[2].visible).toBe(false);
     expect(wrapper.find(".settlement-form-stub").exists()).toBe(false);
@@ -298,6 +298,7 @@ describe("LiquidationsView — Employee table plumbing", () => {
     expect(wrapper.vm.settlementModalMode).toBe("view");
     expect(wrapper.vm.selectedAdvance?.id).toBe("ca-1");
     expect(wrapper.find(".base-modal-stub").exists()).toBe(true);
+    expect(wrapper.find(".base-modal-stub h2").text()).toBe("Liquidation Details");
 
     let form = wrapper.findComponent({ name: "LiquidationSettlementForm" });
     expect(form.exists()).toBe(true);
@@ -310,21 +311,30 @@ describe("LiquidationsView — Employee table plumbing", () => {
     expect(wrapper.vm.isSettlementModalOpen).toBe(false);
     expect(wrapper.find(".base-modal-stub").exists()).toBe(false);
 
-    // Settle opens the same modal in editable mode.
-    const settleActions = wrapper
+    // A row with a "revise" liquidation exposes Edit and opens the modal in editable mode.
+    mockSettlements.push({
+      id: "liq-rev-1",
+      cash_advance_id: "ca-1",
+      status: "revise",
+      receipts: [],
+    });
+    const reviseWrapper = mountView();
+    const reviseActions = reviseWrapper
       .findAllComponents(ActionDropdownMenu)[0]
       .props("actions");
-    expect(settleActions[1].visible).not.toBe(false);
-    settleActions[0].handler();
-    await wrapper.vm.$nextTick();
+    expect(reviseActions[0].visible).toBe(true);
+    expect(reviseActions[1].visible).not.toBe(false);
+    reviseActions[0].handler();
+    await reviseWrapper.vm.$nextTick();
 
-    expect(wrapper.vm.isSettlementModalOpen).toBe(true);
-    expect(wrapper.vm.settlementModalMode).toBe("settle");
-    expect(wrapper.find("#back-to-advance-selection").exists()).toBe(false);
-    form = wrapper.findComponent({ name: "LiquidationSettlementForm" });
+    expect(reviseWrapper.vm.isSettlementModalOpen).toBe(true);
+    expect(reviseWrapper.vm.settlementModalMode).toBe("settle");
+    expect(reviseWrapper.find("#back-to-advance-selection").exists()).toBe(false);
+    expect(reviseWrapper.find(".base-modal-stub h2").text()).toBe("Edit Liquidation");
+    form = reviseWrapper.findComponent({ name: "LiquidationSettlementForm" });
     expect(form.props("disabled")).toBe(false);
 
-    const updatedActions = wrapper
+    const updatedActions = reviseWrapper
       .findAllComponents(ActionDropdownMenu)[0]
       .props("actions");
     expect(updatedActions[0].disabled).toBe(true);
@@ -351,13 +361,14 @@ describe("LiquidationsView — Employee table plumbing", () => {
     expect(wrapper.vm.selectedAdvance).toBeNull();
   });
 
-  it("exposes View and Delete for a row with an existing pending liquidation", async () => {
+  it("exposes View and Delete (and hides Edit) for a row with an existing pending liquidation", async () => {
     seedPendingSettlement();
     const wrapper = mountView();
 
     const actions = wrapper
       .findAllComponents(ActionDropdownMenu)[0]
       .props("actions");
+    expect(actions[0].visible).toBe(false);
     expect(actions[1].visible).not.toBe(false);
     expect(actions[2].visible).not.toBe(false);
 
@@ -379,12 +390,6 @@ describe("LiquidationsView — Employee table plumbing", () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.vm.showSubmitConfirmModal).toBe(false);
 
-    // Settle on the same hydrated record is also clean (baseline hydration).
-    actions[0].handler();
-    await wrapper.vm.$nextTick();
-    expect(wrapper.vm.settlementModalMode).toBe("settle");
-    expect(wrapper.vm.isDirty).toBe(false);
-
     actions[2].handler();
     await wrapper.vm.$nextTick();
     expect(wrapper.vm.deletingLiqId).toBe("liq-1");
@@ -395,16 +400,19 @@ describe("LiquidationsView — Employee table plumbing", () => {
     const approvedActions = approvedWrapper
       .findAllComponents(ActionDropdownMenu)[0]
       .props("actions");
+    expect(approvedActions[0].visible).toBe(false);
     expect(approvedActions[2].visible).toBe(false);
   });
 
-  it("flags TIN and date edits on hydrated settlement receipts as dirty", async () => {
+  it("flags TIN and date edits on hydrated revise settlement receipts as dirty across View and Edit", async () => {
     seedPendingSettlement();
+    mockSettlements[0].status = "revise";
     const wrapper = mountView();
 
     const actions = wrapper
       .findAllComponents(ActionDropdownMenu)[0]
       .props("actions");
+    expect(actions[0].visible).toBe(true);
     actions[1].handler();
     await wrapper.vm.$nextTick();
     expect(wrapper.vm.isDirty).toBe(false);
@@ -415,20 +423,21 @@ describe("LiquidationsView — Employee table plumbing", () => {
 
     expect(wrapper.vm.isDirty).toBe(true);
 
-    // The same edit remains dirty in Settle mode, where closing prompts.
+    // The same edit remains dirty in Edit mode, where closing prompts.
     actions[0].handler();
     await wrapper.vm.$nextTick();
     expect(wrapper.vm.settlementModalMode).toBe("settle");
     expect(wrapper.vm.isDirty).toBe(true);
   });
 
-  it("keeps a fresh Settle draft clean until a receipt is actually added", async () => {
+  it("keeps a fresh New Liquidation draft clean until a receipt is actually added", async () => {
     const wrapper = mountView();
 
-    const actions = wrapper
-      .findAllComponents(ActionDropdownMenu)[0]
-      .props("actions");
-    actions[0].handler();
+    await wrapper.findComponent(BaseButton).vm.$emit("click");
+    await wrapper.vm.$nextTick();
+    await wrapper
+      .find('[data-testid="liquidation-advance-card"][data-advance-id="ca-1"]')
+      .trigger("click");
     await wrapper.vm.$nextTick();
 
     expect(wrapper.vm.settlementModalMode).toBe("settle");
@@ -629,7 +638,28 @@ describe("LiquidationsView — Employee table plumbing", () => {
     }
   });
 
-  it("shows red pending indicator dot on employee liquidation advances only when employee action is needed", async () => {
+  it("excludes advances with existing pending, revise, or rejected liquidations from New Liquidation", async () => {
+    mockSettlements.push(
+      { id: "liq-p", cash_advance_id: "ca-1", status: "pending", receipts: [] },
+      { id: "liq-r", cash_advance_id: "ca-2", status: "revise", receipts: [] },
+      { id: "liq-x", cash_advance_id: "ca-3", status: "rejected", receipts: [] },
+    );
+    const wrapper = mountView();
+
+    await wrapper.findComponent(BaseButton).vm.$emit("click");
+    await wrapper.vm.$nextTick();
+
+    const cardIds = wrapper
+      .findAll('[data-testid="liquidation-advance-card"]')
+      .map((card) => card.attributes("data-advance-id"));
+    expect(cardIds).not.toContain("ca-1");
+    expect(cardIds).not.toContain("ca-2");
+    expect(cardIds).not.toContain("ca-3");
+    expect(cardIds).toContain("ca-4");
+    expect(cardIds).toHaveLength(9);
+  });
+
+  it("shows red pending indicator dot on employee liquidation advances only when a row-menu action is needed (revise)", async () => {
     mockSettlements.push(
       {
         id: 901,
@@ -643,19 +673,24 @@ describe("LiquidationsView — Employee table plumbing", () => {
         status: "under-review",
         receipts: [],
       },
+      {
+        id: 903,
+        cash_advance_id: "ca-4",
+        status: "revise",
+        receipts: [],
+      },
     );
     try {
       const wrapper = mountView();
       const menus = wrapper.findAllComponents(ActionDropdownMenu);
       const findMenu = (purpose) =>
         menus.find((m) => m.element.closest("tr")?.textContent?.includes(purpose));
+      const findRow = (purpose) =>
+        wrapper.findAll("tbody tr").find((tr) => tr.text().includes(purpose));
 
-      // ca-1: signed, no settlement -> employee needs to submit liquidation
-      expect(findMenu("Purpose 1").props("showIndicator")).toBe(true);
-      expect(findMenu("Purpose 1").props("indicatorLabel")).toBe("Submit liquidation");
-      expect(findMenu("Purpose 1").find('[data-testid="action-pending-indicator"]').attributes("title")).toBe(
-        "Submit liquidation",
-      );
+      // ca-1: signed, no settlement -> submitted via New Liquidation, no row-menu dot
+      expect(findMenu("Purpose 1").props("showIndicator")).toBe(false);
+      expect(findMenu("Purpose 1").find('[data-testid="action-pending-indicator"]').exists()).toBe(false);
 
       // ca-2: liquidated -> terminal, no action needed
       expect(findMenu("Purpose 2").props("showIndicator")).toBe(false);
@@ -664,6 +699,14 @@ describe("LiquidationsView — Employee table plumbing", () => {
       // ca-3: under-review -> waiting on admin, no employee action needed
       expect(findMenu("Purpose 3").props("showIndicator")).toBe(false);
       expect(findMenu("Purpose 3").find('[data-testid="action-pending-indicator"]').exists()).toBe(false);
+
+      // ca-4: revise -> Needs Revision badge + red dot with Edit & resubmit liquidation
+      expect(findRow("Purpose 4").text()).toContain("Needs Revision");
+      expect(findMenu("Purpose 4").props("showIndicator")).toBe(true);
+      expect(findMenu("Purpose 4").props("indicatorLabel")).toBe("Edit & resubmit liquidation");
+      expect(findMenu("Purpose 4").find('[data-testid="action-pending-indicator"]').attributes("title")).toBe(
+        "Edit & resubmit liquidation",
+      );
     } finally {
       mockSettlements.length = 0;
     }

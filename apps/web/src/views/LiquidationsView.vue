@@ -185,6 +185,7 @@ const employeeStatusFilters = [
   "All",
   "Pending",
   "Under Review",
+  "Revise",
   "Approved",
   "Disbursed",
   "Signed",
@@ -307,6 +308,15 @@ function isOwnedByCurrentUser(item) {
   );
 }
 
+const NON_NEW_LIQUIDATION_STATUSES = new Set([
+  "pending",
+  "under-review",
+  "revise",
+  "rejected",
+  "approved",
+  "liquidated",
+]);
+
 const employeeOutstandingAdvances = computed(() =>
   store.items.filter((item) => {
     const status = String(item.status || "").toLowerCase();
@@ -315,6 +325,15 @@ const employeeOutstandingAdvances = computed(() =>
       item.acknowledgedAt;
 
     if (!isEligibleAdvance) return false;
+
+    const linkedStatus = String(findLiquidationForAdvance(item)?.status || "")
+      .toLowerCase()
+      .trim()
+      .replace(/[\s_]+/g, "-");
+    if (NON_NEW_LIQUIDATION_STATUSES.has(linkedStatus)) {
+      return false;
+    }
+
     if (!auth.isAdmin) return true;
 
     return isOwnedByCurrentUser(item);
@@ -837,6 +856,7 @@ function employeeAdvanceStatus(advance) {
   ).toLowerCase();
 
   if (linkedLiquidationStatus === "rejected") return "Rejected";
+  if (linkedLiquidationStatus === "revise") return "Revise";
   if (
     linkedLiquidationStatus === "pending" ||
     linkedLiquidationStatus === "under-review"
@@ -989,11 +1009,13 @@ function findLiquidationForAdvance(advance) {
 
 function employeeAdvanceActions(row) {
   const settlement = findLiquidationForAdvance(row);
+  const settlementStatus = String(settlement?.status || "").toLowerCase();
 
   return [
     {
-      label: "Settle",
-      icon: Wallet,
+      label: "Edit",
+      icon: Pencil,
+      visible: settlementStatus === "revise",
       disabled: String(selectedAdvance.value?.id) === String(row.id),
       handler: () => openSettlementModal(row, "settle"),
     },
@@ -1006,9 +1028,7 @@ function employeeAdvanceActions(row) {
       label: "Delete",
       icon: Trash2,
       variant: "danger",
-      visible:
-        !!settlement &&
-        String(settlement.status || "").toLowerCase() === "pending",
+      visible: !!settlement && settlementStatus === "pending",
       handler: () => {
         deletingLiqId.value = settlement.id;
         isDeleteLiqModalOpen.value = true;
@@ -1129,6 +1149,12 @@ const existingLiquidation = computed(() => {
   if (!selectedAdvance.value) return null;
   return findLiquidationForAdvance(selectedAdvance.value);
 });
+
+const isEditingReviseLiquidation = computed(
+  () =>
+    settlementModalMode.value !== "view" &&
+    String(existingLiquidation.value?.status || "").toLowerCase() === "revise",
+);
 
 const isDeleteLiqModalOpen = ref(false);
 const deletingLiqId = ref(null);
@@ -2003,7 +2029,11 @@ onMounted(async () => {
             : 'New Liquidation'
           : auth.isAdmin
             ? 'New Liquidation Request'
-            : 'Liquidation Request'
+            : settlementModalMode === 'view'
+              ? 'Liquidation Details'
+              : isEditingReviseLiquidation
+                ? 'Edit Liquidation'
+                : 'Liquidation Request'
       "
       :description="
         settlementModalStep === 'select'
@@ -2043,7 +2073,9 @@ onMounted(async () => {
                       ? "New Liquidation Request"
                       : settlementModalMode === "view"
                         ? "Liquidation Details"
-                        : "Settle Cash Advance"
+                        : isEditingReviseLiquidation
+                          ? "Edit Liquidation"
+                          : "Settle Cash Advance"
                 }}
               </h2>
             </div>
