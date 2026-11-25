@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 import { X, ShieldCheck, Eye, FileText, Download } from "lucide-vue-next";
 import { formatPeso, formatDate } from "@/utils/formatters";
 import {
-  computePenaltyDaysPastGrace,
+  isLiquidationOverdue,
   sumPenaltyRecords,
 } from "@/utils/liquidationPenalties";
 import { downloadSbsiReportPdf } from "@/utils/sbsiPdfGenerator";
@@ -224,13 +224,17 @@ const roadmapOverpayment = computed(() => {
   return Math.max(0, total - bal);
 });
 
-const isCaseOverdue = computed(() => {
-  if (String(props.reviewStatus).toLowerCase().trim() === "overdue") return true;
-  if (roadmapAging.value?.isOverdue) return true;
-  if (roadmapPenalties.value.length > 0) return true;
-  const due = props.reviewingCase?.dueDate || props.reviewingCase?.expected_liquidation_date || roadmapCashAdvance.value?.expected_liquidation_date;
-  return computePenaltyDaysPastGrace(due) > 0;
-});
+const isCaseOverdue = computed(() =>
+  isLiquidationOverdue({
+    status: props.reviewStatus,
+    aging: roadmapAging.value,
+    penalties: roadmapPenalties.value,
+    dueDate:
+      props.reviewingCase?.dueDate ||
+      props.reviewingCase?.expected_liquidation_date ||
+      roadmapCashAdvance.value?.expected_liquidation_date,
+  }),
+);
 
 function handleRoadmapNavigate(payload) {
   emit("navigate", payload);
