@@ -54,7 +54,9 @@ describe("GrantPayoutModal (G2-043 to G2-046)", () => {
     await otherInput.setValue("Direct Bank Wire");
 
     // Provide signature
-    await wrapper.findComponent({ name: "BaseSignaturePad" }).vm.$emit("update:modelValue", "data:image/png;base64,granterSig");
+    const sigPad = wrapper.findComponent({ name: "BaseSignaturePad" });
+    expect(sigPad.props("required")).toBe(true);
+    await sigPad.vm.$emit("update:modelValue", "data:image/png;base64,granterSig");
 
     expect(submitBtn.attributes("disabled")).toBeUndefined();
   });

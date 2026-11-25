@@ -1010,6 +1010,7 @@ async function confirmAcknowledge() {
                       v-model="acknowledgementSignature"
                       label=""
                       placeholder="Draw your signature here to acknowledge receipt"
+                      required
                     />
 
                     <div class="mt-2 flex w-full max-w-lg justify-end gap-2">

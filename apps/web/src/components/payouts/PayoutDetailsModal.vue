@@ -364,6 +364,7 @@ function handleAcknowledge() {
                     v-model="employeeSignature"
                     label="Employee's Signature *"
                     placeholder="Draw your signature here to acknowledge receipt"
+                    required
                   />
                   <p class="text-[11px] text-slate-400 w-full max-w-lg">
                     By signing, you confirm that you have received

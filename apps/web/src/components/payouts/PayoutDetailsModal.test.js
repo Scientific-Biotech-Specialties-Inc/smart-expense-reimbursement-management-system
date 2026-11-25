@@ -151,6 +151,8 @@ describe("PayoutDetailsModal", () => {
 
     const sigPad = wrapper.findComponent({ name: "BaseSignaturePad" });
     expect(sigPad.exists()).toBe(true);
+    expect(sigPad.props("required")).toBe(true);
+    expect(sigPad.find(".rounded-xl.border").classes()).toContain("border-red-500");
 
     const ackBtn = wrapper.find('[data-testid="acknowledge-payout-btn"]');
     expect(ackBtn.exists()).toBe(true);
@@ -158,6 +160,8 @@ describe("PayoutDetailsModal", () => {
 
     await sigPad.vm.$emit("update:modelValue", "data:image/png;base64,empCaSig");
     await nextTick();
+    expect(sigPad.find(".rounded-xl.border").classes()).toContain("border-slate-200");
+    expect(sigPad.find(".rounded-xl.border").classes()).not.toContain("border-red-500");
     expect(ackBtn.attributes("disabled")).toBeUndefined();
 
     await ackBtn.trigger("click");

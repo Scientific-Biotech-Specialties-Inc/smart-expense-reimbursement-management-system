@@ -44,6 +44,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  required: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const emit = defineEmits(["update:modelValue"]);
@@ -78,6 +82,10 @@ const canUseSavedSignature = computed(() => {
 const isUsingSavedSignature = computed(() => {
   const saved = availableSavedSignature.value;
   return Boolean(saved && props.modelValue && props.modelValue === saved);
+});
+
+const isUnsignedRequired = computed(() => {
+  return props.required && !props.disabled && !hasSignature.value;
 });
 
 function prepareCanvas() {
@@ -298,6 +306,7 @@ function handleCanvasResize() {
 watch(availableSavedSignature, (newSaved) => {
   if (!props.modelValue && !hasUserInteracted.value && props.allowProfileSignature && newSaved) {
     lastEmittedDataUrl.value = newSaved;
+    hasSignature.value = true;
     emit("update:modelValue", newSaved);
     nextTick(() => renderDataUrlOnCanvas(newSaved));
   }
@@ -309,6 +318,7 @@ onMounted(() => {
     renderDataUrlOnCanvas(props.modelValue);
   } else if (props.allowProfileSignature && availableSavedSignature.value) {
     lastEmittedDataUrl.value = availableSavedSignature.value;
+    hasSignature.value = true;
     emit("update:modelValue", availableSavedSignature.value);
     renderDataUrlOnCanvas(availableSavedSignature.value);
   }
@@ -374,12 +384,18 @@ onBeforeUnmount(() => {
     </div>
 
     <div
-      class="relative w-full rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden"
-      :class="[heightClass, disabled ? 'opacity-60 pointer-events-none' : '']"
+      class="relative w-full rounded-xl border bg-white shadow-sm overflow-hidden transition-colors"
+      :class="[
+        heightClass,
+        isUnsignedRequired ? 'border-red-500' : 'border-slate-200',
+        disabled ? 'opacity-60 pointer-events-none' : '',
+      ]"
     >
       <canvas
         ref="signatureCanvas"
         class="h-full w-full touch-none cursor-crosshair"
+        :aria-required="required ? 'true' : undefined"
+        :aria-invalid="isUnsignedRequired ? 'true' : undefined"
         @pointerdown="startStroke"
         @pointermove="drawStroke"
         @pointerup="endStroke"

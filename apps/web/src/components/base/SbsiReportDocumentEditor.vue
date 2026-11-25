@@ -667,6 +667,7 @@ const CHEVRON = "polygon(100% 0, 50% 0, 0 50%, 50% 100%, 100% 100%, 50% 50%)";
                   height-class="h-24"
                   max-width-class="max-w-sm"
                   :center="false"
+                  required
                 />
               </div>
               <img

@@ -505,6 +505,7 @@ describe("CashAdvanceDetailsModal — Export Report (G2-056, G2-059)", () => {
 
       const sigPad = wrapper.findComponent({ name: "BaseSignaturePad" });
       expect(sigPad.exists()).toBe(true);
+      expect(sigPad.props("required")).toBe(true);
 
       const acknowledgeBtn = wrapper.findAll("button").find((b) => b.text().includes("I acknowledge"));
       expect(acknowledgeBtn).toBeTruthy();

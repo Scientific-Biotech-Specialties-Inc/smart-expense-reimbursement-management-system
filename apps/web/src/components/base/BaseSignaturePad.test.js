@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from "vitest";
+import { nextTick } from "vue";
 import { mount } from "@vue/test-utils";
 import BaseSignaturePad from "./BaseSignaturePad.vue";
 
@@ -347,5 +348,104 @@ describe("BaseSignaturePad", () => {
       globalThis.Image = originalImage;
       globalThis.ResizeObserver = originalResizeObserver;
     }
+  });
+
+  it("keeps default slate border when required is false and pad is empty", () => {
+    const wrapper = mount(BaseSignaturePad, {
+      props: {
+        modelValue: "",
+        allowProfileSignature: false,
+      },
+    });
+
+    const container = wrapper.find(".rounded-xl.border");
+    const canvas = wrapper.find("canvas");
+    expect(container.classes()).toContain("border-slate-200");
+    expect(container.classes()).not.toContain("border-red-500");
+    expect(canvas.attributes("aria-invalid")).toBeUndefined();
+    expect(canvas.attributes("aria-required")).toBeUndefined();
+  });
+
+  it("shows red border when required and unsigned, removes it when drawn, and restores it when cleared", async () => {
+    const wrapper = mount(BaseSignaturePad, {
+      props: {
+        modelValue: "",
+        allowProfileSignature: false,
+        required: true,
+      },
+    });
+
+    const container = wrapper.find(".rounded-xl.border");
+    const canvas = wrapper.find("canvas");
+    expect(container.classes()).toContain("border-red-500");
+    expect(container.classes()).not.toContain("border-slate-200");
+    expect(canvas.attributes("aria-required")).toBe("true");
+    expect(canvas.attributes("aria-invalid")).toBe("true");
+
+    const ctxMock = {
+      scale: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn(),
+      clearRect: vi.fn(),
+    };
+    canvas.element.getContext = vi.fn(() => ctxMock);
+    canvas.element.toDataURL = vi.fn(() => "data:image/png;base64,drawnSig");
+
+    await canvas.trigger("pointerdown", { clientX: 10, clientY: 10, pointerId: 1 });
+    await canvas.trigger("pointermove", { clientX: 25, clientY: 25 });
+    await canvas.trigger("pointerup");
+
+    expect(container.classes()).toContain("border-slate-200");
+    expect(container.classes()).not.toContain("border-red-500");
+    expect(canvas.attributes("aria-invalid")).toBeUndefined();
+
+    await wrapper.find('[data-testid="clear-signature-btn"]').trigger("click");
+    expect(container.classes()).toContain("border-red-500");
+    expect(container.classes()).not.toContain("border-slate-200");
+    expect(canvas.attributes("aria-invalid")).toBe("true");
+  });
+
+  it("omits red border when required pad is pre-filled from saved signature and restores it on clear", async () => {
+    const savedSig = "data:image/png;base64,savedProfileSignatureData";
+    const wrapper = mount(BaseSignaturePad, {
+      props: {
+        modelValue: "",
+        savedSignature: savedSig,
+        allowProfileSignature: true,
+        required: true,
+      },
+    });
+    await nextTick();
+
+    const container = wrapper.find(".rounded-xl.border");
+    expect(container.classes()).toContain("border-slate-200");
+    expect(container.classes()).not.toContain("border-red-500");
+
+    await wrapper.find('[data-testid="clear-signature-btn"]').trigger("click");
+    await wrapper.setProps({ modelValue: "" });
+    expect(container.classes()).toContain("border-red-500");
+
+    await wrapper.find('[data-testid="use-saved-signature-btn"]').trigger("click");
+    expect(container.classes()).toContain("border-slate-200");
+    expect(container.classes()).not.toContain("border-red-500");
+  });
+
+  it("suppresses red border when required pad is disabled", () => {
+    const wrapper = mount(BaseSignaturePad, {
+      props: {
+        modelValue: "",
+        allowProfileSignature: false,
+        required: true,
+        disabled: true,
+      },
+    });
+
+    const container = wrapper.find(".rounded-xl.border");
+    const canvas = wrapper.find("canvas");
+    expect(container.classes()).toContain("border-slate-200");
+    expect(container.classes()).not.toContain("border-red-500");
+    expect(canvas.attributes("aria-invalid")).toBeUndefined();
   });
 });
