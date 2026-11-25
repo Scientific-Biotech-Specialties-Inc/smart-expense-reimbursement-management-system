@@ -5,8 +5,10 @@ import { useReimbursementStore } from "@/stores/reimbursement";
 import { useCashAdvanceStore } from "@/stores/cashAdvance";
 import { useLiquidationStore } from "@/stores/liquidation";
 import { useReceiptStore } from "@/stores/receipts";
+import { usePenaltyStore } from "@/stores/penalty";
 import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import SkeletonLoader from "@/components/base/SkeletonLoader.vue";
+import PenaltyStatusBanner from "@/components/penalties/PenaltyStatusBanner.vue";
 import { formatPeso } from "@/utils/formatters";
 import { Bar, Line, Pie } from "vue-chartjs";
 import {
@@ -49,6 +51,7 @@ const rStore = useReimbursementStore();
 const caStore = useCashAdvanceStore();
 const liqStore = useLiquidationStore();
 const receiptsStore = useReceiptStore();
+const penaltyStore = usePenaltyStore();
 
 const currentYear = new Date().getFullYear();
 const MONTH_LABELS = [
@@ -58,12 +61,16 @@ const MONTH_LABELS = [
 
 onMounted(async () => {
   const scope = auth.isAdmin ? "all" : "mine";
-  await Promise.all([
+  const requests = [
     rStore.fetchAll(),
     caStore.fetchAll(),
     liqStore.fetchSettlements(),
     receiptsStore.fetchAll({ scope, perPage: 100 }),
-  ]);
+  ];
+  if (!auth.isAdmin) {
+    requests.push(penaltyStore.fetchMyPenalties().catch(() => {}));
+  }
+  await Promise.all(requests);
 });
 
 const isDashboardLoading = computed(
@@ -703,6 +710,8 @@ const pieOptionsWithCurrency = {
     <!-- EMPLOYEE DASHBOARD -->
     <!-- ══════════════════════════════════════════ -->
     <template v-if="!auth.isAdmin">
+      <PenaltyStatusBanner />
+
       <!-- KPI Cards -->
       <BaseKpiGrid
         :kpis="employeeKpis"

@@ -5,6 +5,8 @@ import {
   FilePieChart,
   FileCheck,
   Banknote,
+  ShieldAlert,
+  ShieldCheck,
 } from "lucide-vue-next";
 
 const base = [
@@ -17,9 +19,16 @@ const base = [
 
 const employee = [
   { name: "My Expense", to: "/my-expense", icon: FileCheck },
+  { name: "Penalties", to: "/penalties", icon: ShieldAlert },
 ];
 
-export function buildNavLinks() {
-  return [...base, ...employee];
+const admin = [
+  { divider: true },
+  { header: "Administration" },
+  { name: "Penalty Management", to: "/admin/penalties", icon: ShieldCheck },
+];
+
+export function buildNavLinks(isAdmin = false) {
+  return isAdmin ? [...base, ...employee, ...admin] : [...base, ...employee];
 }
 

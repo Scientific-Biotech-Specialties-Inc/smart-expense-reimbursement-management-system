@@ -8,6 +8,7 @@ import { useReimbursementStore } from "@/stores/reimbursement";
 import { useCashAdvanceStore } from "@/stores/cashAdvance";
 import { useLiquidationStore } from "@/stores/liquidation";
 import { useReceiptStore } from "@/stores/receipts";
+import { usePenaltyStore } from "@/stores/penalty";
 
 vi.mock("vue-chartjs", async () => {
   const { defineComponent, h } = await import("vue");
@@ -276,5 +277,47 @@ describe("DashboardView", () => {
     expect(wrapper.findAll(".mock-bar-chart").length).toBe(1);
     expect(wrapper.findAll(".mock-pie-chart").length).toBe(2);
     expect(wrapper.findAll(".mock-line-chart").length).toBe(1);
+  });
+
+  it("renders PenaltyStatusBanner for non-admin employees with active strikes and hides it for admins", async () => {
+    const auth = useAuthStore();
+    auth.user = { id: 1, name: "Employee", email: "employee@example.com", is_admin: false };
+
+    const rStore = useReimbursementStore();
+    rStore.fetchAll = vi.fn().mockResolvedValue([]);
+    const caStore = useCashAdvanceStore();
+    caStore.fetchAll = vi.fn().mockResolvedValue([]);
+    const liqStore = useLiquidationStore();
+    liqStore.fetchSettlements = vi.fn().mockResolvedValue([]);
+    const receiptsStore = useReceiptStore();
+    receiptsStore.fetchAll = vi.fn().mockResolvedValue([]);
+
+    const penaltyStore = usePenaltyStore();
+    penaltyStore.activeStrikesCount = 1;
+    penaltyStore.standing = "warning";
+    penaltyStore.fetchMyPenalties = vi.fn().mockResolvedValue({});
+
+    const employeeWrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          BaseKpiGrid: true,
+          SkeletonLoader: true,
+          PenaltyStatusBanner: { template: "<div data-testid='dashboard-penalty-banner'></div>" },
+        },
+      },
+    });
+    expect(employeeWrapper.find('[data-testid="dashboard-penalty-banner"]').exists()).toBe(true);
+
+    auth.user = { id: 2, name: "Admin", email: "admin@example.com", is_admin: true };
+    const adminWrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          BaseKpiGrid: true,
+          SkeletonLoader: true,
+          PenaltyStatusBanner: { template: "<div data-testid='dashboard-penalty-banner'></div>" },
+        },
+      },
+    });
+    expect(adminWrapper.find('[data-testid="dashboard-penalty-banner"]').exists()).toBe(false);
   });
 });

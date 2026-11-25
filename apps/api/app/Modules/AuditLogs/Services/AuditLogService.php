@@ -41,6 +41,13 @@ class AuditLogService
 
         'OVERDUE_PENALTY' => ['label' => 'Daily Penalty Applied', 'tone' => 'danger', 'domain' => 'cash_advance', 'domain_label' => 'Cash Advance'],
 
+        'PENALTY_STRIKE_ISSUED' => ['label' => 'Compliance Strike Issued', 'tone' => 'danger', 'domain' => 'penalty', 'domain_label' => 'Penalties & Strikes'],
+        'PENALTY_STRIKE_WAIVED' => ['label' => 'Compliance Strike Waived', 'tone' => 'warning', 'domain' => 'penalty', 'domain_label' => 'Penalties & Strikes'],
+        'PENALTY_CYCLE_RESET' => ['label' => 'Compliance Strikes Reset', 'tone' => 'success', 'domain' => 'penalty', 'domain_label' => 'Penalties & Strikes'],
+        'PENALTY_APPEAL_SUBMITTED' => ['label' => 'Penalty Appeal Submitted', 'tone' => 'info', 'domain' => 'penalty', 'domain_label' => 'Penalties & Strikes'],
+        'PENALTY_APPEAL_APPROVED' => ['label' => 'Penalty Appeal Approved', 'tone' => 'success', 'domain' => 'penalty', 'domain_label' => 'Penalties & Strikes'],
+        'PENALTY_APPEAL_REJECTED' => ['label' => 'Penalty Appeal Rejected', 'tone' => 'danger', 'domain' => 'penalty', 'domain_label' => 'Penalties & Strikes'],
+
         'USER_LOGIN' => ['label' => 'Signed In', 'tone' => 'info', 'domain' => 'profile', 'domain_label' => 'Account Security'],
         'PROFILE_UPDATED' => ['label' => 'Profile Details Updated', 'tone' => 'neutral', 'domain' => 'profile', 'domain_label' => 'Profile'],
         'PROFILE_PHOTO_UPDATED' => ['label' => 'Profile Photo Updated', 'tone' => 'info', 'domain' => 'profile', 'domain_label' => 'Profile'],
