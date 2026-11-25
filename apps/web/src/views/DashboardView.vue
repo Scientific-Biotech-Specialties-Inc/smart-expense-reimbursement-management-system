@@ -26,7 +26,6 @@ import {
 } from "chart.js";
 import {
   Wallet,
-  FileText,
   Banknote,
   ReceiptText,
   Clock,
@@ -74,7 +73,12 @@ onMounted(async () => {
 });
 
 const isDashboardLoading = computed(
-  () => rStore.isLoading || caStore.isLoading || liqStore.isLoading || receiptsStore.isLoading,
+  () =>
+    rStore.isLoading ||
+    caStore.isLoading ||
+    liqStore.isLoading ||
+    receiptsStore.isLoading ||
+    (!auth.isAdmin && penaltyStore.isLoading),
 );
 
 // ══════════════════════════════════════════════════
@@ -96,13 +100,13 @@ const employeeKpis = computed(() => [
     accent: "bg-emerald-500",
   },
   {
-    label: "Total Reimbursement Request",
-    value: rStore.items.length,
-    sub: "All filed requests",
-    icon: FileText,
-    iconBg: "bg-accent-100",
-    iconColor: "text-accent-600",
-    accent: "bg-accent",
+    label: "Total Current Penalties",
+    value: penaltyStore.activeStrikesCount ?? 0,
+    sub: "Current cycle strikes",
+    icon: AlertTriangle,
+    iconBg: penaltyStore.isPenalized ? "bg-red-100" : "bg-amber-100",
+    iconColor: penaltyStore.isPenalized ? "text-red-600" : "text-amber-600",
+    accent: penaltyStore.isPenalized ? "bg-red-500" : "bg-amber-500",
   },
   {
     label: "Total Filed Cash Advance",

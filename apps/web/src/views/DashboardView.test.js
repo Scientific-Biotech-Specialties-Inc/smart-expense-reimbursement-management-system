@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mount } from "@vue/test-utils";
+import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import DashboardView from "@/views/DashboardView.vue";
+import BaseKpiGrid from "@/components/base/BaseKpiGrid.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useReimbursementStore } from "@/stores/reimbursement";
 import { useCashAdvanceStore } from "@/stores/cashAdvance";
@@ -83,6 +84,9 @@ describe("DashboardView", () => {
     const receiptsStore = useReceiptStore();
     receiptsStore.receipts = [];
     receiptsStore.fetchAll = vi.fn().mockResolvedValue([]);
+
+    const penaltyStore = usePenaltyStore();
+    penaltyStore.fetchMyPenalties = vi.fn().mockResolvedValue({});
 
     const wrapper = mount(DashboardView, {
       global: {
@@ -167,6 +171,9 @@ describe("DashboardView", () => {
     ];
     receiptsStore.fetchAll = vi.fn().mockResolvedValue([]);
 
+    const penaltyStore = usePenaltyStore();
+    penaltyStore.fetchMyPenalties = vi.fn().mockResolvedValue({});
+
     const wrapper = mount(DashboardView, {
       global: {
         stubs: {
@@ -201,6 +208,9 @@ describe("DashboardView", () => {
     const receiptsStore = useReceiptStore();
     receiptsStore.receipts = [];
     receiptsStore.fetchAll = vi.fn().mockResolvedValue([]);
+
+    const penaltyStore = usePenaltyStore();
+    penaltyStore.fetchMyPenalties = vi.fn().mockResolvedValue({});
 
     const wrapper = mount(DashboardView, {
       global: {
@@ -258,6 +268,9 @@ describe("DashboardView", () => {
       { id: "RCPT-101", amount: 2000, date: `${currentYear}-08-01`, category: "Travel", isDeleted: false },
     ];
     receiptsStore.fetchAll = vi.fn().mockResolvedValue([]);
+
+    const penaltyStore = usePenaltyStore();
+    penaltyStore.fetchMyPenalties = vi.fn().mockResolvedValue({});
 
     const wrapper = mount(DashboardView, {
       global: {
@@ -319,5 +332,51 @@ describe("DashboardView", () => {
       },
     });
     expect(adminWrapper.find('[data-testid="dashboard-penalty-banner"]').exists()).toBe(false);
+  });
+
+  it("replaces Total Reimbursement Request with Total Current Penalties showing current-cycle strikes on employee dashboard", async () => {
+    const auth = useAuthStore();
+    auth.user = { id: 1, name: "Employee", email: "employee@example.com", is_admin: false };
+
+    const rStore = useReimbursementStore();
+    rStore.items = [{ id: 1, amount: 1000, status: "approved", date: "2026-08-01" }];
+    rStore.fetchAll = vi.fn().mockResolvedValue([]);
+    const caStore = useCashAdvanceStore();
+    caStore.items = [];
+    caStore.fetchAll = vi.fn().mockResolvedValue([]);
+    const liqStore = useLiquidationStore();
+    liqStore.settlements = [];
+    liqStore.fetchSettlements = vi.fn().mockResolvedValue([]);
+    const receiptsStore = useReceiptStore();
+    receiptsStore.receipts = [];
+    receiptsStore.fetchAll = vi.fn().mockResolvedValue([]);
+
+    const penaltyStore = usePenaltyStore();
+    penaltyStore.activeStrikesCount = 2;
+    penaltyStore.strikeLimit = 3;
+    penaltyStore.standing = "warning";
+    penaltyStore.fetchMyPenalties = vi.fn().mockResolvedValue({});
+
+    const wrapper = mount(DashboardView, {
+      global: {
+        stubs: {
+          SkeletonLoader: true,
+          PenaltyStatusBanner: true,
+        },
+      },
+    });
+    await flushPromises();
+
+    const kpis = wrapper.findComponent(BaseKpiGrid).props("kpis");
+    const labels = kpis.map((k) => k.label);
+
+    expect(labels).not.toContain("Total Reimbursement Request");
+    expect(labels).toContain("Total Current Penalties");
+
+    const penaltyKpi = kpis.find((k) => k.label === "Total Current Penalties");
+    expect(penaltyKpi.value).toBe(2);
+    expect(wrapper.text()).toContain("Total Current Penalties");
+    expect(wrapper.text()).toContain("2");
+    expect(wrapper.text()).not.toContain("/3");
   });
 });
