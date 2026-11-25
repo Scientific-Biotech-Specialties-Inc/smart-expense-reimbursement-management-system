@@ -42,6 +42,7 @@ import {
 } from "@/composables/useCurrencyRates";
 import { formatPeso, formatDate, truncateText } from "@/utils/formatters";
 import { numberOrZero } from "@/utils/numbers";
+import { getRequiredActionLabel } from "@/utils/requestActionIndicator";
 import {
   computePenaltyDaysPastGrace,
   isLiquidationOverdue,
@@ -1164,6 +1165,24 @@ async function confirmDeleteLiquidation(password) {
   }
 }
 
+function getLiquidationActionLabel(row) {
+  return getRequiredActionLabel(row, "liquidation", {
+    isAdmin: auth.isAdmin,
+    currentUserId: auth.user?.id ?? null,
+  });
+}
+
+function getEmployeeAdvanceActionLabel(row) {
+  return getRequiredActionLabel(
+    { ...row, status: employeeAdvanceBadgeStatus(row) },
+    "liquidation_advance",
+    {
+      isAdmin: auth.isAdmin,
+      currentUserId: auth.user?.id ?? null,
+    },
+  );
+}
+
 function getActions(row) {
   const status = String(row.status || "").toLowerCase();
   const isRevise = status === "revise";
@@ -1799,7 +1818,11 @@ onMounted(async () => {
           <StatusBadge :status="row.status" />
         </template>
         <template #cell-actions="{ row }">
-          <ActionDropdownMenu :actions="getActions(row)" />
+          <ActionDropdownMenu
+            :actions="getActions(row)"
+            :show-indicator="Boolean(getLiquidationActionLabel(row))"
+            :indicator-label="getLiquidationActionLabel(row) || undefined"
+          />
         </template>
       </LiquidationTable>
       <BasePagination
@@ -1951,7 +1974,11 @@ onMounted(async () => {
           <StatusBadge :status="employeeAdvanceBadgeStatus(row)" />
         </template>
         <template #cell-actions="{ row }">
-          <ActionDropdownMenu :actions="employeeAdvanceActions(row)" />
+          <ActionDropdownMenu
+            :actions="employeeAdvanceActions(row)"
+            :show-indicator="Boolean(getEmployeeAdvanceActionLabel(row))"
+            :indicator-label="getEmployeeAdvanceActionLabel(row) || undefined"
+          />
         </template>
       </LiquidationTable>
 

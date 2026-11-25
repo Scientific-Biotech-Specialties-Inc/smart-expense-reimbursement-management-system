@@ -440,6 +440,7 @@ onBeforeUnmount(() => {
       :sort-key="sortKey"
       :sort-direction="sortDirection"
       :is-admin="auth.isAdmin"
+      :current-user-id="auth.user?.id ?? null"
       v-model:current-page="currentPage"
       :page-size="pageSize"
       @toggle-sort="toggleSort"

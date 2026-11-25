@@ -239,6 +239,7 @@ async function confirmDelete(password) {
     <CashAdvanceTable
       :rows="searchedRows"
       :isAdmin="auth.isAdmin"
+      :currentUserId="auth.user?.id ?? null"
       :isLoading="store.isLoading"
       @view="openDetails"
       @edit="handleEdit"

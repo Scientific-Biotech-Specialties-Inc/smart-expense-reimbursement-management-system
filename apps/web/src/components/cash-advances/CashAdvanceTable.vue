@@ -14,6 +14,7 @@ import StatusBadge from "@/components/base/StatusBadge.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import CashAdvanceTableSkeleton from "./CashAdvanceTableSkeleton.vue";
 import ActionDropdownMenu from "@/components/base/ActionDropdownMenu.vue";
+import { getRequiredActionLabel } from "@/utils/requestActionIndicator";
 
 const props = defineProps({
   rows: {
@@ -23,6 +24,10 @@ const props = defineProps({
   isAdmin: {
     type: Boolean,
     default: false,
+  },
+  currentUserId: {
+    type: [String, Number],
+    default: null,
   },
   isLoading: {
     type: Boolean,
@@ -56,6 +61,13 @@ function getActions(row) {
       handler: () => emit("delete", row),
     },
   ];
+}
+
+function getRequiredAction(row) {
+  return getRequiredActionLabel(row, "cash_advance", {
+    isAdmin: props.isAdmin,
+    currentUserId: props.currentUserId,
+  });
 }
 
 const sortKey = ref("requested");
@@ -296,7 +308,11 @@ function isSorted(column) {
                 <StatusBadge :status="row.status" />
               </td>
               <td class="px-5 py-5 text-center">
-                <ActionDropdownMenu :actions="getActions(row)" />
+                <ActionDropdownMenu
+                  :actions="getActions(row)"
+                  :show-indicator="Boolean(getRequiredAction(row))"
+                  :indicator-label="getRequiredAction(row) || undefined"
+                />
               </td>
             </tr>
           </template>

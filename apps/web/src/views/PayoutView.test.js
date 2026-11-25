@@ -739,5 +739,24 @@ describe("PayoutView (G2-048 to G2-052)", () => {
       );
       expect(isPayoutAcknowledged({ status: "disbursed" })).toBe(false);
     });
+
+    it("renders red pending indicator dot on PayoutsTable action button for employees on unacknowledged rows and hides it for admins", async () => {
+      authState.isAdmin = false;
+      const wrapper = mount(PayoutView);
+      await flushPromises();
+
+      const rows = wrapper.findAll("tbody tr");
+      expect(rows.length).toBe(2);
+      // 102 is Awaiting Acknowledgement (sorted newest first), 101 is Acknowledged
+      expect(rows[0].find('[data-testid="action-pending-indicator"]').attributes("title")).toBe(
+        "Sign to acknowledge payout",
+      );
+      expect(rows[1].find('[data-testid="action-pending-indicator"]').exists()).toBe(false);
+
+      authState.isAdmin = true;
+      const adminWrapper = mount(PayoutView);
+      await flushPromises();
+      expect(adminWrapper.findAll('[data-testid="action-pending-indicator"]')).toHaveLength(0);
+    });
   });
 });
