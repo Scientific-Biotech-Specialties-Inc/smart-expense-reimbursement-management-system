@@ -468,6 +468,51 @@ function formatDateOnly(value) {
   return formatted === "—" ? "--" : formatted;
 }
 
+const summaryMetadataItems = computed(() => {
+  const rec = props.record;
+  if (!rec) return [];
+
+  const disbursementDateItem = {
+    key: "disbursement-date",
+    label: "Disbursement Date",
+    value: formatDateOnly(
+      rec.expected_disbursement_date || rec.expectedDisbursementDate,
+    ),
+    valueClass: "text-slate-700",
+  };
+
+  const dateRequestedItem = {
+    key: "date-requested",
+    label: "Date Requested",
+    value: formatDateOnly(rec.date || rec.created_at),
+    valueClass: "text-slate-700",
+  };
+
+  const settlementDueDateItem = {
+    key: "settlement-due-date",
+    label: "Settlement Due Date",
+    value: formatDateOnly(rec.dueDate || rec.expected_liquidation_date),
+    valueClass: "text-slate-700",
+  };
+
+  if (auth.isAdmin) {
+    return [
+      {
+        key: "requestor",
+        label: "Requestor",
+        value:
+          rec.requestedBy || rec.requester?.name || rec.user?.name || "--",
+        valueClass: "font-medium text-slate-700",
+      },
+      dateRequestedItem,
+      settlementDueDateItem,
+      disbursementDateItem,
+    ];
+  }
+
+  return [disbursementDateItem, dateRequestedItem, settlementDueDateItem];
+});
+
 function normalizeStatus(status) {
   const normalized = String(status || "").toLowerCase();
   const statusMap = {
@@ -1030,45 +1075,16 @@ async function confirmAcknowledge() {
             </p>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-              <div v-if="auth.isAdmin">
+              <div
+                v-for="item in summaryMetadataItems"
+                :key="item.key"
+                :data-testid="`summary-${item.key}`"
+              >
                 <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">
-                  Requestor
+                  {{ item.label }}
                 </p>
-                <p class="text-sm font-medium text-slate-700">
-                  {{
-                    record.requestedBy ||
-                    record.requester?.name ||
-                    record.user?.name ||
-                    "--"
-                  }}
-                </p>
-              </div>
-              <div v-else>
-                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">
-                  Request ID
-                </p>
-                <p class="text-sm font-semibold text-primary">
-                  #{{ record.id }}
-                </p>
-              </div>
-              <div>
-                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">
-                  Date Requested
-                </p>
-                <p class="text-sm text-slate-700">
-                  {{ formatDateOnly(record.date || record.created_at) }}
-                </p>
-              </div>
-              <div>
-                <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-0.5">
-                  Settlement Due Date
-                </p>
-                <p class="text-sm text-slate-700">
-                  {{
-                    formatDateOnly(
-                      record.dueDate || record.expected_liquidation_date,
-                    )
-                  }}
+                <p class="text-sm" :class="item.valueClass">
+                  {{ item.value }}
                 </p>
               </div>
               <div :class="record.contract_id ? '' : 'sm:col-span-2'">

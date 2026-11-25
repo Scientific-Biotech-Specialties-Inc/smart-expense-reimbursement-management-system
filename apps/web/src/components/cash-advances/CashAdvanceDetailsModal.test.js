@@ -1293,3 +1293,110 @@ describe("useCashAdvanceStore — Payout Normalization & Disbursement", () => {
       }
     });
 });
+
+describe("CashAdvanceDetailsModal — Request Summary Disbursement Date", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+  });
+
+  const baseStubs = {
+    UnifiedRoadmapStepper: true,
+    StatusBadge: true,
+    DecisionConfirmationModal: true,
+    GrantPayoutModal: true,
+    SbsiReportPreviewModal: true,
+    BaseModal: true,
+    BaseAuditTrail: true,
+    BaseSignaturePad: true,
+  };
+
+  it("replaces Request ID with Disbursement Date in Employee Request Summary", () => {
+    mockAuth.isAdmin = false;
+    const wrapper = mount(CashAdvanceDetailsModal, {
+      props: {
+        isOpen: true,
+        record: {
+          id: 16,
+          userId: 99,
+          purpose: "Field supplies",
+          amount: 100,
+          balance: 100,
+          date: "2026-11-25",
+          expected_disbursement_date: "2026-11-26",
+          dueDate: "2026-11-27",
+          status: "pending",
+        },
+      },
+      global: { stubs: baseStubs },
+    });
+
+    const summary = wrapper.find('[data-testid="modal-summary-section"]');
+    expect(summary.text()).not.toContain("Request ID");
+    expect(summary.text()).not.toContain("#16");
+
+    const items = summary.findAll('[data-testid^="summary-"]');
+    expect(items.map((el) => el.attributes("data-testid"))).toEqual([
+      "summary-disbursement-date",
+      "summary-date-requested",
+      "summary-settlement-due-date",
+    ]);
+    expect(wrapper.find('[data-testid="summary-disbursement-date"]').text()).toContain("Disbursement Date");
+    expect(wrapper.find('[data-testid="summary-disbursement-date"]').text()).toContain("Nov 26, 2026");
+  });
+
+  it("renders Disbursement Date below Date Requested (after Settlement Due Date) in Admin Request Summary", () => {
+    mockAuth.isAdmin = true;
+    const wrapper = mount(CashAdvanceDetailsModal, {
+      props: {
+        isOpen: true,
+        record: {
+          id: 16,
+          userId: 10,
+          requestedBy: "Juan Dela Cruz",
+          purpose: "Field supplies",
+          amount: 100,
+          balance: 100,
+          date: "2026-11-25",
+          expected_disbursement_date: "2026-11-26",
+          dueDate: "2026-11-27",
+          status: "pending",
+        },
+      },
+      global: { stubs: baseStubs },
+    });
+
+    const summary = wrapper.find('[data-testid="modal-summary-section"]');
+    const items = summary.findAll('[data-testid^="summary-"]');
+    expect(items.map((el) => el.attributes("data-testid"))).toEqual([
+      "summary-requestor",
+      "summary-date-requested",
+      "summary-settlement-due-date",
+      "summary-disbursement-date",
+    ]);
+    expect(wrapper.find('[data-testid="summary-disbursement-date"]').text()).toContain("Disbursement Date");
+    expect(wrapper.find('[data-testid="summary-disbursement-date"]').text()).toContain("Nov 26, 2026");
+  });
+
+  it("falls back to '--' when expected_disbursement_date is missing", () => {
+    mockAuth.isAdmin = false;
+    const wrapper = mount(CashAdvanceDetailsModal, {
+      props: {
+        isOpen: true,
+        record: {
+          id: 17,
+          userId: 99,
+          purpose: "Field supplies",
+          amount: 100,
+          balance: 100,
+          date: "2026-11-25",
+          dueDate: "2026-11-27",
+          status: "pending",
+        },
+      },
+      global: { stubs: baseStubs },
+    });
+
+    expect(wrapper.find('[data-testid="summary-disbursement-date"]').text()).toContain("--");
+  });
+});
