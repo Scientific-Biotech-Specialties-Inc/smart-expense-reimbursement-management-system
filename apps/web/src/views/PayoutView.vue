@@ -366,6 +366,7 @@ onMounted(async () => {
       v-model:current-page="currentPage"
       :page-size="pageSize"
       :is-admin="auth.isAdmin"
+      :current-user-id="auth.user?.id ?? null"
       @toggle-sort="toggleSort"
       @view-details="openDetails"
     />

@@ -8,6 +8,7 @@ import {
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import ActionDropdownMenu from "@/components/base/ActionDropdownMenu.vue";
+import { getRequiredActionLabel } from "@/utils/requestActionIndicator";
 import {
   ChevronUp,
   ChevronDown,
@@ -25,6 +26,7 @@ const props = defineProps({
   currentPage: { type: Number, required: true },
   pageSize: { type: Number, default: 10 },
   isAdmin: { type: Boolean, default: false },
+  currentUserId: { type: [String, Number], default: null },
 });
 
 const emit = defineEmits([
@@ -62,6 +64,12 @@ function getActions(row) {
       handler: () => emit("view-details", row),
     },
   ];
+}
+function getRequiredAction(row) {
+  return getRequiredActionLabel(row, "payout", {
+    isAdmin: props.isAdmin,
+    currentUserId: props.currentUserId,
+  });
 }
 </script>
 
@@ -200,7 +208,11 @@ function getActions(row) {
                 <StatusBadge :status="row.acknowledgementStatus" />
               </td>
               <td class="px-5 py-5 text-center">
-                <ActionDropdownMenu :actions="getActions(row)" />
+                <ActionDropdownMenu
+                  :actions="getActions(row)"
+                  :show-indicator="Boolean(getRequiredAction(row))"
+                  :indicator-label="getRequiredAction(row) || undefined"
+                />
               </td>
             </tr>
           </template>

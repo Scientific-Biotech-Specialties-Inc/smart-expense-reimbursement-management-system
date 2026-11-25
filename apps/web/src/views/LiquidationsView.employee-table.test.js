@@ -628,5 +628,45 @@ describe("LiquidationsView — Employee table plumbing", () => {
       mockItems[0].dueDate = originalDue;
     }
   });
+
+  it("shows red pending indicator dot on employee liquidation advances only when employee action is needed", async () => {
+    mockSettlements.push(
+      {
+        id: 901,
+        cash_advance_id: "ca-2",
+        status: "liquidated",
+        receipts: [],
+      },
+      {
+        id: 902,
+        cash_advance_id: "ca-3",
+        status: "under-review",
+        receipts: [],
+      },
+    );
+    try {
+      const wrapper = mountView();
+      const menus = wrapper.findAllComponents(ActionDropdownMenu);
+      const findMenu = (purpose) =>
+        menus.find((m) => m.element.closest("tr")?.textContent?.includes(purpose));
+
+      // ca-1: signed, no settlement -> employee needs to submit liquidation
+      expect(findMenu("Purpose 1").props("showIndicator")).toBe(true);
+      expect(findMenu("Purpose 1").props("indicatorLabel")).toBe("Submit liquidation");
+      expect(findMenu("Purpose 1").find('[data-testid="action-pending-indicator"]').attributes("title")).toBe(
+        "Submit liquidation",
+      );
+
+      // ca-2: liquidated -> terminal, no action needed
+      expect(findMenu("Purpose 2").props("showIndicator")).toBe(false);
+      expect(findMenu("Purpose 2").find('[data-testid="action-pending-indicator"]').exists()).toBe(false);
+
+      // ca-3: under-review -> waiting on admin, no employee action needed
+      expect(findMenu("Purpose 3").props("showIndicator")).toBe(false);
+      expect(findMenu("Purpose 3").find('[data-testid="action-pending-indicator"]').exists()).toBe(false);
+    } finally {
+      mockSettlements.length = 0;
+    }
+  });
 });
 

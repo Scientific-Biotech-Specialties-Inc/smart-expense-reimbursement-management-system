@@ -12,12 +12,22 @@ import { cn } from "@/utils/cn";
  * ActionDropdownMenu — Accessible Radix-backed dropdown for table row actions.
  *
  * @prop {Array} actions — Each item: { label, icon, visible, disabled, handler, variant }
+ * @prop {Boolean} showIndicator — Shows a red dot on the top-right when a user action is required
+ * @prop {String} indicatorLabel — Accessible label & tooltip for the action-required indicator
  */
 defineProps({
   actions: {
     type: Array,
     required: true,
     validator: (v) => v.every((a) => a.label && a.handler),
+  },
+  showIndicator: {
+    type: Boolean,
+    default: false,
+  },
+  indicatorLabel: {
+    type: String,
+    default: "Action required",
   },
 });
 
@@ -32,11 +42,20 @@ function handleAction(action) {
     <DropdownMenuTrigger as-child>
       <button
         type="button"
-        class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-all duration-200 ease-out hover:border-[#2E85D8]/40 hover:bg-[#EFF6FF] hover:text-[#2E85D8] focus:outline-none focus:ring-2 focus:ring-[#2E85D8]/20"
+        class="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-all duration-200 ease-out hover:border-[#2E85D8]/40 hover:bg-[#EFF6FF] hover:text-[#2E85D8] focus:outline-none focus:ring-2 focus:ring-[#2E85D8]/20"
         title="Actions"
+        :aria-label="showIndicator ? `Actions — ${indicatorLabel}` : 'Actions'"
         @click.stop
       >
-        <MoreHorizontal class="h-4 w-4" />
+        <MoreHorizontal class="h-4 w-4" aria-hidden="true" />
+        <span
+          v-if="showIndicator"
+          data-testid="action-pending-indicator"
+          :title="indicatorLabel"
+          aria-hidden="true"
+          class="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white"
+        />
+        <span v-if="showIndicator" class="sr-only">{{ indicatorLabel }}</span>
       </button>
     </DropdownMenuTrigger>
 

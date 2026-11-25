@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-vue-next";
 import ActionDropdownMenu from "@/components/base/ActionDropdownMenu.vue";
+import { getRequiredActionLabel } from "@/utils/requestActionIndicator";
 
 const props = defineProps({
   isLoading: { type: Boolean, default: false },
@@ -24,6 +25,7 @@ const props = defineProps({
   sortKey: { type: String, default: "dateSubmitted" },
   sortDirection: { type: String, default: "desc" },
   isAdmin: { type: Boolean, default: false },
+  currentUserId: { type: [String, Number], default: null },
   currentPage: { type: Number, required: true },
   pageSize: { type: Number, default: 10 },
 });
@@ -70,6 +72,13 @@ function getActions(row) {
       handler: () => emit("delete-request", row),
     },
   ];
+}
+
+function getRequiredAction(row) {
+  return getRequiredActionLabel(row, "reimbursement", {
+    isAdmin: props.isAdmin,
+    currentUserId: props.currentUserId,
+  });
 }
 
 const tableMinWidth = computed(() =>
@@ -295,7 +304,11 @@ const tableMinWidth = computed(() =>
                 <StatusBadge :status="row.displayStatus" />
               </td>
               <td class="px-5 py-5 text-center">
-                <ActionDropdownMenu :actions="getActions(row)" />
+                <ActionDropdownMenu
+                  :actions="getActions(row)"
+                  :show-indicator="Boolean(getRequiredAction(row))"
+                  :indicator-label="getRequiredAction(row) || undefined"
+                />
               </td>
             </tr>
           </template>
