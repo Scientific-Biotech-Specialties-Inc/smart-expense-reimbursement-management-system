@@ -234,6 +234,7 @@ function handleConfirm() {
             v-model="granterSignature"
             label="Granter's Signature *"
             placeholder="Draw granter's signature here"
+            required
           />
         </div>
 

@@ -489,6 +489,8 @@ describe("SbsiReportDocumentEditor", () => {
 
     expect(wrapper.find('[data-testid="saved-signature-indicator"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="use-saved-signature-btn"]').exists()).toBe(false);
+    const padContainer = wrapper.find('[data-testid="signatory-signature-pad"] .rounded-xl.border');
+    expect(padContainer.classes()).toContain("border-red-500");
 
     const canvas = wrapper.find('[data-testid="signatory-signature-pad"] canvas');
     const ctxMock = {
@@ -508,6 +510,8 @@ describe("SbsiReportDocumentEditor", () => {
     await nextTick();
 
     expect(wrapper.emitted("update:modelValue").at(-1)[0].signatorySignature).toBe("data:image/png;base64,noProfileFreeDraw");
+    expect(padContainer.classes()).toContain("border-slate-200");
+    expect(padContainer.classes()).not.toContain("border-red-500");
   });
 
   it("renders signatory signature image in readonly mode and ignores unsafe urls", async () => {
