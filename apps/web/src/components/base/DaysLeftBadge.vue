@@ -28,7 +28,17 @@ const props = defineProps({
     type: Number,
     default: 7,
   },
+  variant: {
+    type: String,
+    default: "liquidation",
+    validator: (value) => ["liquidation", "signing"].includes(value),
+  },
 });
+
+const isSigningVariant = computed(() => props.variant === "signing");
+const effectiveGraceDays = computed(() =>
+  isSigningVariant.value ? 0 : GRACE_PERIOD_DAYS,
+);
 
 const parsedDueDate = computed(() => {
   if (!props.dueDate) return null;
@@ -52,18 +62,22 @@ const diffDays = computed(() => {
 });
 
 const normalizedStatus = computed(() => String(props.status || "").toLowerCase().trim());
-const isTerminalStatus = computed(() =>
-  TERMINAL_LIQUIDATION_STATUSES.includes(normalizedStatus.value),
+const isTerminalStatus = computed(
+  () =>
+    !isSigningVariant.value &&
+    TERMINAL_LIQUIDATION_STATUSES.includes(normalizedStatus.value),
 );
-const isPausedStatus = computed(() =>
-  PAUSED_LIQUIDATION_STATUSES.includes(normalizedStatus.value),
+const isPausedStatus = computed(
+  () =>
+    !isSigningVariant.value &&
+    PAUSED_LIQUIDATION_STATUSES.includes(normalizedStatus.value),
 );
 
 const computedIsOverdue = computed(() => {
-  if (normalizedStatus.value === "overdue") return true;
+  if (!isSigningVariant.value && normalizedStatus.value === "overdue") return true;
   if (typeof props.isOverdue === "boolean") return props.isOverdue;
   if (isTerminalStatus.value || isPausedStatus.value) return false;
-  return diffDays.value < -GRACE_PERIOD_DAYS;
+  return diffDays.value < -effectiveGraceDays.value;
 });
 
 const badgeMode = computed(() => {
@@ -121,6 +135,11 @@ const badgeText = computed(() => {
 const tone = computed(() => {
   if (badgeMode.value === "closed") return "slate";
   if (badgeMode.value === "under-review") return "violet";
+  if (isSigningVariant.value) {
+    if (badgeMode.value !== "countdown" || daysLeft.value <= 1) return "red";
+    if (daysLeft.value === 2) return "amber";
+    return "emerald";
+  }
   if (badgeMode.value !== "countdown" || daysLeft.value <= 3) return "red";
   if (daysLeft.value <= 10) return "amber";
   return "emerald";
@@ -171,6 +190,15 @@ const tooltipTitle = computed(() => {
     day: "numeric",
     year: "numeric",
   });
+  if (isSigningVariant.value) {
+    if (badgeMode.value === "penalty") {
+      return `Signing deadline exceeded (${dateStr}) — 3-day signing grace period passed; triggers a compliance strike`;
+    }
+    if (badgeMode.value === "due-today") {
+      return `Must sign today (${dateStr}) — last day before compliance strike`;
+    }
+    return `Must sign by ${dateStr} (${daysLeft.value} ${daysLeft.value === 1 ? "day" : "days"} remaining)`;
+  }
   if (badgeMode.value === "penalty") {
     return `Penalty active — past ${GRACE_PERIOD_DAYS}-day grace period (due ${dateStr})`;
   }
