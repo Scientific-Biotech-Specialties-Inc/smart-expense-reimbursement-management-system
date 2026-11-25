@@ -126,14 +126,11 @@ describe("getRequiredActionLabel & hasPendingSignOff", () => {
       expect(
         getRequiredActionLabel({ userId: 10, status: "revise" }, "liquidation_advance", ctx),
       ).toBe("Edit & resubmit liquidation");
-      for (const status of ["signed", "incomplete", "overdue", "overpayment"]) {
+      for (const status of ["signed", "incomplete", "overdue", "overpayment", "under-review"]) {
         expect(
           getRequiredActionLabel({ userId: 10, status }, "liquidation_advance", ctx),
-        ).toBe("Submit liquidation");
+        ).toBeNull();
       }
-      expect(
-        getRequiredActionLabel({ userId: 10, status: "under-review" }, "liquidation_advance", ctx),
-      ).toBeNull();
     });
   });
 

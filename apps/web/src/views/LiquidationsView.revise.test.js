@@ -180,7 +180,7 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
     while (mounted.length) mounted.pop().unmount();
   });
 
-  it("keeps #submit-liquidation-btn disabled on initial Settle modal open with real BaseSignaturePad and SbsiReportDocumentEditor", async () => {
+  it("keeps #submit-liquidation-btn disabled on initial Edit modal open with real BaseSignaturePad and SbsiReportDocumentEditor", async () => {
     mockAdvances.value = [
       {
         id: 10,
@@ -230,8 +230,9 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
 
     const wrapper = trackMount();
     await flushPromises();
-    await openAction(wrapper, "Settle");
+    await openAction(wrapper, "Edit");
 
+    expect(wrapper.text()).toContain("Edit Liquidation");
     expect(wrapper.find("#submit-liquidation-btn").attributes("disabled")).toBeDefined();
   });
 
@@ -276,13 +277,13 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
 
     const wrapper = trackMount();
     await flushPromises();
-    await openAction(wrapper, "Settle");
+    await openAction(wrapper, "Edit");
 
     expect(wrapper.find('[data-testid="mode-manual"]').attributes("aria-pressed")).toBe("true");
     expect(wrapper.find("#submit-liquidation-btn").attributes("disabled")).toBeDefined();
   });
 
-  it("enables on shortfall or receipt changes, re-disables on revert, and stays disabled after View -> Close -> Settle", async () => {
+  it("enables on shortfall or receipt changes, re-disables on revert, and stays disabled after View -> Close -> Edit", async () => {
     mockAdvances.value = [
       {
         id: 13,
@@ -324,11 +325,11 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
     const wrapper = trackMount();
     await flushPromises();
 
-    // Open in View, close, then open in Settle
+    // Open in View, close, then open in Edit
     await openAction(wrapper, "View");
     await wrapper.find("#settlement-modal-close").trigger("click");
     await flushPromises();
-    await openAction(wrapper, "Settle");
+    await openAction(wrapper, "Edit");
 
     const submitBtn = () => wrapper.find("#submit-liquidation-btn");
     expect(submitBtn().attributes("disabled")).toBeDefined();
@@ -414,7 +415,7 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
 
     const wrapper = trackMount();
     await flushPromises();
-    await openAction(wrapper, "Settle");
+    await openAction(wrapper, "Edit");
 
     const submitBtn = () => wrapper.find("#submit-liquidation-btn");
     expect(wrapper.find('[data-testid="mode-template"]').attributes("aria-pressed")).toBe("true");
@@ -492,7 +493,7 @@ describe("LiquidationsView — revise status keeps Update button disabled until 
 
     const wrapper = trackMount();
     await flushPromises();
-    await openAction(wrapper, "Settle");
+    await openAction(wrapper, "Edit");
 
     await wrapper.find("textarea").setValue("Updated note");
     await flushPromises();
