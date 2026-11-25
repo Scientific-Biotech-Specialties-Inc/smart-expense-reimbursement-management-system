@@ -44,6 +44,7 @@ import { formatPeso, formatDate, truncateText } from "@/utils/formatters";
 import { numberOrZero } from "@/utils/numbers";
 import {
   computePenaltyDaysPastGrace,
+  isLiquidationOverdue,
   sumPenaltyRecords,
   resolveAdvanceBalance,
   isExpenseBelowBalance,
@@ -870,18 +871,14 @@ const modalAdvanceStatus = computed(() => {
 
 const isModalAdvanceOverdue = computed(() => {
   if (!selectedAdvance.value) return false;
-  if (modalAdvanceStatus.value === "overdue") return true;
-  if (liqStore.calculateAging(selectedAdvance.value)?.isOverdue) return true;
-  if (
-    Array.isArray(selectedAdvance.value?.penalties) &&
-    selectedAdvance.value.penalties.length > 0
-  ) {
-    return true;
-  }
-  const due =
-    selectedAdvance.value.dueDate ||
-    selectedAdvance.value.expected_liquidation_date;
-  return computePenaltyDaysPastGrace(due) > 0;
+  return isLiquidationOverdue({
+    status: modalAdvanceStatus.value,
+    aging: liqStore.calculateAging(selectedAdvance.value),
+    penalties: selectedAdvance.value?.penalties,
+    dueDate:
+      selectedAdvance.value.dueDate ||
+      selectedAdvance.value.expected_liquidation_date,
+  });
 });
 
 function employeeSortValue(advance, key) {

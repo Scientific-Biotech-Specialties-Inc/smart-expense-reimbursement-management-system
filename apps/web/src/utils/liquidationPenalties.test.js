@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   resolveAdvanceBalance,
   isExpenseBelowBalance,
+  isLiquidationOverdue,
 } from "./liquidationPenalties";
 
 describe("liquidationPenalties balance helpers", () => {
@@ -19,5 +20,22 @@ describe("liquidationPenalties balance helpers", () => {
     expect(isExpenseBelowBalance(5250, 5000)).toBe(false);
     expect(isExpenseBelowBalance(100.1 + 200.2, 300.3)).toBe(false);
     expect(isExpenseBelowBalance(5000, 5150)).toBe(true);
+  });
+
+  it("evaluates overdue status past the 7-day grace period while respecting terminal and paused statuses", () => {
+    const refDate = new Date("2026-10-21T00:00:00Z");
+
+    expect(isLiquidationOverdue({ status: "overdue", dueDate: "2026-10-25" }, refDate)).toBe(true);
+    expect(isLiquidationOverdue({ status: "liquidated", penalties: [{ penalty_amount: 50 }], dueDate: "2026-10-25" }, refDate)).toBe(true);
+    expect(isLiquidationOverdue({ status: "disbursed", aging: { isOverdue: true }, dueDate: "2026-10-25" }, refDate)).toBe(true);
+
+    // Grace period (7 days past due) vs penalty day (8 days past due)
+    expect(isLiquidationOverdue({ status: "disbursed", dueDate: "2026-10-14" }, refDate)).toBe(false);
+    expect(isLiquidationOverdue({ status: "disbursed", dueDate: "2026-10-13" }, refDate)).toBe(true);
+
+    // Terminal & paused statuses without explicit overdue/penalties never trigger overdue
+    for (const status of ["liquidated", "settled", "rejected", "pending", "under-review", "approved"]) {
+      expect(isLiquidationOverdue({ status, dueDate: "2026-10-01" }, refDate)).toBe(false);
+    }
   });
 });

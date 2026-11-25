@@ -587,9 +587,30 @@ describe("LiquidationsView — Employee table plumbing", () => {
     }
   });
 
-  it("renders overdue DaysLeftBadge in settlement modal header when advance is overdue", async () => {
+  it("renders grace period countdown in settlement modal header when inside 7-day grace window", async () => {
+    const graceDate = new Date();
+    graceDate.setDate(graceDate.getDate() - 5);
+    const dueDateStr = graceDate.toISOString().split("T")[0];
+
+    const originalDue = mockItems[0].dueDate;
+    mockItems[0].dueDate = dueDateStr;
+    try {
+      const wrapper = mountView();
+      wrapper.vm.openSettlementModal(mockItems[0], "view");
+      await wrapper.vm.$nextTick();
+
+      const modalHeader = wrapper.find(".base-modal-stub .border-b");
+      const daysLeftBadge = modalHeader.findComponent(DaysLeftBadge);
+      expect(daysLeftBadge.exists()).toBe(true);
+      expect(daysLeftBadge.text()).toContain("3 grace days left");
+    } finally {
+      mockItems[0].dueDate = originalDue;
+    }
+  });
+
+  it("renders PENALTY DaysLeftBadge in settlement modal header when advance is past 7-day grace period", async () => {
     const pastDate = new Date();
-    pastDate.setDate(pastDate.getDate() - 5);
+    pastDate.setDate(pastDate.getDate() - 10);
     const dueDateStr = pastDate.toISOString().split("T")[0];
 
     const originalDue = mockItems[0].dueDate;
@@ -602,7 +623,7 @@ describe("LiquidationsView — Employee table plumbing", () => {
       const modalHeader = wrapper.find(".base-modal-stub .border-b");
       const daysLeftBadge = modalHeader.findComponent(DaysLeftBadge);
       expect(daysLeftBadge.exists()).toBe(true);
-      expect(daysLeftBadge.text()).toContain("0 days left");
+      expect(daysLeftBadge.text()).toBe("PENALTY");
     } finally {
       mockItems[0].dueDate = originalDue;
     }

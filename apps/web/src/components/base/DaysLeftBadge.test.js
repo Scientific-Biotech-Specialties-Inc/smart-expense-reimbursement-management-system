@@ -105,7 +105,60 @@ describe("DaysLeftBadge", () => {
     expect(wrapper1Day.classes()).toContain("bg-red-50");
   });
 
-  it("renders '0 days left' with 100% progress and red styling when status is overdue", () => {
+  it("renders 'Due today' with 100% progress and red styling on the due date", () => {
+    const wrapper = mount(DaysLeftBadge, {
+      props: {
+        dueDate: "2026-10-21T00:00:00Z", // 0 days diff
+        startDate: "2026-10-14T00:00:00Z",
+      },
+    });
+
+    expect(wrapper.text()).toContain("Due today");
+    expect(wrapper.classes()).toContain("bg-red-50");
+    expect(wrapper.classes()).toContain("text-red-700");
+    const progressbar = wrapper.find('[role="progressbar"]');
+    expect(progressbar.exists()).toBe(true);
+    expect(progressbar.attributes("aria-valuenow")).toBe("100");
+  });
+
+  it("renders grace period countdown (7 down to 1) during days 1 to 7 past due", () => {
+    const day1Past = mount(DaysLeftBadge, {
+      props: {
+        dueDate: "2026-10-20T00:00:00Z", // 1 day past due -> 7 grace days left
+        startDate: "2026-10-13T00:00:00Z",
+      },
+    });
+    expect(day1Past.text()).toContain("7 grace days left");
+    expect(day1Past.classes()).toContain("bg-red-50");
+    expect(day1Past.find('[role="progressbar"]').attributes("aria-valuenow")).toBe("100");
+
+    const day7Past = mount(DaysLeftBadge, {
+      props: {
+        dueDate: "2026-10-14T00:00:00Z", // 7 days past due -> 1 grace day left
+        startDate: "2026-10-07T00:00:00Z",
+      },
+    });
+    expect(day7Past.text()).toContain("1 grace day left");
+    expect(day7Past.classes()).toContain("bg-red-50");
+    expect(day7Past.find('[role="progressbar"]').attributes("aria-valuenow")).toBe("100");
+  });
+
+  it("renders 'PENALTY' with alert icon and no progress bar once past the 7-day grace period", () => {
+    const wrapper = mount(DaysLeftBadge, {
+      props: {
+        dueDate: "2026-10-13T00:00:00Z", // 8 days past due
+        status: "disbursed",
+      },
+    });
+
+    expect(wrapper.text()).toBe("PENALTY");
+    expect(wrapper.classes()).toContain("bg-red-50");
+    expect(wrapper.classes()).toContain("text-red-700");
+    expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="days-left-penalty-icon"]').exists()).toBe(true);
+  });
+
+  it("renders 'PENALTY' with no progress bar when status is overdue", () => {
     const wrapper = mount(DaysLeftBadge, {
       props: {
         dueDate: "2026-10-15T00:00:00Z",
@@ -113,14 +166,14 @@ describe("DaysLeftBadge", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("0 days left");
+    expect(wrapper.text()).toBe("PENALTY");
     expect(wrapper.classes()).toContain("bg-red-50");
     expect(wrapper.classes()).toContain("text-red-700");
-    const progressbar = wrapper.find('[role="progressbar"]');
-    expect(progressbar.attributes("aria-valuenow")).toBe("100");
+    expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="days-left-penalty-icon"]').exists()).toBe(true);
   });
 
-  it("renders '0 days left' when isOverdue prop is true", () => {
+  it("renders 'PENALTY' when isOverdue prop is true", () => {
     const wrapper = mount(DaysLeftBadge, {
       props: {
         dueDate: "2026-10-30T00:00:00Z",
@@ -128,9 +181,37 @@ describe("DaysLeftBadge", () => {
       },
     });
 
-    expect(wrapper.text()).toContain("0 days left");
-    const progressbar = wrapper.find('[role="progressbar"]');
-    expect(progressbar.attributes("aria-valuenow")).toBe("100");
+    expect(wrapper.text()).toBe("PENALTY");
+    expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="days-left-penalty-icon"]').exists()).toBe(true);
+  });
+
+  it("renders 'Closed' instead of 'PENALTY' for past-due liquidated, settled, or rejected records without penalties", () => {
+    for (const status of ["liquidated", "settled", "rejected"]) {
+      const wrapper = mount(DaysLeftBadge, {
+        props: {
+          dueDate: "2026-10-01T00:00:00Z", // 20 days past due
+          status,
+        },
+      });
+      expect(wrapper.text()).toBe("Closed");
+      expect(wrapper.text()).not.toContain("PENALTY");
+      expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
+    }
+  });
+
+  it("renders 'Under review' instead of 'PENALTY' for past-due pending, under-review, or approved records without penalties", () => {
+    for (const status of ["pending", "under-review", "approved"]) {
+      const wrapper = mount(DaysLeftBadge, {
+        props: {
+          dueDate: "2026-10-01T00:00:00Z", // 20 days past due
+          status,
+        },
+      });
+      expect(wrapper.text()).toBe("Under review");
+      expect(wrapper.text()).not.toContain("PENALTY");
+      expect(wrapper.find('[role="progressbar"]').exists()).toBe(false);
+    }
   });
 
   it("still renders when status is liquidated, settled, or rejected as long as dueDate exists", () => {

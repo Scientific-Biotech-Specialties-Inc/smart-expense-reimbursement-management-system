@@ -46,13 +46,65 @@ describe("LiquidationReviewModal Header Chipsets", () => {
 
     expect(daysLeftBadge.exists()).toBe(true);
     expect(statusBadge.exists()).toBe(true);
-    expect(daysLeftBadge.text()).toContain("0 days left");
+    expect(daysLeftBadge.text()).toBe("PENALTY");
     expect(statusBadge.text()).toContain("Overdue");
 
     // Verify ordering: DaysLeftBadge precedes StatusBadge in the DOM tree
     const container = statusBadge.element.parentElement;
     expect(container).toBeDefined();
     expect(daysLeftBadge.element.nextElementSibling).toBe(statusBadge.element);
+  });
+
+  it("does not show PENALTY when liquidated or under-review case has past dueDate without penalties", () => {
+    const liquidatedWrapper = mount(LiquidationReviewModal, {
+      props: {
+        isOpen: true,
+        reviewingCase: {
+          id: "LIQ-013",
+          cashAdvanceAmount: 500,
+          dueDate: "2026-10-01",
+          dateOfAdvances: "2026-09-24",
+          requestorName: "Juan Dela Cruz",
+          penalties: [],
+        },
+        reviewStatus: "liquidated",
+        reviewOutstandingBalance: 500,
+        getFileUrl: () => "",
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          BaseReceiptImage: true,
+        },
+      },
+    });
+
+    expect(liquidatedWrapper.findComponent(DaysLeftBadge).text()).toBe("Closed");
+
+    const reviewWrapper = mount(LiquidationReviewModal, {
+      props: {
+        isOpen: true,
+        reviewingCase: {
+          id: "LIQ-014",
+          cashAdvanceAmount: 500,
+          dueDate: "2026-10-01",
+          dateOfAdvances: "2026-09-24",
+          requestorName: "Juan Dela Cruz",
+          penalties: [],
+        },
+        reviewStatus: "under-review",
+        reviewOutstandingBalance: 500,
+        getFileUrl: () => "",
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          BaseReceiptImage: true,
+        },
+      },
+    });
+
+    expect(reviewWrapper.findComponent(DaysLeftBadge).text()).toBe("Under review");
   });
 
   it("renders 'x days left' when case has remaining days before due date", () => {

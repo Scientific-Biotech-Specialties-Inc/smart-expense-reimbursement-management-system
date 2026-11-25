@@ -4,6 +4,8 @@
 
 export const GRACE_PERIOD_DAYS = 7;
 export const DAILY_PENALTY_PHP = 50;
+export const TERMINAL_LIQUIDATION_STATUSES = ["liquidated", "settled", "rejected"];
+export const PAUSED_LIQUIDATION_STATUSES = ["pending", "under-review", "approved"];
 
 /**
  * Sum persisted penalty amounts from an array of penalty records.
@@ -64,4 +66,29 @@ export function isExpenseBelowBalance(expenseAmount, balanceAmount) {
   const expenseCents = Math.round((Number.isFinite(expense) ? expense : 0) * 100);
   const balanceCents = Math.round((Number.isFinite(balance) ? balance : 0) * 100);
   return expenseCents < balanceCents;
+}
+
+/**
+ * Determine whether a liquidation/cash advance is overdue past the 7-day grace period,
+ * respecting explicit overdue/penalty records and terminal or paused review statuses.
+ *
+ * @param {{ status?: string, aging?: { isOverdue?: boolean }|null, penalties?: Array|null, dueDate?: string|Date|number|null }} [params]
+ * @param {Date} [referenceDate]
+ * @returns {boolean}
+ */
+export function isLiquidationOverdue(
+  { status = "", aging = null, penalties = null, dueDate = null } = {},
+  referenceDate = new Date(),
+) {
+  const normalizedStatus = String(status || "").toLowerCase().trim();
+  if (normalizedStatus === "overdue") return true;
+  if (Array.isArray(penalties) && penalties.length > 0) return true;
+  if (
+    TERMINAL_LIQUIDATION_STATUSES.includes(normalizedStatus) ||
+    PAUSED_LIQUIDATION_STATUSES.includes(normalizedStatus)
+  ) {
+    return false;
+  }
+  if (aging?.isOverdue) return true;
+  return computePenaltyDaysPastGrace(dueDate, referenceDate) > 0;
 }
