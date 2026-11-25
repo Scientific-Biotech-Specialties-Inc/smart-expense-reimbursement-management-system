@@ -9,6 +9,8 @@ import BaseModal from "@/components/base/BaseModal.vue";
 import BaseModalTabs from "@/components/base/BaseModalTabs.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import StatusBadge from "@/components/base/StatusBadge.vue";
+import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
+import MustSignBadge from "@/components/base/MustSignBadge.vue";
 import DecisionConfirmationModal from "@/components/base/DecisionConfirmationModal.vue";
 import GrantPayoutModal from "@/components/reimbursements/GrantPayoutModal.vue";
 import UnifiedRoadmapStepper from "@/components/base/UnifiedRoadmapStepper.vue";
@@ -19,6 +21,8 @@ import { formatPeso, formatDate } from "@/utils/formatters";
 import { getFileUrl } from "@/utils/fileUtils";
 import { downloadSbsiReportPdf } from "@/utils/sbsiPdfGenerator";
 import {
+  CA_SIGNING_GRACE_DAYS,
+  computeSigningDeadline,
   sumPenaltyRecords,
   resolveAdvanceBalance,
 } from "@/utils/liquidationPenalties";
@@ -343,6 +347,9 @@ const resolvedGrantedAt = computed(
     payoutMeta.value?.granted_at ||
     disbursementMeta.value?.created_at ||
     disbursementMeta.value?.disbursement_date ||
+    props.record?.disbursedAt ||
+    props.record?.grantedDate ||
+    props.record?.granted_at ||
     null,
 );
 
@@ -396,6 +403,25 @@ const canAcknowledgeFromCurrentView = computed(
     !resolvedAcknowledgedAt.value &&
     !resolvedEmployeeSignature.value,
 );
+
+const isAwaitingSignature = computed(() => {
+  const status = normalizeStatus(props.record?.status);
+  const isAck = Boolean(
+    resolvedAcknowledgedAt.value ||
+      resolvedEmployeeSignature.value ||
+      props.record?.acknowledged,
+  );
+  return status === "disbursed" && !isAck;
+});
+
+const showMustSignBadge = computed(() =>
+  Boolean(!auth?.isAdmin && canAcknowledgeFromCurrentView.value),
+);
+
+const signingDeadline = computed(() => {
+  if (!isAwaitingSignature.value) return null;
+  return computeSigningDeadline(resolvedGrantedAt.value);
+});
 
 const modalTabs = computed(() => [
   { key: "report", label: "Report Attachment" },
@@ -735,7 +761,7 @@ async function confirmAcknowledge() {
 
         <!-- Sticky Header -->
         <div class="px-6 pt-8 pb-4 border-b border-slate-100 shrink-0">
-          <div class="flex items-start justify-between gap-4">
+          <div class="flex items-start justify-between gap-4 pr-6">
             <div>
               <p class="text-[11px] text-slate-400 uppercase tracking-wide mb-1">
                 Cash Advance Ref #{{ record.id }}
@@ -759,7 +785,20 @@ async function confirmAcknowledge() {
                 </span>
               </div>
             </div>
-            <StatusBadge :status="record.status" />
+            <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
+              <MustSignBadge
+                v-if="showMustSignBadge"
+                data-testid="cash-advance-must-sign-badge"
+              />
+              <DaysLeftBadge
+                v-if="signingDeadline"
+                variant="signing"
+                :due-date="signingDeadline"
+                :start-date="resolvedGrantedAt"
+                :total-days="CA_SIGNING_GRACE_DAYS"
+              />
+              <StatusBadge :status="record.status" />
+            </div>
           </div>
         </div>
 

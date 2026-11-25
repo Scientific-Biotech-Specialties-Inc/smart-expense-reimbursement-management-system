@@ -3,6 +3,7 @@
  */
 
 export const GRACE_PERIOD_DAYS = 7;
+export const CA_SIGNING_GRACE_DAYS = 3;
 export const DAILY_PENALTY_PHP = 50;
 export const TERMINAL_LIQUIDATION_STATUSES = ["liquidated", "settled", "rejected"];
 export const PAUSED_LIQUIDATION_STATUSES = ["pending", "under-review", "approved"];
@@ -91,4 +92,19 @@ export function isLiquidationOverdue(
   }
   if (aging?.isOverdue) return true;
   return computePenaltyDaysPastGrace(dueDate, referenceDate) > 0;
+}
+
+/**
+ * Compute the 3-day employee signing deadline from a cash advance disbursement timestamp.
+ *
+ * @param {string|Date|number|null|undefined} grantedDateValue
+ * @returns {Date|null}
+ */
+export function computeSigningDeadline(grantedDateValue) {
+  if (!grantedDateValue) return null;
+  const granted = new Date(grantedDateValue);
+  if (Number.isNaN(granted.getTime())) return null;
+  const due = new Date(granted);
+  due.setDate(due.getDate() + CA_SIGNING_GRACE_DAYS);
+  return due;
 }

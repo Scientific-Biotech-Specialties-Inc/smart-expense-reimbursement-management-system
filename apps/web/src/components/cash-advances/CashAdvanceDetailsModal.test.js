@@ -4,6 +4,7 @@ import { ref, nextTick } from "vue";
 import { mount, flushPromises } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import CashAdvanceDetailsModal from "./CashAdvanceDetailsModal.vue";
+import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
 import GrantPayoutModal from "@/components/reimbursements/GrantPayoutModal.vue";
 import DecisionConfirmationModal from "@/components/base/DecisionConfirmationModal.vue";
 import { useCashAdvanceStore } from "@/stores/cashAdvance";
@@ -1399,5 +1400,167 @@ describe("CashAdvanceDetailsModal — Request Summary Disbursement Date", () => 
     });
 
     expect(wrapper.find('[data-testid="summary-disbursement-date"]').text()).toContain("--");
+  });
+});
+
+describe("CashAdvanceDetailsModal — header Must Sign and 3-day signing countdown / penalty badges", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-26T00:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const mountModal = (record, { isAdmin = false, userId = isAdmin ? 99 : 10 } = {}) => {
+    mockAuth.isAdmin = isAdmin;
+    mockAuth.user = { id: userId, name: isAdmin ? "Admin User" : "Juan Dela Cruz" };
+    return mount(CashAdvanceDetailsModal, {
+      props: {
+        isOpen: true,
+        record,
+      },
+      global: {
+        stubs: {
+          UnifiedRoadmapStepper: true,
+          StatusBadge: { template: '<span data-testid="status-badge-stub" />' },
+          DecisionConfirmationModal: true,
+          GrantPayoutModal: true,
+          SbsiReportPreviewModal: true,
+          BaseModal: true,
+          BaseAuditTrail: true,
+          BaseSignaturePad: true,
+        },
+      },
+    });
+  };
+
+  it("renders Must Sign then DaysLeftBadge before StatusBadge for unacknowledged employee cash advance across 3-day thresholds and PENALTY", async () => {
+    const baseRecord = {
+      id: 301,
+      userId: 10,
+      purpose: "Field Calibration",
+      amount: 5000,
+      balance: 5000,
+      status: "disbursed",
+      acknowledgedAt: null,
+      signatureImage: null,
+      payout: {
+        granted_at: "2026-11-26T00:00:00Z",
+      },
+    };
+
+    const wrapper = mountModal(baseRecord, { isAdmin: false, userId: 10 });
+
+    const mustSign = wrapper.find('[data-testid="cash-advance-must-sign-badge"]');
+    const daysLeft = wrapper.findComponent(DaysLeftBadge);
+    expect(mustSign.exists()).toBe(true);
+    expect(mustSign.text()).toContain("Must Sign");
+    expect(daysLeft.exists()).toBe(true);
+    expect(daysLeft.text()).toContain("3 days left");
+    expect(daysLeft.classes()).toContain("bg-emerald-50");
+
+    // Verify DOM order: Must Sign -> DaysLeftBadge -> StatusBadge
+    const html = wrapper.html();
+    const mustSignIdx = html.indexOf('data-testid="cash-advance-must-sign-badge"');
+    const daysLeftIdx = html.indexOf('data-testid="days-left-badge"');
+    const statusIdx = html.indexOf('data-testid="status-badge-stub"');
+    expect(daysLeftIdx).toBeGreaterThan(mustSignIdx);
+    expect(statusIdx).toBeGreaterThan(daysLeftIdx);
+
+    // Day 1 -> 2 days left (amber)
+    await wrapper.setProps({
+      record: { ...baseRecord, payout: { granted_at: "2026-11-25T00:00:00Z" } },
+    });
+    expect(wrapper.findComponent(DaysLeftBadge).text()).toContain("2 days left");
+    expect(wrapper.findComponent(DaysLeftBadge).classes()).toContain("bg-amber-50");
+
+    // Day 2 -> 1 day left (red)
+    await wrapper.setProps({
+      record: { ...baseRecord, payout: { granted_at: "2026-11-24T00:00:00Z" } },
+    });
+    expect(wrapper.findComponent(DaysLeftBadge).text()).toContain("1 day left");
+    expect(wrapper.findComponent(DaysLeftBadge).classes()).toContain("bg-red-50");
+
+    // Day 3 -> Due today (red)
+    await wrapper.setProps({
+      record: { ...baseRecord, payout: { granted_at: "2026-11-23T00:00:00Z" } },
+    });
+    expect(wrapper.findComponent(DaysLeftBadge).text()).toContain("Due today");
+    expect(wrapper.findComponent(DaysLeftBadge).classes()).toContain("bg-red-50");
+
+    // Day 4+ -> PENALTY (red)
+    await wrapper.setProps({
+      record: { ...baseRecord, payout: { granted_at: "2026-11-21T00:00:00Z" } },
+    });
+    expect(wrapper.findComponent(DaysLeftBadge).text()).toBe("PENALTY");
+    expect(wrapper.findComponent(DaysLeftBadge).classes()).toContain("bg-red-50");
+  });
+
+  it("renders DaysLeftBadge / PENALTY without Must Sign for admin on unacknowledged disbursed cash advance", () => {
+    const wrapper = mountModal(
+      {
+        id: 302,
+        userId: 10,
+        purpose: "Field Calibration",
+        amount: 5000,
+        balance: 5000,
+        status: "disbursed",
+        disbursement: {
+          created_at: "2026-11-21T00:00:00Z",
+        },
+      },
+      { isAdmin: true, userId: 99 },
+    );
+
+    expect(wrapper.find('[data-testid="cash-advance-must-sign-badge"]').exists()).toBe(false);
+    expect(wrapper.findComponent(DaysLeftBadge).exists()).toBe(true);
+    expect(wrapper.findComponent(DaysLeftBadge).text()).toBe("PENALTY");
+  });
+
+  it("hides Must Sign and DaysLeftBadge when acknowledged or not disbursed, and omits DaysLeftBadge if granted date is missing", () => {
+    const acked = mountModal(
+      {
+        id: 303,
+        userId: 10,
+        amount: 5000,
+        status: "disbursed",
+        acknowledgedAt: "2026-11-26T00:00:00Z",
+        payout: { granted_at: "2026-11-21T00:00:00Z" },
+      },
+      { isAdmin: false, userId: 10 },
+    );
+    expect(acked.find('[data-testid="cash-advance-must-sign-badge"]').exists()).toBe(false);
+    expect(acked.findComponent(DaysLeftBadge).exists()).toBe(false);
+
+    const pending = mountModal(
+      {
+        id: 304,
+        userId: 10,
+        amount: 5000,
+        status: "approved",
+        payout: { granted_at: "2026-11-21T00:00:00Z" },
+      },
+      { isAdmin: false, userId: 10 },
+    );
+    expect(pending.find('[data-testid="cash-advance-must-sign-badge"]').exists()).toBe(false);
+    expect(pending.findComponent(DaysLeftBadge).exists()).toBe(false);
+
+    const missingDate = mountModal(
+      {
+        id: 305,
+        userId: 10,
+        amount: 5000,
+        status: "disbursed",
+        acknowledgedAt: null,
+        signatureImage: null,
+      },
+      { isAdmin: false, userId: 10 },
+    );
+    expect(missingDate.find('[data-testid="cash-advance-must-sign-badge"]').exists()).toBe(true);
+    expect(missingDate.findComponent(DaysLeftBadge).exists()).toBe(false);
   });
 });
