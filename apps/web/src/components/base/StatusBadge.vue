@@ -195,6 +195,42 @@ const statusConfig = {
     medium: 'bg-red-50 text-red-700 border border-red-300',
     low: 'bg-red-50/70 text-red-700',
   },
+  clear: {
+    label: 'Clear',
+    high: 'bg-emerald-600 text-white',
+    medium: 'bg-emerald-50 text-emerald-700 border border-emerald-300',
+    low: 'bg-emerald-50/70 text-emerald-700',
+  },
+  warning: {
+    label: 'Warning',
+    high: 'bg-amber-600 text-white',
+    medium: 'bg-amber-50 text-amber-800 border border-amber-300',
+    low: 'bg-amber-50/70 text-amber-800',
+  },
+  penalized: {
+    label: 'Penalized',
+    high: 'bg-red-600 text-white',
+    medium: 'bg-red-50 text-red-700 border border-red-300',
+    low: 'bg-red-50/70 text-red-700',
+  },
+  waived: {
+    label: 'Waived',
+    high: 'bg-slate-600 text-white',
+    medium: 'bg-slate-100 text-slate-700 border border-slate-300',
+    low: 'bg-slate-100/70 text-slate-600',
+  },
+  reset: {
+    label: 'Reset',
+    high: 'bg-blue-600 text-white',
+    medium: 'bg-blue-50 text-blue-700 border border-blue-300',
+    low: 'bg-blue-50/70 text-blue-700',
+  },
+  active: {
+    label: 'Active',
+    high: 'bg-amber-600 text-white',
+    medium: 'bg-amber-50 text-amber-800 border border-amber-300',
+    low: 'bg-amber-50/70 text-amber-800',
+  },
 }
 
 function toTitleCase(str) {

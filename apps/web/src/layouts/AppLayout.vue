@@ -50,7 +50,7 @@ const sidebarOpen = ref(true);
 const notifOpen = ref(false);
 const mobileOpen = ref(false);
 
-const navLinks = buildNavLinks();
+const navLinks = computed(() => buildNavLinks(auth.isAdmin));
 
 const unreadCount = computed(() => notif.unreadCount);
 

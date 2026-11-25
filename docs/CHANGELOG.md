@@ -6,6 +6,21 @@ Please refer to [**`DOC_CHANGELOG.md`**](DOC_CHANGELOG.md) for the complete vers
 
 ---
 
+## [Unreleased] - Nov 26, 2026
+
+### Changed
+- **Unified Compliance Appeal Letter (`docs/SERMS.md`, `apps/api`, `apps/web`):**
+  - Removed the `letter_type` classification across backend, frontend, database, and canonical docs (`docs/SERMS.md`) so penalized employees submit a single Compliance Appeal Letter (`explanation` + `letter_file` PDF/JPEG/PNG `<= 2MB`).
+  - Added migration `2026_11_26_000001_drop_letter_type_from_penalty_appeals_table.php`, updated `PenaltyAppeal`, `PenaltyController`, `PenaltyStrikeService`, `PenaltyModuleTest.php`, `stores/penalty.js`, `PenaltiesView.vue`, `AdminPenaltiesView.vue`, `PenaltyStatusBanner.vue` (`Submit Appeal Letter`), and corresponding Vitest tests.
+
+## [Unreleased] - Nov 25, 2026
+
+### Added
+- **3-Strike Compliance & Penalty Hold Module (`docs/SERMS.md`, `apps/api`, `apps/web`):**
+  - **Canonical Documentation (`docs/SERMS.md`):** Documented the new `Penalties` module (`App\Modules\Penalties`, `/api/penalties`), frontend routes (`/penalties`, `/admin/penalties`), 3-strike compliance workflow (`ca_unsigned_overdue`, `liquidation_overdue`, `manual_admin`), `403 PENALTY_HOLD_ACTIVE` submission hold semantics, Compliance Appeal Letter uploads in Supabase Bucket, append-only `reset`/`waived` transitions with cycle increments, `StatusBadge` values (`clear`, `warning`, `penalized`, `waived`, `reset`, `active`), and penalty audit actions.
+  - **Backend (`apps/api`):** Added `App\Modules\Penalties` (`PenaltiesServiceProvider`, `PenaltyController`, `PenaltyStrikeService`, `PenaltyStrike`, `PenaltyAppeal`, `PenaltyHoldException`) and migration `2026_11_25_000001_create_penalty_strikes_and_appeals_tables.php` (`penalty_strikes`, `penalty_appeals`, unique incident index, hard-delete guards); hooked automatic strike synchronization into `penalties:calculate` (`ComputeDailyPenalties`) and `GET /api/penalties/me` for unsigned disbursed Cash Advances (`> 3 days`, `ca_unsigned_overdue`) and overdue Liquidations (`liquidation_overdue`); enforced `403 PENALTY_HOLD_ACTIVE` on new `ReimbursementService` and `CashAdvanceService` submissions without blocking Cash Advance signing or Liquidations; implemented Compliance Appeal Letter uploads (`pdf,jpg,jpeg,png <= 2MB`) to Supabase `penalties/appeals` with SHA-256 hashing and `try-catch` cleanup, plus admin review (`approve` resets cycle active strikes to `0/3`, `reject` requires comment, self-approval blocked `403`), manual strike issuance, waive, and cycle reset endpoints; and registered `PENALTY_STRIKE_ISSUED`, `PENALTY_STRIKE_WAIVED`, `PENALTY_CYCLE_RESET`, `PENALTY_APPEAL_SUBMITTED`, `PENALTY_APPEAL_APPROVED`, and `PENALTY_APPEAL_REJECTED` in `AuditLogService::ACTION_META`.
+  - **Frontend (`apps/web`):** Added `usePenaltyStore` (`stores/penalty.js`), `penaltyFormatters.js`, `<PenaltyStatusBanner>` (1–2 strike warning with deep-link `Go to Record` redirects and 3-strike submission hold notice on `DashboardView.vue` and `PenaltiesView.vue`), `PenaltiesView.vue` (`/penalties`), and `AdminPenaltiesView.vue` (`/admin/penalties`, `requiresAdmin: true`) with `BaseKpiGrid`, `BaseFilterTabs`, inline letter preview + review modal, manual strike picker, and waive/reset modal; updated `StatusBadge.vue` (`clear`, `warning`, `penalized`, `waived`, `reset`, `active`), `router/index.js`, `useNavLinks.js`, and `AppLayout.vue`.
+
 ## [Unreleased] - Nov 23, 2026
 
 ### Added

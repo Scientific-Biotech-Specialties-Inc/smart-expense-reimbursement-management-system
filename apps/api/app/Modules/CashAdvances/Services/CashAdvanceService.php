@@ -9,6 +9,7 @@ use App\Modules\CashAdvances\Models\CashAdvanceApprovalAction;
 use App\Modules\CashAdvances\Models\CashAdvanceDisbursement;
 use App\Modules\CashAdvances\Models\CashAdvanceStatusHistory;
 use App\Modules\Notifications\Services\NotificationService;
+use App\Modules\Penalties\Services\PenaltyStrikeService;
 use App\Modules\Users\Models\User;
 use App\Modules\Shared\Services\PasswordVerificationService;
 use Illuminate\Http\Request;
@@ -22,6 +23,8 @@ class CashAdvanceService
 {
     public function createAdvance(User $user, array $data, array $files = [])
     {
+        app(PenaltyStrikeService::class)->assertUserNotPenalized((int) $user->id);
+
         return DB::transaction(function () use ($user, $data, $files) {
             $advance = CashAdvance::create([
                 'user_id' => $user->id,

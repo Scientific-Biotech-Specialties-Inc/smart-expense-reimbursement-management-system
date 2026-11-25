@@ -115,7 +115,7 @@ SBSI granted permission for their on-premises / dedicated server to be used for 
 
 ### 4.1 BIR VAT Rules & Financial Compliance
 - **BIR VAT Validation:** Receipts must be strictly classified as **VAT** or **NON-VAT** based on Bureau of Internal Revenue (BIR) validation logic, never on unverified user input.
-- **Immutable Auditing:** Append-only audit logs must be recorded for every financial mutation and retained for a minimum of 10 years. Updates and deletes on `audit_logs` and `penalties` tables are strictly forbidden.
+- **Immutable Auditing:** Append-only audit logs must be recorded for every financial mutation and retained for a minimum of 10 years. Updates and deletes on `audit_logs` and `penalties` tables are strictly forbidden, and `PenaltyStrike` / `PenaltyAppeal` models block hard deletes via `deleting()` model guards (resolutions use append-only `waived` / `reset` statuses and cycle increments).
 - **Session Policies:** Standard user sessions timeout after 90 minutes; Admin/IT sessions timeout after 60 minutes. Concurrent sessions from distinct IP addresses are blocked.
 - **No Hallucinations / No Fabrications:** Financial amounts, approval states, penalty calculations, and OCR outputs must never be guessed or fabricated. Missing fields require explicit clarification.
 
@@ -126,6 +126,10 @@ SBSI granted permission for their on-premises / dedicated server to be used for 
 - **Cash Advance & Routing:** Employee submits purpose, amount, expected disbursement, and liquidation dates -> request routes through active `approval_thresholds` -> Finance/Admin disburses funds via the shared `GrantPayoutModal` (recording `granted_by`, `payout_method` [`Cash`, `E-wallet`, `Card`, `Visa`, `Other`], optional `payout_method_other`, `granter_signature`, auto-generated `CA-{id}-{YmdHis}` reference fallback, and password re-verification, while preserving legacy `{ channel, reference, password }` support) -> employee acknowledges receipt via signature in Cash Advances or the unified Payout module (`PayoutView.vue`, supporting both `Reimbursement` and `Cash Advance` payout types) -> status transitions to `signed` / `unliquidated`.
 - **Advance Liquidation & Variance:** Employee submits liquidation report with matching receipts whose server-computed PHP `total_expense_amount` (summed from attached receipts' `converted_php_amount`) is equal to or greater than the cash advance's current `outstanding_balance` (including accrued overdue penalties). Submissions or updates with `total_expense_amount < outstanding_balance` are strictly blocked at both the UI and API (`422` validation error) layers; excess expenses beyond the balance are tracked as overpayment for reimbursement forwarding -> accounting audits and approves -> status marked `liquidated`.
 - **Daily Overdue Penalties:** Nightly queued job scans unliquidated cash advances past their 7-day grace period -> applies configured daily penalty (PHP 50.00/day) -> writes immutable penalty records.
+- **3-Strike Compliance & Penalty Hold Workflow:**
+  - **Automatic & Manual Strike Triggers:** `PenaltyStrikeService` synchronizes automatic strikes daily via `penalties:calculate` (`ComputeDailyPenalties`) and on-demand via `GET /api/penalties/me` (`syncUserStrikes()`) for: (1) Cash Advances remaining `disbursed` with `acknowledged_at IS NULL` strictly `> 3 days` after disbursement date (`ca_unsigned_overdue`), and (2) unliquidated Cash Advances with `outstanding_balance > 0` past `expected_liquidation_date` without an active or settled liquidation (`liquidation_overdue`). Administrators may also issue manual strikes (`manual_admin`) across `cash_advance`, `liquidation`, and `reimbursement` records.
+  - **1–2 Strikes (`warning`) & 3-Strike Hold (`penalized`):** Employees with `1–2` active strikes see an amber warning banner (`PenaltyStatusBanner.vue` on Dashboard and `/penalties`) with a `tabular-nums` strike meter and one-click `Go to Record` deep-link redirect buttons (`/cash-advances?view=ID`, `/liquidations?view=ID`, `/reimbursements?view=ID`). At `3/3` active strikes, `PenaltyHoldException` (`403 Forbidden`, `code: 'PENALTY_HOLD_ACTIVE'`) blocks new Reimbursement and Cash Advance submissions (`ReimbursementService` and `CashAdvanceService` creation paths) while deliberately permitting Cash Advance signing/acknowledgement and Liquidation submissions so employees can settle pending obligations without deadlock.
+  - **Compliance Appeal Letter & Admin Resolution:** Penalized employees submit a single Compliance Appeal Letter (`explanation` 10–2000 chars, `letter_file` PDF/JPEG/PNG `<= 2MB` uploaded to Supabase Bucket `penalties/appeals` with SHA-256 `letter_file_hash` and `try-catch` cleanup) via `/penalties` (`POST /api/penalties/appeals`). Administrators review appeals at `/admin/penalties` (`requiresAdmin: true`; self-approval blocked with `403`): **Approve** transitions current-cycle `active` strikes to `reset` and increments `current_cycle` (restoring active count to `0/3` and lifting the hold without deleting `penalties` or `audit_logs`); **Reject** requires a mandatory `admin_comment` and permits employee resubmission. Administrators can also waive individual strikes (`waived`) or reset a user's active strikes (`reset`) with mandatory reasons.
 - **90-Day Duplicate Detection:** Receipts matching Vendor, Date, Total Amount, or Invoice Number within 90 days are flagged. Submitting an override requires a minimum 20-character justification and generates a dedicated audit log.
 
 ---
@@ -186,7 +190,7 @@ graph TD
 
 ## 6. System Design, Modules & Cryptography (SDD)
 
-### 6.1 Module Roster (Canonical 9 Modules)
+### 6.1 Module Roster (Canonical 10 Modules)
 
 | Module | Route Prefix / Namespace | Key Controllers & Services | Key Jobs & Workers | Responsibility |
 |---|---|---|---|---|
@@ -194,6 +198,7 @@ graph TD
 | **`Reimbursements`** | `/api/reimbursements`<br>`App\Modules\Reimbursements` | `ReimbursementController`<br>`ReceiptController`<br>`ExpenseCategoryController`<br>`PrsReimbursementRequestController`<br>`PrsWebhookController`<br>`OcrCallbackController`<br>`ReimbursementService`<br>`ReceiptService`<br>`TsReimbursementImportService` | `UpdatePrsReimbursementStatusJob`<br>`UpdateTsReimbursementStatusJob`<br>`DispatchReceiptToAiService` | Reimbursement claim submission, multi-receipt uploading & OCR dispatch, 90-day duplicate checking, BIR VAT classification, system-locked multi-currency receipt FX snapshot persistence (`converted_php_amount`) and PHP-authoritative claim totals (`reimbursements.amount`), PRS status sync (`source_system === 'prs'` guarded), TS ticket reimbursement ingestion (`ticket_id`, `ticket_number`, `reference_no`), TS status sync, and approval workflows. |
 | **`Expenses`** | `/api/expenses`<br>`App\Modules\Expenses` | `ExpenseController`<br>`ExpenseService` | — | Generic expense logging, line-item recording, receipt linkage, and expense category association. |
 | **`Liquidations`** | `/api/liquidations`<br>`App\Modules\Liquidations` | `LiquidationController` | `CalculateDailyPenaltiesJob` | Cash advance liquidation reports, receipt item matching & scanning, PHP-normalized `total_expense_amount` aggregation from attached receipts' `converted_php_amount`, variance/shortfall computation, accounting audit verification, and daily penalty accruals. |
+| **`Penalties`** | `/api/penalties`<br>`App\Modules\Penalties`<br>*(UI: `/penalties`, `/admin/penalties`)* | `PenaltyController`<br>`PenaltyStrikeService`<br>`PenaltyStrike`, `PenaltyAppeal` (`PenaltyHoldException`) | `penalties:calculate` (`ComputeDailyPenalties`) | 3-strike compliance tracking (`ca_unsigned_overdue`, `liquidation_overdue`, `manual_admin`), submission hold enforcement (`403 PENALTY_HOLD_ACTIVE`), Compliance Appeal Letter submissions in Supabase Bucket, admin appeal review (`approve`/`reject`), strike waiving/cycle resets, and audit logging. |
 | **`AuditLogs`** | `App\Modules\AuditLogs` | `AuditLogService` | — | Centralized append-only audit trail logging (`AuditLogService::log()`) and compliance export action tracking. |
 | **`Notifications`** | `App\Modules\Notifications` | `NotificationDeliveryService` | — | Template-based in-app notification dispatching, failed attempt logging, and role-based hierarchy resolution. |
 | **`Ai`** | `App\Modules\Ai` | `AiServiceOcrEngine`<br>`TesseractOcrEngine` | — | OCR contract bindings (`OcrEngineInterface`, `AsyncOcrEngineInterface`), external OCR service communication, payload signing, and webhook validation. |
@@ -240,6 +245,7 @@ To ensure financial compliance, auditability, and transparent lifecycle tracking
 4. **Field-Level Diff Sanitization:** Attribute diffs (`before_state` vs `after_state`) are cleaned using `computeSanitizedDiff()`, excluding internal metadata (`id`, `created_at`, `updated_at`, `password`, `token`) and formatting monetary values into standard currency strings.
 5. **Universal View Modal Integration:** The reusable `<BaseAuditTrail />` component (`apps/web/src/components/base/BaseAuditTrail.vue`) is integrated across all 5 request and settlement modals (`ReimbursementDetailsModal.vue`, `PayoutDetailsModal.vue`, `CashAdvanceDetailsModal.vue`, `LiquidationReviewModal.vue`, `LiquidationSettlementForm.vue`). It renders a single unified card formatted as a clean, corporate table (`Time`, `User`, `Action`) with sort toggles (Latest / Oldest First), collapsible headers with badge counts, actor role indicators, Medium Date Format timestamps (`MMM D, YYYY · h:mm A`), inline comments, field change diffs, and a 4-event display cap with expand/collapse.
 6. **Multi-Format Export Engine:** Integrated client-side export utility (`apps/web/src/utils/auditTrailExport.js`) supporting instant downloads of the complete audit log in `XLSX` (Excel XML Spreadsheet), `CSV` (RFC-4180 with UTF-8 BOM), `PDF` (pure PDF 1.4 corporate report), and `JSON` directly from the `<BaseAuditTrail />` header.
+7. **Penalty Compliance Audit Actions (`AuditLogService::ACTION_META`):** All 3-strike compliance mutations execute inside `DB::transaction()` and log `PENALTY_STRIKE_ISSUED`, `PENALTY_STRIKE_WAIVED`, `PENALTY_CYCLE_RESET`, `PENALTY_APPEAL_SUBMITTED`, `PENALTY_APPEAL_APPROVED`, and `PENALTY_APPEAL_REJECTED` (alongside `OVERDUE_PENALTY` for daily monetary accruals).
 
 ### 6.5 CMS ↔ SERMS Bi-Directional Integration Architecture
 To connect SERMS expenses, vendor compliance, and recurring vendor spend with the Contract Management System (CMS):
@@ -331,6 +337,22 @@ To integrate field/sales activity reimbursements and planned activity cash advan
 6. **Environment Configuration (`config/services.php` `services.prs`, `.env.example`, Azure Container Apps):**
    - `PRS_API_URL`, `PRS_PORTAL_URL`, `PRS_INTERNAL_SECRET`, `PRS_WEBHOOK_SECRET`, `PRS_REIMBURSEMENT_STATUS_API_URL`, `PRS_CASH_ADVANCE_STATUS_API_URL`, `PRS_REIMBURSEMENT_API_KEY`, `PRS_REIMBURSEMENT_STATUS_API_KEY`, `PRS_REIMBURSEMENT_STATUS_API_TIMEOUT` (default `10`), and `INTERNAL_SERVICE_SECRET` (rotate to 32+ byte secret in production).
 
+### 6.9 3-Strike Compliance & Penalty Hold Architecture
+To enforce timely Cash Advance acknowledgements and Liquidation settlements without breaking immutable financial ledgers:
+1. **Database Tables & Immutability (`2026_11_25_000001_create_penalty_strikes_and_appeals_tables.php`, `2026_11_26_000001_drop_letter_type_from_penalty_appeals_table.php`):**
+   - `penalty_strikes`: Tracks per-cycle compliance strikes (`user_id`, `cycle_number`, `source_module` [`cash_advance`|`liquidation`|`reimbursement`], `source_id`, `source_reference`, `trigger_type` [`ca_unsigned_overdue`|`liquidation_overdue`|`manual_admin`], `reason`, `status` [`active`|`waived`|`reset`], `issued_by_id`, `issued_by_name`, `appeal_id`, `resolved_by_id`, `resolved_at`, `resolution_note`) with unique composite index `penalty_strikes_unique_incident` on `(user_id, cycle_number, source_module, source_id, trigger_type)` and index `penalty_strikes_user_status_idx` on `(user_id, status)`.
+   - `penalty_appeals`: Stores employee Compliance Appeal Letters (`user_id`, `cycle_number`, `explanation`, `letter_file_path`, `letter_file_name`, `letter_mime_type`, `letter_file_hash` SHA-256, `status` [`pending`|`approved`|`rejected`], `reviewed_by_id`, `reviewed_by_name`, `reviewed_at`, `admin_comment`). Migration `2026_11_26_000001_drop_letter_type_from_penalty_appeals_table.php` drops the legacy classification column so employees submit a single unified Compliance Appeal Letter.
+   - Both `PenaltyStrike` and `PenaltyAppeal` throw an exception in `static::deleting(...)` to forbid hard deletes; existing `penalties` (`PenaltyRecord`) and `audit_logs` tables remain strictly untouched and append-only.
+2. **Automatic Triggers & Submission Hold Guard:**
+   - `PenaltyStrikeService::syncUserStrikes()` (called on `GET /api/penalties/me` and daily via `penalties:calculate` -> `ComputeDailyPenalties`) issues one-time automatic strikes per incident for `ca_unsigned_overdue` (Cash Advance `status = 'disbursed'`, `acknowledged_at IS NULL`, disbursement date strictly `> 3 days` old) and `liquidation_overdue` (Cash Advance `outstanding_balance > 0`, `expected_liquidation_date < today`, and `!PenaltySyncService::hasActiveOrSettledLiquidation()`).
+   - `PenaltyStrikeService::assertUserNotPenalized($userId)` throws `PenaltyHoldException` (`403 Forbidden`, `{ message, code: 'PENALTY_HOLD_ACTIVE', active_strikes_count: 3 }`) inside `ReimbursementService::storeReimbursement()` and `CashAdvanceService::createAdvance()` only—never blocking Cash Advance signing/acknowledgement or Liquidation submission.
+3. **API Endpoints (`/api/penalties`, middleware `['api', 'auth.external', 'throttle:serms-api']`):**
+   - **Employee:** `GET /api/penalties/me` (returns `active_strikes_count`, `strike_limit: 3`, `standing`, `is_penalized`, `current_cycle`, `active_strikes`, `history_strikes`, `appeals`, `pending_appeal`, and read-only `overdue_monetary_penalties`) and `POST /api/penalties/appeals` (`multipart/form-data`: `explanation` 10–2000 chars, `letter_file` `pdf,jpg,jpeg,png <= 2MB` uploaded to Supabase Bucket `penalties/appeals` with SHA-256 hash and `try-catch` cleanup on DB failure; requires `active_strikes_count >= 3` and no pending appeal in the current cycle).
+   - **Admin (`$user->hasAdminPrivileges()`, `403` otherwise):** `GET /api/penalties/admin/overview` (SQL-aggregated KPIs, pending appeals, searchable/filterable standings with `current_cycle`, and unfiltered `employees` directory), `GET /api/penalties/admin/strikes`, `POST /api/penalties/admin/appeals/{id}/review` (`approve` resets active cycle strikes to `0/3` via `reset` status + cycle increment, blocking self-approval with `403`; `reject` requires `comment`), `POST /api/penalties/admin/strikes`, `POST /api/penalties/admin/strikes/{id}/waive`, `POST /api/penalties/admin/users/{userId}/reset`, and `GET /api/penalties/admin/users/{userId}/records`.
+4. **Frontend Integration (`apps/web`):**
+   - Routes `/penalties` (`PenaltiesView.vue`) and `/admin/penalties` (`AdminPenaltiesView.vue`, `meta: { requiresAdmin: true }`) wired in `router/index.js` and `useNavLinks.js` (`Penalties` and `Penalty Management`).
+   - `PenaltyStatusBanner.vue` renders on `DashboardView.vue` (non-admin employees) and `PenaltiesView.vue`, displaying 1–2 strike amber warnings with deep-link `Go to Record` buttons (`strike.redirect_path`) and 3-strike hold alerts with `Submit Appeal Letter` / `View Pending Appeal` CTAs, backed by `usePenaltyStore` (`stores/penalty.js`) and `penaltyFormatters.js` (`PHP 1,250.00`, Medium Date `MMM D, YYYY`, `tabular-nums`).
+
 ---
 
 ## 7. Design System & Frontend UX Standards (DSD)
@@ -348,7 +370,7 @@ To integrate field/sales activity reimbursements and planned activity cash advan
   - Body Text: `.text-body` (`text-sm text-slate-600 dark:text-slate-300 font-sans leading-relaxed`)
   - Numerical Values: `.text-value` (`font-mono text-sm font-medium tabular-nums`)
 
-### 7.3 Complete 23-Status Badge Map
+### 7.3 Complete Status Badge Map
 
 | Status Key | Background Class | Display Label | Context |
 |---|---|---|---|
@@ -375,6 +397,12 @@ To integrate field/sales activity reimbursements and planned activity cash advan
 | `pending-admin-re-review`| `bg-purple-600` | Pending Admin Re-Review | Re-submitted claim awaiting admin review |
 | `draft` | `bg-slate-400` | Draft | Work in progress |
 | `flagged` | `bg-orange-500` | Flagged | Flagged for OCR score `< 0.80` or duplicate check |
+| `clear` | `bg-emerald-600` | Clear | Employee compliance standing with `0` active strikes |
+| `warning` | `bg-amber-600` | Warning | Employee compliance standing with `1–2` active strikes |
+| `penalized` | `bg-red-600` | Penalized | Employee compliance standing at `3/3` active strikes (submission hold active) |
+| `waived` | `bg-slate-600` | Waived | Individual compliance strike waived by administrator |
+| `reset` | `bg-blue-600` | Reset | Compliance strikes resolved via approved appeal or admin cycle reset |
+| `active` | `bg-amber-600` | Active | Currently active compliance strike in the employee's current cycle |
 
 ---
 

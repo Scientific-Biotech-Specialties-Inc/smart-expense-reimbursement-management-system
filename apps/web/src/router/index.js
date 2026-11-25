@@ -99,6 +99,18 @@ const routes = [
         meta: { title: "My Profile", hideSidebar: true },
       },
       {
+        path: "penalties",
+        name: "Penalties",
+        component: () => import("@/views/PenaltiesView.vue"),
+        meta: { title: "Compliance & Penalties" },
+      },
+      {
+        path: "admin/penalties",
+        name: "AdminPenalties",
+        component: () => import("@/views/admin/AdminPenaltiesView.vue"),
+        meta: { title: "Penalty Management", requiresAdmin: true },
+      },
+      {
         path: "admin/policy",
         name: "Policy",
         component: () => import("@/views/admin/PolicyView.vue"),

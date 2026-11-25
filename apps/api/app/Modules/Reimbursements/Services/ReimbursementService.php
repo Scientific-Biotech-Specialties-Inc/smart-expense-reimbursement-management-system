@@ -7,6 +7,7 @@ use App\Modules\Reimbursements\Models\Receipt;
 use App\Modules\Reimbursements\Models\Reimbursement;
 use App\Modules\AuditLogs\Services\AuditLogService;
 use App\Modules\Notifications\Services\NotificationService;
+use App\Modules\Penalties\Services\PenaltyStrikeService;
 use App\Modules\Reimbursements\Jobs\UpdatePrsReimbursementStatusJob;
 use App\Modules\Reimbursements\Jobs\UpdateTsReimbursementStatusJob;
 use App\Modules\Shared\Services\CurrencyConversionService;
@@ -103,6 +104,8 @@ class ReimbursementService
      */
     public function storeReimbursement(User $user, array $validated, $reportFile)
     {
+        app(PenaltyStrikeService::class)->assertUserNotPenalized((int) $user->id);
+
         return DB::transaction(function () use ($user, $validated, $reportFile) {
             $receiptIds = array_values(array_unique($validated['receipt_ids']));
             $ownedReceipts = Receipt::whereIn('id', $receiptIds)
