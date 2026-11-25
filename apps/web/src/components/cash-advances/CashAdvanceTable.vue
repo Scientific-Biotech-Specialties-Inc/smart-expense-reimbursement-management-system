@@ -10,6 +10,7 @@ import {
   Trash2,
 } from "lucide-vue-next";
 import { formatPeso, formatDate } from "@/utils/formatters";
+import { Badge } from "@/components/ui/badge";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import BasePagination from "@/components/base/BasePagination.vue";
 import CashAdvanceTableSkeleton from "./CashAdvanceTableSkeleton.vue";
@@ -70,6 +71,89 @@ function getRequiredAction(row) {
   });
 }
 
+const DISBURSED_STATUSES = new Set([
+  "disbursed",
+  "signed",
+  "unliquidated",
+  "under-review",
+  "incomplete",
+  "overdue",
+  "liquidated",
+  "settled",
+]);
+
+function parseCalendarDate(value) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s]00:00:00)/);
+    if (match) {
+      return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    }
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function getDisbursementBadge(row) {
+  const status = String(row.status || "").toLowerCase().trim();
+  if (DISBURSED_STATUSES.has(status)) {
+    const disbursedRaw =
+      row.disbursedAt ||
+      row.payout?.granted_at ||
+      row.disbursement?.disbursement_date ||
+      row.disbursement?.created_at;
+    const disbursedFormatted = disbursedRaw ? formatDate(disbursedRaw) : null;
+    return {
+      label: "Disbursed",
+      badgeClass: "bg-slate-100 text-slate-700 border border-slate-300",
+      title:
+        disbursedFormatted && disbursedFormatted !== "—"
+          ? `Disbursed on ${disbursedFormatted}`
+          : "Already disbursed",
+    };
+  }
+
+  if (status === "rejected") return null;
+
+  const expectedDate = parseCalendarDate(
+    row.expected_disbursement_date || row.expectedDisbursementDate,
+  );
+  if (!expectedDate) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.round(
+    (expectedDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+  );
+
+  let label;
+  if (diffDays < 0) {
+    const overdueDays = Math.abs(diffDays);
+    label = `${overdueDays} ${overdueDays === 1 ? "day" : "days"} overdue`;
+  } else if (diffDays === 0) {
+    label = "Due today";
+  } else {
+    label = `${diffDays} ${diffDays === 1 ? "day" : "days"} left`;
+  }
+
+  let badgeClass;
+  if (diffDays <= 3) {
+    badgeClass = "bg-red-50 text-red-700 border border-red-300";
+  } else if (diffDays <= 10) {
+    badgeClass = "bg-amber-50 text-amber-700 border border-amber-300";
+  } else {
+    badgeClass = "bg-emerald-50 text-emerald-700 border border-emerald-300";
+  }
+
+  return {
+    label,
+    badgeClass,
+    title: `Expected disbursement: ${formatDate(expectedDate)}`,
+  };
+}
+
 const sortKey = ref("requested");
 const sortDirection = ref("desc");
 const pageSize = 10;
@@ -80,6 +164,7 @@ const columns = computed(() => [
   ...(props.isAdmin ? [{ key: "user", label: "User" }] : []),
   { key: "amount", label: "Amount", align: "right" },
   { key: "requested", label: "Date Requested" },
+  { key: "disbursement", label: "Disbursement", align: "center" },
   { key: "dueDate", label: "Due Date" },
   { key: "status", label: "Status", align: "center" },
   { key: "actions", sortKey: "id", label: "Actions", align: "center" },
@@ -138,6 +223,12 @@ function getSortValue(row, key) {
     return Number.isNaN(timestamp)
       ? String(value || "").toLowerCase()
       : timestamp;
+  }
+  if (key === "disbursement") {
+    const parsed = parseCalendarDate(
+      row.expected_disbursement_date || row.expectedDisbursementDate,
+    );
+    return parsed ? parsed.getTime() : Number.MAX_SAFE_INTEGER;
   }
   if (key === "dueDate") {
     const raw = row.expected_liquidation_date || row.dueDate;
@@ -200,7 +291,7 @@ function isSorted(column) {
     <div class="overflow-x-auto">
       <table
         class="w-full text-left border-collapse"
-        :class="isAdmin ? 'min-w-[880px]' : 'min-w-[680px]'"
+        :class="isAdmin ? 'min-w-[980px]' : 'min-w-[780px]'"
       >
         <thead>
           <tr class="border-b border-slate-200 bg-slate-50">
@@ -300,6 +391,20 @@ function isSorted(column) {
               </td>
               <td class="px-5 py-5 text-sm text-slate-500">
                 {{ formatDate(row.date || row.requested) }}
+              </td>
+              <td class="px-5 py-5 text-center">
+                <Badge
+                  v-if="getDisbursementBadge(row)"
+                  data-testid="disbursement-badge"
+                  :title="getDisbursementBadge(row).title"
+                  :class="[
+                    'inline-flex items-center font-sans text-[11px] font-semibold h-6 px-3 rounded-full',
+                    getDisbursementBadge(row).badgeClass,
+                  ]"
+                >
+                  {{ getDisbursementBadge(row).label }}
+                </Badge>
+                <span v-else class="text-sm text-slate-400">—</span>
               </td>
               <td class="px-5 py-5 text-sm text-slate-500">
                 {{ formatDate(row.dueDate) }}

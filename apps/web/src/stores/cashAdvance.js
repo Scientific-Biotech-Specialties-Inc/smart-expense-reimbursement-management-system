@@ -51,6 +51,14 @@ export const useCashAdvanceStore = defineStore("cashAdvance", () => {
       // Map backend fields to frontend expected fields
       userId: item.user_id ?? item.userId,
       requestedBy: item.requester?.name || item.requestedBy || "Unknown",
+      expectedDisbursementDate:
+        item.expected_disbursement_date ?? item.expectedDisbursementDate ?? null,
+      disbursedAt:
+        payout?.granted_at ||
+        disbursement?.disbursement_date ||
+        disbursement?.created_at ||
+        item.disbursedAt ||
+        null,
       dueDate: item.expected_liquidation_date ?? item.dueDate,
       date: item.submitted_at || item.date || item.created_at,
       approved_by:
