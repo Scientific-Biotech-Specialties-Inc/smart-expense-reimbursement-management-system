@@ -10,10 +10,15 @@ import {
 import { useHorizontalScroll } from "@/composables/useHorizontalScroll";
 import StatusBadge from "@/components/base/StatusBadge.vue";
 import DaysLeftBadge from "@/components/base/DaysLeftBadge.vue";
+import MustSignBadge from "@/components/base/MustSignBadge.vue";
 import BaseButton from "@/components/base/BaseButton.vue";
 import BaseModalTabs from "@/components/base/BaseModalTabs.vue";
 import BaseSignaturePad from "@/components/base/BaseSignaturePad.vue";
 import BaseAuditTrail from "@/components/base/BaseAuditTrail.vue";
+import {
+  CA_SIGNING_GRACE_DAYS,
+  computeSigningDeadline,
+} from "@/utils/liquidationPenalties";
 import { X, PenTool, Clock, CheckCircle2 } from "lucide-vue-next";
 
 const auth = getActivePinia() ? useAuthStore() : null;
@@ -96,22 +101,16 @@ const roadmapSteps = computed(() => {
   ];
 });
 
-const CA_SIGNING_GRACE_DAYS = 3;
-
 const showMustSignBadge = computed(() =>
   Boolean(props.record && !props.record.acknowledged && !props.isAdmin),
 );
 
 const signingDeadline = computed(() => {
   const r = props.record;
-  if (!r || r.acknowledged || r.type !== "cash_advance" || !r.grantedDate) {
+  if (!r || r.acknowledged || r.type !== "cash_advance") {
     return null;
   }
-  const granted = new Date(r.grantedDate);
-  if (Number.isNaN(granted.getTime())) return null;
-  const due = new Date(granted);
-  due.setDate(due.getDate() + CA_SIGNING_GRACE_DAYS);
-  return due;
+  return computeSigningDeadline(r.grantedDate);
 });
 
 const noteText = computed(() =>
@@ -178,14 +177,10 @@ function handleAcknowledge() {
               </h2>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
-              <span
+              <MustSignBadge
                 v-if="showMustSignBadge"
                 data-testid="payout-must-sign-badge"
-                class="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold font-sans text-indigo-700"
-              >
-                <PenTool class="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                <span>Must Sign</span>
-              </span>
+              />
               <DaysLeftBadge
                 v-if="signingDeadline"
                 variant="signing"

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  CA_SIGNING_GRACE_DAYS,
+  computeSigningDeadline,
   resolveAdvanceBalance,
   isExpenseBelowBalance,
   isLiquidationOverdue,
@@ -37,5 +39,17 @@ describe("liquidationPenalties balance helpers", () => {
     for (const status of ["liquidated", "settled", "rejected", "pending", "under-review", "approved"]) {
       expect(isLiquidationOverdue({ status, dueDate: "2026-10-01" }, refDate)).toBe(false);
     }
+  });
+
+  it("computes 3-day cash advance signing deadline from granted date and returns null for invalid input", () => {
+    expect(CA_SIGNING_GRACE_DAYS).toBe(3);
+    expect(computeSigningDeadline(null)).toBeNull();
+    expect(computeSigningDeadline("not-a-date")).toBeNull();
+
+    const deadline = computeSigningDeadline("2026-11-23T08:00:00Z");
+    expect(deadline).toBeInstanceOf(Date);
+    expect(deadline.getUTCFullYear()).toBe(2026);
+    expect(deadline.getUTCMonth()).toBe(10); // November
+    expect(deadline.getUTCDate()).toBe(26);
   });
 });
