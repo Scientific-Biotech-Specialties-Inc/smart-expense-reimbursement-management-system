@@ -27,8 +27,7 @@ const props = defineProps({
   >
     <div class="flex justify-between items-center">
       <h3
-        class="text-base font-bold text-primary"
-        style="font-family: 'Poppins', sans-serif"
+        class="text-base font-bold text-primary font-heading"
       >
         Summary
       </h3>

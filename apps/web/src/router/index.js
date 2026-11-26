@@ -148,6 +148,15 @@ router.beforeEach(async (to) => {
 
   const incomingToken = to.query.token;
   if (incomingToken && !to.meta.public) {
+    if (typeof window !== "undefined" && window.history?.replaceState) {
+      const cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete("token");
+      window.history.replaceState(
+        window.history.state,
+        "",
+        cleanUrl.pathname + cleanUrl.search + cleanUrl.hash,
+      );
+    }
     try {
       auth.setToken(
         Array.isArray(incomingToken) ? incomingToken[0] : incomingToken,

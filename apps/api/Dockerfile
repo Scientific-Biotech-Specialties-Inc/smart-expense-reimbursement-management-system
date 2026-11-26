@@ -17,6 +17,9 @@ RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 # Install PHP extensions
 RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
 
+# Suppress PHP version disclosure in HTTP responses (X-Powered-By)
+RUN printf "expose_php = Off\n" > /usr/local/etc/php/conf.d/security.ini
+
 # Get latest Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
