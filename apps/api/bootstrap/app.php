@@ -1,6 +1,7 @@
 <?php
 
 use App\Modules\Shared\Http\Middleware\EnsureIdempotency;
+use App\Modules\Shared\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -24,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ));
 
         $middleware->trustProxies(at: $trustedProxies);
+        $middleware->append(SecurityHeaders::class);
         $middleware->append(EnsureIdempotency::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -392,8 +392,7 @@ function categoryName(record) {
                 aria-label="Reimbursement steps roadmap"
               >
                 <div
-                  class="relative flex items-start justify-between min-w-full"
-                  style="min-width: 440px"
+                  class="relative flex items-start justify-between w-full min-w-[440px]"
                 >
                   <div
                     class="pointer-events-none absolute top-4 -translate-y-1/2 left-[12.5%] right-[12.5%] h-0.5 bg-slate-100 z-0"

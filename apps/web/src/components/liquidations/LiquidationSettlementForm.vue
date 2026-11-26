@@ -769,8 +769,7 @@ const normalizedViewReceipt = computed(() => {
 
                 <!-- Transparent Frosted Blur Overlay for Lower Card Contrast -->
                 <div
-                  class="pointer-events-none absolute inset-x-0 bottom-0 h-56 rounded-b-3xl backdrop-blur-md bg-gradient-to-t from-slate-800/75 via-slate-800/45 to-transparent"
-                  style="mask-image: linear-gradient(to bottom, transparent 0%, black 38%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 38%);"
+                  class="pointer-events-none absolute inset-x-0 bottom-0 h-56 rounded-b-3xl backdrop-blur-md bg-gradient-to-t from-slate-800/75 via-slate-800/45 to-transparent frosted-bottom-mask"
                   aria-hidden="true"
                 />
 

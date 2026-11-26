@@ -33,6 +33,12 @@ onMounted(async () => {
   const token = route.query.token
   if (token) {
     auth.setToken(Array.isArray(token) ? token[0] : token)
+    // Strip sensitive token from the browser URL immediately before async calls.
+    if (typeof window !== 'undefined' && window.history?.replaceState) {
+      const cleanUrl = new URL(window.location.href)
+      cleanUrl.searchParams.delete('token')
+      window.history.replaceState(window.history.state, '', cleanUrl.pathname + cleanUrl.search + cleanUrl.hash)
+    }
   }
 
   try {

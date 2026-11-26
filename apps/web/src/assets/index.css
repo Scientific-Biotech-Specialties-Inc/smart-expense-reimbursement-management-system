@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Montserrat:wght@400;500;600;700;800&family=Open+Sans:wght@400;500;600;700&family=Poppins:wght@400;500;600;700;800&display=swap");
+@import "./fonts.css";
 
 @import "tailwindcss/base";
 @import "tailwindcss/components";
@@ -329,5 +329,10 @@
 
   .tabular-nums {
     font-variant-numeric: tabular-nums;
+  }
+
+  .frosted-bottom-mask {
+    mask-image: linear-gradient(to bottom, transparent 0%, black 38%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 38%);
   }
 }

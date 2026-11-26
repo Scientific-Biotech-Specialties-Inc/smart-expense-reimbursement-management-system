@@ -36,8 +36,7 @@ onBeforeUnmount(() => {
     >
       <div class="flex items-center gap-3">
         <h2
-          class="text-lg font-bold text-primary"
-          style="font-family: 'Poppins', sans-serif"
+          class="text-lg font-bold text-primary font-heading"
         >
           Upload Receipts
         </h2>
